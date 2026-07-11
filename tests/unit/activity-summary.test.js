@@ -1,16 +1,29 @@
 import { describe, it, expect } from 'vitest';
 import {
   utcDayStartMs,
+  utcYesterdayKey,
   summarizeInboundActivity,
+  shiftHourBuckets,
+  peakHoursFromBuckets,
   formatHeatBars,
+  formatHeatAxis,
   formatPeakHours,
   rankMedal,
+  displayUserLabel,
+  shouldAppendUsername,
+  formatDelta,
+  activitySourceLabel,
 } from '../../src/activity-summary.js';
 
 describe('activity-summary', () => {
   it('utcDayStartMs 对齐 UTC 零点', () => {
     const ms = Date.UTC(2026, 6, 11, 15, 30, 0);
     expect(utcDayStartMs(ms)).toBe(Date.UTC(2026, 6, 11, 0, 0, 0));
+  });
+
+  it('utcYesterdayKey 为前一 UTC 日', () => {
+    const ms = Date.UTC(2026, 6, 11, 12, 0, 0);
+    expect(utcYesterdayKey(ms)).toBe('2026-07-10');
   });
 
   it('汇总总量、排行与高峰小时', () => {
@@ -38,6 +51,7 @@ describe('activity-summary', () => {
   it('空数据热力为全点', () => {
     expect(formatHeatBars([])).toBe('·'.repeat(24));
     expect(formatPeakHours([])).toBe('暂无');
+    expect(formatHeatAxis()).toHaveLength(24);
   });
 
   it('热力条随最大值缩放', () => {
@@ -50,10 +64,36 @@ describe('activity-summary', () => {
     expect(bar[1]).toBe('█');
   });
 
+  it('UTC 小时桶平移到 CST(+8)', () => {
+    const hours = Array.from({ length: 24 }, () => 0);
+    hours[0] = 5; // UTC 0 → CST 8
+    hours[16] = 3; // UTC 16 → CST 0
+    const local = shiftHourBuckets(hours, 8);
+    expect(local[8]).toBe(5);
+    expect(local[0]).toBe(3);
+    expect(peakHoursFromBuckets(local, 1)[0]).toMatchObject({ hour: 8, count: 5 });
+  });
+
   it('名次徽章', () => {
     expect(rankMedal(0)).toBe('🥇');
     expect(rankMedal(1)).toBe('🥈');
     expect(rankMedal(2)).toBe('🥉');
     expect(rankMedal(3)).toBe('4.');
+  });
+
+  it('用户标签不重复 @username', () => {
+    expect(displayUserLabel({ firstName: 'Ada', username: 'ada' })).toBe('Ada');
+    expect(displayUserLabel({ username: 'bob' })).toBe('@bob');
+    expect(displayUserLabel({ userId: '9' })).toBe('9');
+    expect(shouldAppendUsername({ username: 'bob' }, '@bob')).toBe(false);
+    expect(shouldAppendUsername({ username: 'ada' }, 'Ada')).toBe(true);
+  });
+
+  it('delta 与数据源标签', () => {
+    expect(formatDelta(10, 7)).toBe('↑3');
+    expect(formatDelta(3, 5)).toBe('↓2');
+    expect(formatDelta(4, 4)).toBe('持平');
+    expect(activitySourceLabel('message_links')).toBe('消息映射');
+    expect(activitySourceLabel('none')).toBe('暂无');
   });
 });

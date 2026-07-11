@@ -14,11 +14,20 @@ import { createEphemeralStore } from './src/storage/kv-ephemeral-store.js';
 import { createKVStorage } from './src/storage/kv-storage.js';
 import { createUpdateHandler } from './src/update-router.js';
 import {
+  OPS_TZ_OFFSET_HOURS,
   utcDayStartMs,
+  utcYesterdayKey,
   summarizeInboundActivity,
+  shiftHourBuckets,
+  peakHoursFromBuckets,
   formatHeatBars,
+  formatHeatAxis,
   formatPeakHours,
   rankMedal,
+  displayUserLabel,
+  shouldAppendUsername,
+  formatDelta,
+  activitySourceLabel,
 } from './src/activity-summary.js';
 
 // Telegram Private Chat Gateway — Cloudflare Workers 私聊安全接入与双向会话网关
@@ -2082,49 +2091,67 @@ async function loadTodayActivity(env) {
   };
 }
 
-function displayUserLabel(u) {
-  const name = [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
-  if (name) return name;
-  if (u.username) return `@${u.username}`;
-  return u.userId || '未知';
-}
-
-function buildUserJumpKeyboard(users, { includeMenu = true } = {}) {
-  const rows = (users || []).slice(0, 8).map((u) => {
-    const label = displayUserLabel(u).slice(0, 24);
-    return [{
-      text: `👤 ${label}`,
-      callback_data: `adm:u:panel:${u.userId}`,
-    }];
-  });
+function buildUserJumpKeyboard(users, { includeMenu = true, columns = 2 } = {}) {
+  const cols = Math.min(Math.max(Number(columns) || 2, 1), 3);
+  const list = (users || []).slice(0, 8);
+  const rows = [];
+  for (let i = 0; i < list.length; i += cols) {
+    const chunk = list.slice(i, i + cols).map((u) => {
+      const label = displayUserLabel(u).slice(0, cols === 1 ? 24 : 14);
+      return {
+        text: `👤 ${label}`,
+        callback_data: `adm:u:panel:${u.userId}`,
+      };
+    });
+    rows.push(chunk);
+  }
   if (includeMenu) {
-    rows.push([{ text: '🏠 菜单', callback_data: 'adm:nav:menu' }]);
+    rows.push([
+      { text: '🔥 活跃', callback_data: 'adm:nav:rank' },
+      { text: '🏠 菜单', callback_data: 'adm:nav:menu' },
+    ]);
   }
   return { inline_keyboard: rows };
 }
 
 function formatRankingBlock(rankingUsers, { withCount = true } = {}) {
-  if (!rankingUsers?.length) return ['暂无今日活跃用户'];
+  if (!rankingUsers?.length) {
+    return ['暂无今日活跃用户', '<i>有入站消息或用户发过言后会显示排行</i>'];
+  }
   const lines = [];
   rankingUsers.slice(0, 10).forEach((u, i) => {
-    const name = escapeHtml(displayUserLabel(u));
-    const un = u.username ? ` @${escapeHtml(u.username)}` : '';
+    const label = displayUserLabel(u);
+    const name = escapeHtml(label);
+    const un = shouldAppendUsername(u, label) ? ` @${escapeHtml(u.username)}` : '';
     const cnt = withCount && u.count != null ? ` · <b>${u.count}</b> 条` : '';
     const when = u.lastMessageAt && u.count == null
       ? ` · ${formatRelativeTime(u.lastMessageAt)}`
       : '';
-    lines.push(`${rankMedal(i)} ${name}${un}${cnt}${when}`);
+    const badge = u.status === 'banned' ? ' 🚫'
+      : u.status === 'closed' ? ' 🔒'
+        : '';
+    lines.push(`${rankMedal(i)} ${name}${un}${cnt}${when}${badge}`);
     lines.push(`   <code>${escapeHtml(u.userId)}</code>${u.topicId ? ` · T${escapeHtml(u.topicId)}` : ''}`);
   });
   return lines;
 }
 
-function formatHeatBlock(hours, peakHours) {
+/** 热力展示统一用运维时区（默认 CST UTC+8） */
+function formatHeatBlock(utcHours) {
+  const localHours = shiftHourBuckets(utcHours, OPS_TZ_OFFSET_HOURS);
+  const peaks = peakHoursFromBuckets(localHours, 3);
   return [
-    '🌡 <b>小时热力</b> <i>UTC 0–23</i>',
-    `<code>${formatHeatBars(hours)}</code>`,
-    `高峰 ${escapeHtml(formatPeakHours(peakHours))}`,
+    `🌡 <b>小时热力</b> <i>CST UTC+${OPS_TZ_OFFSET_HOURS} · 0–23</i>`,
+    `<code>${formatHeatBars(localHours)}</code>`,
+    `<code>${formatHeatAxis()}</code>`,
+    `高峰 ${escapeHtml(formatPeakHours(peaks))}`,
   ];
+}
+
+function formatCompareLine(label, todayVal, ydayVal) {
+  const t = Number(todayVal) || 0;
+  const y = Number(ydayVal) || 0;
+  return `  ${label}  <b>${t}</b>  <i>较昨 ${escapeHtml(formatDelta(t, y))}</i>`;
 }
 
 async function resolveThreadIdForUser(env, userId) {
@@ -2175,8 +2202,8 @@ async function handleMenuCommand(env, threadId, senderId) {
     '────────────',
     '点下方按钮快速打开功能，无需记忆命令。',
     '',
-    '🔥 <b>活跃</b> 今日排行与小时热力',
-    '🔎 <b>备注</b> 按关键词搜管理员备注',
+    '🔥 <b>活跃</b> 今日排行 + 中国时间热力',
+    '🔍 <b>查找</b> /find · 🔎 <b>备注</b> /notes',
     '💡 用户会话请进入对应 Forum Topic 使用 <b>面板/资料</b>。',
   ].join('\n');
   await tgCall(env, 'sendMessage', {
@@ -2231,11 +2258,12 @@ function buildAdminHomeKeyboard(isOwner = false) {
       { text: '🔥 活跃', callback_data: 'adm:nav:rank' },
     ],
     [
+      { text: '🔍 查找', callback_data: 'adm:nav:find' },
       { text: '🔎 备注', callback_data: 'adm:nav:notes' },
       { text: '📝 屏蔽词', callback_data: 'adm:nav:listwords' },
-      { text: '🧹 清理', callback_data: 'adm:nav:cleanup_ask' },
     ],
     [
+      { text: '🧹 清理', callback_data: 'adm:nav:cleanup_ask' },
       { text: '🪪 我', callback_data: 'adm:nav:whoami' },
       { text: '❓ 帮助', callback_data: 'adm:nav:help' },
     ],
@@ -2333,6 +2361,7 @@ async function getCachedKvPrefixCounts(env) {
 /**
  * 构建 sysinfo 某一页正文
  * @param {'overview'|'storage'|'errors'|'stats'|'activity'} page
+ * @returns {Promise<{text:string, activity:object|null}>}
  */
 async function buildSysinfoPageText(env, page = 'overview') {
   const started = Date.now();
@@ -2341,6 +2370,7 @@ async function buildSysinfoPageText(env, page = 'overview') {
   const baseUrl = String(env.VERIFICATION_PAGE_URL || '').replace(/\/$/, '') || '(未配置 VERIFICATION_PAGE_URL)';
   const turnstileOn = !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY && env.VERIFICATION_PAGE_URL);
   const lines = [];
+  let activity = null;
 
   if (page === 'overview' || page === 'stats') {
     lines.push(`🖥 <b>系统 · ${page === 'stats' ? '今日统计' : '概览'}</b>`);
@@ -2394,16 +2424,18 @@ async function buildSysinfoPageText(env, page = 'overview') {
     }
 
     if (page === 'stats') {
-      const activity = await loadTodayActivity(env);
+      activity = await loadTodayActivity(env);
       const today = activity.today;
+      const yday = await getDailyStats(env, utcYesterdayKey());
       lines.push('');
-      lines.push(`📅 <b>今日</b> <code>${escapeHtml(today.day)}</code>`);
-      lines.push(`  💬 入站  <b>${today.messages_in}</b>`);
-      lines.push(`  ✅ 验证  ${today.verifies}`);
-      lines.push(`  🚫 封禁  ${today.bans}`);
-      lines.push(`  🛡 垃圾  ${today.spam}`);
+      lines.push(`📅 <b>今日</b> <code>${escapeHtml(today.day)}</code> <i>UTC 日</i>`);
+      lines.push(formatCompareLine('💬 入站', today.messages_in, yday.messages_in));
+      lines.push(formatCompareLine('✅ 验证', today.verifies, yday.verifies));
+      lines.push(formatCompareLine('🚫 封禁', today.bans, yday.bans));
+      lines.push(formatCompareLine('🛡 垃圾', today.spam, yday.spam));
+      lines.push(`  <i>昨 ${escapeHtml(yday.day)}：入站 ${yday.messages_in} · 验证 ${yday.verifies} · 垃圾 ${yday.spam}</i>`);
       lines.push('');
-      lines.push(...formatHeatBlock(activity.summary.hours, activity.summary.peakHours));
+      lines.push(...formatHeatBlock(activity.summary.hours));
       if (activity.rankingUsers.length) {
         lines.push('');
         lines.push('🏆 <b>今日 Top</b> <i>（完整见 /rank）</i>');
@@ -2419,21 +2451,22 @@ async function buildSysinfoPageText(env, page = 'overview') {
   }
 
   if (page === 'activity') {
-    const activity = await loadTodayActivity(env);
+    activity = await loadTodayActivity(env);
+    const unique = activity.summary.uniqueUsers || activity.rankingUsers.length;
     lines.push('🔥 <b>系统 · 今日活跃</b>');
-    lines.push(`<code>v${GATEWAY_VERSION}</code> · <code>${escapeHtml(activity.day)}</code> UTC`);
+    lines.push(`<code>v${GATEWAY_VERSION}</code> · <code>${escapeHtml(activity.day)}</code> UTC 日`);
     lines.push('────────────────');
-    lines.push(`入站样本 <b>${activity.summary.total}</b> · 独立用户 <b>${activity.summary.uniqueUsers || activity.rankingUsers.length}</b>`);
-    lines.push(`数据源: <code>${escapeHtml(activity.source)}</code>`);
+    lines.push(`入站样本 <b>${activity.summary.total}</b> · 独立用户 <b>${unique}</b>`);
+    lines.push(`数据源: ${escapeHtml(activitySourceLabel(activity.source))}`);
     lines.push('');
-    lines.push(...formatHeatBlock(activity.summary.hours, activity.summary.peakHours));
+    lines.push(...formatHeatBlock(activity.summary.hours));
     lines.push('');
     lines.push('🏆 <b>活跃排行</b>');
     lines.push(...formatRankingBlock(activity.rankingUsers, {
       withCount: activity.rankingUsers.some(u => u.count != null),
     }));
     lines.push('');
-    lines.push('<i>点下方用户按钮可打开面板 · 热力为 UTC 时区</i>');
+    lines.push('<i>点下方用户按钮打开面板 · 热力按中国时间 CST</i>');
   }
 
   if (page === 'storage') {
@@ -2490,7 +2523,7 @@ async function buildSysinfoPageText(env, page = 'overview') {
   lines.push(`⏱ ${Date.now() - started} ms · 点下方切换分页`);
   let text = lines.join('\n');
   if (text.length > 3500) text = `${text.slice(0, 3500)}\n…`;
-  return text;
+  return { text, activity };
 }
 
 /**
@@ -2502,20 +2535,28 @@ async function buildSysinfoPageText(env, page = 'overview') {
  */
 async function handleSysinfoCommand(env, threadId, opts = {}) {
   const page = opts.page || 'overview';
-  const text = await buildSysinfoPageText(env, page);
+  const { text, activity } = await buildSysinfoPageText(env, page);
   let markup = buildSysinfoKeyboard(page);
-  // 活跃页附加用户跳转按钮
-  if (page === 'activity') {
-    try {
-      const activity = await loadTodayActivity(env);
-      const jump = buildUserJumpKeyboard(activity.rankingUsers, { includeMenu: false });
-      markup = {
-        inline_keyboard: [
-          ...buildSysinfoKeyboard('activity').inline_keyboard,
-          ...jump.inline_keyboard,
-        ],
-      };
-    } catch { /* 保留基础键盘 */ }
+  // 活跃页附加用户跳转按钮（复用同一次 activity，避免二次查库）
+  if (page === 'activity' && activity?.rankingUsers?.length) {
+    const jump = buildUserJumpKeyboard(activity.rankingUsers, { includeMenu: false });
+    markup = {
+      inline_keyboard: [
+        ...buildSysinfoKeyboard('activity').inline_keyboard,
+        ...jump.inline_keyboard,
+      ],
+    };
+  } else if (page === 'stats') {
+    // 今日页快捷跳到活跃排行
+    const base = buildSysinfoKeyboard('stats').inline_keyboard;
+    markup = {
+      inline_keyboard: [
+        base[0],
+        base[1],
+        [{ text: '🔥 完整活跃排行', callback_data: 'adm:sys:activity' }],
+        base[2],
+      ].filter(Boolean),
+    };
   }
   if (opts.edit?.chatId && opts.edit?.messageId) {
     const res = await tgCall(env, 'editMessageText', {
@@ -2613,8 +2654,8 @@ async function handleNotesCommand(env, threadId, queryText = '') {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
       text: q
-        ? `🔎 未找到含「${escapeHtml(q)}」的备注\n用法: <code>/notes 关键词</code>`
-        : '📝 暂无备注。在用户话题内用 <code>/note 内容</code> 添加。',
+        ? `🔎 未找到含「${escapeHtml(q)}」的备注\n\n用法: <code>/notes 关键词</code>\n也可: <code>/find ${escapeHtml(q)}</code> 找用户`
+        : '📝 暂无备注。\n在用户话题内用 <code>/note 内容</code> 添加，再用 <code>/notes 关键词</code> 检索。',
       parse_mode: 'HTML',
       reply_markup: buildAdminHomeKeyboard(false),
     });
@@ -2630,9 +2671,10 @@ async function handleNotesCommand(env, threadId, queryText = '') {
     } catch { /* ignore */ }
   }
 
+  const truncated = matches.length >= 12 || Boolean(cursor);
   const lines = [
-    `🔎 <b>备注搜索</b>${q ? ` · 「${escapeHtml(q)}」` : ' · 全部'}`,
-    `共 ${matches.length} 条${pages >= maxPages && cursor ? '（可能未扫全）' : ''}`,
+    `🔎 <b>备注搜索</b>${q ? ` · 「${escapeHtml(q)}」` : ' · 最近'}`,
+    `共 ${matches.length} 条${truncated ? '（已截断，可加关键词缩小）' : ''}`,
     '────────────────',
   ];
   const jumpUsers = [];
@@ -2677,6 +2719,7 @@ async function handleWhoamiCommand(env, threadId, senderId) {
     message_thread_id: threadId,
     text,
     parse_mode: 'HTML',
+    reply_markup: buildAdminHomeKeyboard(owner),
   });
 }
 
@@ -3212,6 +3255,26 @@ async function handleAdminUiCallback(query, env, ctx) {
     else if (nav === 'stats') await handleStatsCommand(env, threadId);
     else if (nav === 'rank' || nav === 'activity') await handleRankCommand(env, threadId);
     else if (nav === 'notes') await handleNotesCommand(env, threadId, '/notes');
+    else if (nav === 'find') {
+      await tgCall(env, 'sendMessage', {
+        chat_id: env.SUPERGROUP_ID,
+        message_thread_id: threadId,
+        text: [
+          '🔍 <b>查找用户</b>',
+          '用法: <code>/find UID或用户名或姓名</code>',
+          '备注: <code>/notes 关键词</code>',
+          '活跃: <code>/rank</code>',
+        ].join('\n'),
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '🔎 备注列表', callback_data: 'adm:nav:notes' },
+            { text: '🔥 活跃', callback_data: 'adm:nav:rank' },
+            { text: '🏠 菜单', callback_data: 'adm:nav:menu' },
+          ]],
+        },
+      });
+    }
     else if (nav === 'whoami') await handleWhoamiCommand(env, threadId, senderId);
     else if (nav === 'listwords') await handleListWordsCommand(env, threadId);
     else if (nav === 'help') await handleHelpCommand(env, threadId, senderId);

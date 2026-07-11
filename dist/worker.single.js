@@ -2135,9 +2135,16 @@ function createKVStorage(kv) {
 }
 
 // src/activity-summary.js
+var OPS_TZ_OFFSET_HOURS = 8;
 function utcDayStartMs(now = Date.now()) {
   const d = new Date(Number(now) || Date.now());
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+function utcDayKey(now = Date.now()) {
+  return new Date(Number(now) || Date.now()).toISOString().slice(0, 10);
+}
+function utcYesterdayKey(now = Date.now()) {
+  return utcDayKey(Number(now) - 864e5);
 }
 function summarizeInboundActivity(rows, opts = {}) {
   const topN = Math.min(Math.max(Number(opts.topN) || 10, 1), 30);
@@ -2155,8 +2162,27 @@ function summarizeInboundActivity(rows, opts = {}) {
     byUser.set(uid, (byUser.get(uid) || 0) + 1);
   }
   const ranking = [...byUser.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, topN).map(([userId, count]) => ({ userId, count }));
-  const peakHours = hours.map((count, hour) => ({ hour, count })).filter((item) => item.count > 0).sort((a, b) => b.count - a.count || a.hour - b.hour).slice(0, 3);
-  return { total, hours, ranking, peakHours, uniqueUsers: byUser.size };
+  return {
+    total,
+    hours,
+    ranking,
+    peakHours: peakHoursFromBuckets(hours, 3),
+    uniqueUsers: byUser.size
+  };
+}
+function shiftHourBuckets(hours, offsetHours = OPS_TZ_OFFSET_HOURS) {
+  const list = Array.isArray(hours) && hours.length === 24 ? hours.map((n) => Math.max(0, Number(n) || 0)) : Array.from({ length: 24 }, () => 0);
+  const off = (Number(offsetHours) % 24 + 24) % 24;
+  if (off === 0) return list;
+  const out = Array.from({ length: 24 }, () => 0);
+  for (let utc = 0; utc < 24; utc += 1) {
+    out[(utc + off) % 24] = list[utc];
+  }
+  return out;
+}
+function peakHoursFromBuckets(hours, topN = 3) {
+  const list = Array.isArray(hours) && hours.length === 24 ? hours : Array.from({ length: 24 }, () => 0);
+  return list.map((count, hour) => ({ hour, count: Number(count) || 0 })).filter((item) => item.count > 0).sort((a, b) => b.count - a.count || a.hour - b.hour).slice(0, Math.min(Math.max(Number(topN) || 3, 1), 24));
 }
 function formatHeatBars(hours) {
   const list = Array.isArray(hours) && hours.length === 24 ? hours.map((n) => Math.max(0, Number(n) || 0)) : Array.from({ length: 24 }, () => 0);
@@ -2169,6 +2195,9 @@ function formatHeatBars(hours) {
     return blocks[level - 1];
   }).join("");
 }
+function formatHeatAxis() {
+  return "0\xB7\xB7\xB7\xB7\xB76\xB7\xB7\xB7\xB712\xB7\xB7\xB7\xB718\xB7\xB7\xB723";
+}
 function formatPeakHours(peakHours) {
   if (!peakHours?.length) return "\u6682\u65E0";
   return peakHours.map((p) => `${String(p.hour).padStart(2, "0")}:00\xD7${p.count}`).join(" \xB7 ");
@@ -2178,6 +2207,42 @@ function rankMedal(index0) {
   if (index0 === 1) return "\u{1F948}";
   if (index0 === 2) return "\u{1F949}";
   return `${index0 + 1}.`;
+}
+function displayUserLabel(u) {
+  if (!u || typeof u !== "object") return "\u672A\u77E5";
+  const name = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
+  if (name) return name;
+  if (u.username) return `@${u.username}`;
+  return String(u.userId || "\u672A\u77E5");
+}
+function shouldAppendUsername(u, label) {
+  if (!u?.username) return false;
+  const un = String(u.username);
+  const lb = String(label || "");
+  return lb !== `@${un}` && lb !== un;
+}
+function formatDelta(current, previous) {
+  const c = Number(current) || 0;
+  const p = Number(previous) || 0;
+  const d = c - p;
+  if (d === 0) return "\u6301\u5E73";
+  return d > 0 ? `\u2191${d}` : `\u2193${Math.abs(d)}`;
+}
+function activitySourceLabel(source) {
+  switch (String(source || "")) {
+    case "message_links":
+      return "\u6D88\u606F\u6620\u5C04";
+    case "kv_hours":
+      return "KV \u5C0F\u65F6\u6876";
+    case "last_message":
+      return "\u6700\u8FD1\u6D3B\u8DC3";
+    case "kv_hours+last_message":
+      return "KV\u70ED\u529B+\u6700\u8FD1\u6D3B\u8DC3";
+    case "none":
+      return "\u6682\u65E0";
+    default:
+      return source || "\u672A\u77E5";
+  }
 }
 
 // worker.js
@@ -3821,44 +3886,59 @@ async function loadTodayActivity(env) {
     source
   };
 }
-function displayUserLabel(u) {
-  const name = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
-  if (name) return name;
-  if (u.username) return `@${u.username}`;
-  return u.userId || "\u672A\u77E5";
-}
-function buildUserJumpKeyboard(users, { includeMenu = true } = {}) {
-  const rows = (users || []).slice(0, 8).map((u) => {
-    const label = displayUserLabel(u).slice(0, 24);
-    return [{
-      text: `\u{1F464} ${label}`,
-      callback_data: `adm:u:panel:${u.userId}`
-    }];
-  });
+function buildUserJumpKeyboard(users, { includeMenu = true, columns = 2 } = {}) {
+  const cols = Math.min(Math.max(Number(columns) || 2, 1), 3);
+  const list = (users || []).slice(0, 8);
+  const rows = [];
+  for (let i = 0; i < list.length; i += cols) {
+    const chunk = list.slice(i, i + cols).map((u) => {
+      const label = displayUserLabel(u).slice(0, cols === 1 ? 24 : 14);
+      return {
+        text: `\u{1F464} ${label}`,
+        callback_data: `adm:u:panel:${u.userId}`
+      };
+    });
+    rows.push(chunk);
+  }
   if (includeMenu) {
-    rows.push([{ text: "\u{1F3E0} \u83DC\u5355", callback_data: "adm:nav:menu" }]);
+    rows.push([
+      { text: "\u{1F525} \u6D3B\u8DC3", callback_data: "adm:nav:rank" },
+      { text: "\u{1F3E0} \u83DC\u5355", callback_data: "adm:nav:menu" }
+    ]);
   }
   return { inline_keyboard: rows };
 }
 function formatRankingBlock(rankingUsers, { withCount = true } = {}) {
-  if (!rankingUsers?.length) return ["\u6682\u65E0\u4ECA\u65E5\u6D3B\u8DC3\u7528\u6237"];
+  if (!rankingUsers?.length) {
+    return ["\u6682\u65E0\u4ECA\u65E5\u6D3B\u8DC3\u7528\u6237", "<i>\u6709\u5165\u7AD9\u6D88\u606F\u6216\u7528\u6237\u53D1\u8FC7\u8A00\u540E\u4F1A\u663E\u793A\u6392\u884C</i>"];
+  }
   const lines = [];
   rankingUsers.slice(0, 10).forEach((u, i) => {
-    const name = escapeHtml(displayUserLabel(u));
-    const un = u.username ? ` @${escapeHtml(u.username)}` : "";
+    const label = displayUserLabel(u);
+    const name = escapeHtml(label);
+    const un = shouldAppendUsername(u, label) ? ` @${escapeHtml(u.username)}` : "";
     const cnt = withCount && u.count != null ? ` \xB7 <b>${u.count}</b> \u6761` : "";
     const when = u.lastMessageAt && u.count == null ? ` \xB7 ${formatRelativeTime(u.lastMessageAt)}` : "";
-    lines.push(`${rankMedal(i)} ${name}${un}${cnt}${when}`);
+    const badge = u.status === "banned" ? " \u{1F6AB}" : u.status === "closed" ? " \u{1F512}" : "";
+    lines.push(`${rankMedal(i)} ${name}${un}${cnt}${when}${badge}`);
     lines.push(`   <code>${escapeHtml(u.userId)}</code>${u.topicId ? ` \xB7 T${escapeHtml(u.topicId)}` : ""}`);
   });
   return lines;
 }
-function formatHeatBlock(hours, peakHours) {
+function formatHeatBlock(utcHours) {
+  const localHours = shiftHourBuckets(utcHours, OPS_TZ_OFFSET_HOURS);
+  const peaks = peakHoursFromBuckets(localHours, 3);
   return [
-    "\u{1F321} <b>\u5C0F\u65F6\u70ED\u529B</b> <i>UTC 0\u201323</i>",
-    `<code>${formatHeatBars(hours)}</code>`,
-    `\u9AD8\u5CF0 ${escapeHtml(formatPeakHours(peakHours))}`
+    `\u{1F321} <b>\u5C0F\u65F6\u70ED\u529B</b> <i>CST UTC+${OPS_TZ_OFFSET_HOURS} \xB7 0\u201323</i>`,
+    `<code>${formatHeatBars(localHours)}</code>`,
+    `<code>${formatHeatAxis()}</code>`,
+    `\u9AD8\u5CF0 ${escapeHtml(formatPeakHours(peaks))}`
   ];
+}
+function formatCompareLine(label, todayVal, ydayVal) {
+  const t = Number(todayVal) || 0;
+  const y = Number(ydayVal) || 0;
+  return `  ${label}  <b>${t}</b>  <i>\u8F83\u6628 ${escapeHtml(formatDelta(t, y))}</i>`;
 }
 async function resolveThreadIdForUser(env, userId) {
   const rec = await safeGetJSON(env, `user:${userId}`, null);
@@ -3907,8 +3987,8 @@ async function handleMenuCommand(env, threadId, senderId) {
     "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
     "\u70B9\u4E0B\u65B9\u6309\u94AE\u5FEB\u901F\u6253\u5F00\u529F\u80FD\uFF0C\u65E0\u9700\u8BB0\u5FC6\u547D\u4EE4\u3002",
     "",
-    "\u{1F525} <b>\u6D3B\u8DC3</b> \u4ECA\u65E5\u6392\u884C\u4E0E\u5C0F\u65F6\u70ED\u529B",
-    "\u{1F50E} <b>\u5907\u6CE8</b> \u6309\u5173\u952E\u8BCD\u641C\u7BA1\u7406\u5458\u5907\u6CE8",
+    "\u{1F525} <b>\u6D3B\u8DC3</b> \u4ECA\u65E5\u6392\u884C + \u4E2D\u56FD\u65F6\u95F4\u70ED\u529B",
+    "\u{1F50D} <b>\u67E5\u627E</b> /find \xB7 \u{1F50E} <b>\u5907\u6CE8</b> /notes",
     "\u{1F4A1} \u7528\u6237\u4F1A\u8BDD\u8BF7\u8FDB\u5165\u5BF9\u5E94 Forum Topic \u4F7F\u7528 <b>\u9762\u677F/\u8D44\u6599</b>\u3002"
   ].join("\n");
   await tgCall(env, "sendMessage", {
@@ -3957,11 +4037,12 @@ function buildAdminHomeKeyboard(isOwner = false) {
       { text: "\u{1F525} \u6D3B\u8DC3", callback_data: "adm:nav:rank" }
     ],
     [
+      { text: "\u{1F50D} \u67E5\u627E", callback_data: "adm:nav:find" },
       { text: "\u{1F50E} \u5907\u6CE8", callback_data: "adm:nav:notes" },
-      { text: "\u{1F4DD} \u5C4F\u853D\u8BCD", callback_data: "adm:nav:listwords" },
-      { text: "\u{1F9F9} \u6E05\u7406", callback_data: "adm:nav:cleanup_ask" }
+      { text: "\u{1F4DD} \u5C4F\u853D\u8BCD", callback_data: "adm:nav:listwords" }
     ],
     [
+      { text: "\u{1F9F9} \u6E05\u7406", callback_data: "adm:nav:cleanup_ask" },
       { text: "\u{1FAAA} \u6211", callback_data: "adm:nav:whoami" },
       { text: "\u2753 \u5E2E\u52A9", callback_data: "adm:nav:help" }
     ]
@@ -4059,6 +4140,7 @@ async function buildSysinfoPageText(env, page = "overview") {
   const baseUrl = String(env.VERIFICATION_PAGE_URL || "").replace(/\/$/, "") || "(\u672A\u914D\u7F6E VERIFICATION_PAGE_URL)";
   const turnstileOn = !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY && env.VERIFICATION_PAGE_URL);
   const lines = [];
+  let activity = null;
   if (page === "overview" || page === "stats") {
     lines.push(`\u{1F5A5} <b>\u7CFB\u7EDF \xB7 ${page === "stats" ? "\u4ECA\u65E5\u7EDF\u8BA1" : "\u6982\u89C8"}</b>`);
     lines.push(`<code>v${GATEWAY_VERSION}</code>`);
@@ -4103,16 +4185,18 @@ async function buildSysinfoPageText(env, page = "overview") {
       lines.push("D1 \u672A\u7ED1\u5B9A\uFF0C\u65E0\u6CD5\u663E\u793A\u4F1A\u8BDD\u7EDF\u8BA1");
     }
     if (page === "stats") {
-      const activity = await loadTodayActivity(env);
+      activity = await loadTodayActivity(env);
       const today = activity.today;
+      const yday = await getDailyStats(env, utcYesterdayKey());
       lines.push("");
-      lines.push(`\u{1F4C5} <b>\u4ECA\u65E5</b> <code>${escapeHtml(today.day)}</code>`);
-      lines.push(`  \u{1F4AC} \u5165\u7AD9  <b>${today.messages_in}</b>`);
-      lines.push(`  \u2705 \u9A8C\u8BC1  ${today.verifies}`);
-      lines.push(`  \u{1F6AB} \u5C01\u7981  ${today.bans}`);
-      lines.push(`  \u{1F6E1} \u5783\u573E  ${today.spam}`);
+      lines.push(`\u{1F4C5} <b>\u4ECA\u65E5</b> <code>${escapeHtml(today.day)}</code> <i>UTC \u65E5</i>`);
+      lines.push(formatCompareLine("\u{1F4AC} \u5165\u7AD9", today.messages_in, yday.messages_in));
+      lines.push(formatCompareLine("\u2705 \u9A8C\u8BC1", today.verifies, yday.verifies));
+      lines.push(formatCompareLine("\u{1F6AB} \u5C01\u7981", today.bans, yday.bans));
+      lines.push(formatCompareLine("\u{1F6E1} \u5783\u573E", today.spam, yday.spam));
+      lines.push(`  <i>\u6628 ${escapeHtml(yday.day)}\uFF1A\u5165\u7AD9 ${yday.messages_in} \xB7 \u9A8C\u8BC1 ${yday.verifies} \xB7 \u5783\u573E ${yday.spam}</i>`);
       lines.push("");
-      lines.push(...formatHeatBlock(activity.summary.hours, activity.summary.peakHours));
+      lines.push(...formatHeatBlock(activity.summary.hours));
       if (activity.rankingUsers.length) {
         lines.push("");
         lines.push("\u{1F3C6} <b>\u4ECA\u65E5 Top</b> <i>\uFF08\u5B8C\u6574\u89C1 /rank\uFF09</i>");
@@ -4126,21 +4210,22 @@ async function buildSysinfoPageText(env, page = "overview") {
     lines.push(`Webhook <code>POST ${escapeHtml(baseUrl)}/</code>`);
   }
   if (page === "activity") {
-    const activity = await loadTodayActivity(env);
+    activity = await loadTodayActivity(env);
+    const unique = activity.summary.uniqueUsers || activity.rankingUsers.length;
     lines.push("\u{1F525} <b>\u7CFB\u7EDF \xB7 \u4ECA\u65E5\u6D3B\u8DC3</b>");
-    lines.push(`<code>v${GATEWAY_VERSION}</code> \xB7 <code>${escapeHtml(activity.day)}</code> UTC`);
+    lines.push(`<code>v${GATEWAY_VERSION}</code> \xB7 <code>${escapeHtml(activity.day)}</code> UTC \u65E5`);
     lines.push("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-    lines.push(`\u5165\u7AD9\u6837\u672C <b>${activity.summary.total}</b> \xB7 \u72EC\u7ACB\u7528\u6237 <b>${activity.summary.uniqueUsers || activity.rankingUsers.length}</b>`);
-    lines.push(`\u6570\u636E\u6E90: <code>${escapeHtml(activity.source)}</code>`);
+    lines.push(`\u5165\u7AD9\u6837\u672C <b>${activity.summary.total}</b> \xB7 \u72EC\u7ACB\u7528\u6237 <b>${unique}</b>`);
+    lines.push(`\u6570\u636E\u6E90: ${escapeHtml(activitySourceLabel(activity.source))}`);
     lines.push("");
-    lines.push(...formatHeatBlock(activity.summary.hours, activity.summary.peakHours));
+    lines.push(...formatHeatBlock(activity.summary.hours));
     lines.push("");
     lines.push("\u{1F3C6} <b>\u6D3B\u8DC3\u6392\u884C</b>");
     lines.push(...formatRankingBlock(activity.rankingUsers, {
       withCount: activity.rankingUsers.some((u) => u.count != null)
     }));
     lines.push("");
-    lines.push("<i>\u70B9\u4E0B\u65B9\u7528\u6237\u6309\u94AE\u53EF\u6253\u5F00\u9762\u677F \xB7 \u70ED\u529B\u4E3A UTC \u65F6\u533A</i>");
+    lines.push("<i>\u70B9\u4E0B\u65B9\u7528\u6237\u6309\u94AE\u6253\u5F00\u9762\u677F \xB7 \u70ED\u529B\u6309\u4E2D\u56FD\u65F6\u95F4 CST</i>");
   }
   if (page === "storage") {
     lines.push("\u{1F5C4} <b>\u7CFB\u7EDF \xB7 \u5B58\u50A8</b>");
@@ -4195,24 +4280,30 @@ async function buildSysinfoPageText(env, page = "overview") {
   let text = lines.join("\n");
   if (text.length > 3500) text = `${text.slice(0, 3500)}
 \u2026`;
-  return text;
+  return { text, activity };
 }
 async function handleSysinfoCommand(env, threadId, opts = {}) {
   const page = opts.page || "overview";
-  const text = await buildSysinfoPageText(env, page);
+  const { text, activity } = await buildSysinfoPageText(env, page);
   let markup = buildSysinfoKeyboard(page);
-  if (page === "activity") {
-    try {
-      const activity = await loadTodayActivity(env);
-      const jump = buildUserJumpKeyboard(activity.rankingUsers, { includeMenu: false });
-      markup = {
-        inline_keyboard: [
-          ...buildSysinfoKeyboard("activity").inline_keyboard,
-          ...jump.inline_keyboard
-        ]
-      };
-    } catch {
-    }
+  if (page === "activity" && activity?.rankingUsers?.length) {
+    const jump = buildUserJumpKeyboard(activity.rankingUsers, { includeMenu: false });
+    markup = {
+      inline_keyboard: [
+        ...buildSysinfoKeyboard("activity").inline_keyboard,
+        ...jump.inline_keyboard
+      ]
+    };
+  } else if (page === "stats") {
+    const base = buildSysinfoKeyboard("stats").inline_keyboard;
+    markup = {
+      inline_keyboard: [
+        base[0],
+        base[1],
+        [{ text: "\u{1F525} \u5B8C\u6574\u6D3B\u8DC3\u6392\u884C", callback_data: "adm:sys:activity" }],
+        base[2]
+      ].filter(Boolean)
+    };
   }
   if (opts.edit?.chatId && opts.edit?.messageId) {
     const res = await tgCall(env, "editMessageText", {
@@ -4300,7 +4391,9 @@ async function handleNotesCommand(env, threadId, queryText = "") {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
       text: q ? `\u{1F50E} \u672A\u627E\u5230\u542B\u300C${escapeHtml(q)}\u300D\u7684\u5907\u6CE8
-\u7528\u6CD5: <code>/notes \u5173\u952E\u8BCD</code>` : "\u{1F4DD} \u6682\u65E0\u5907\u6CE8\u3002\u5728\u7528\u6237\u8BDD\u9898\u5185\u7528 <code>/note \u5185\u5BB9</code> \u6DFB\u52A0\u3002",
+
+\u7528\u6CD5: <code>/notes \u5173\u952E\u8BCD</code>
+\u4E5F\u53EF: <code>/find ${escapeHtml(q)}</code> \u627E\u7528\u6237` : "\u{1F4DD} \u6682\u65E0\u5907\u6CE8\u3002\n\u5728\u7528\u6237\u8BDD\u9898\u5185\u7528 <code>/note \u5185\u5BB9</code> \u6DFB\u52A0\uFF0C\u518D\u7528 <code>/notes \u5173\u952E\u8BCD</code> \u68C0\u7D22\u3002",
       parse_mode: "HTML",
       reply_markup: buildAdminHomeKeyboard(false)
     });
@@ -4314,9 +4407,10 @@ async function handleNotesCommand(env, threadId, queryText = "") {
     } catch {
     }
   }
+  const truncated = matches.length >= 12 || Boolean(cursor);
   const lines = [
-    `\u{1F50E} <b>\u5907\u6CE8\u641C\u7D22</b>${q ? ` \xB7 \u300C${escapeHtml(q)}\u300D` : " \xB7 \u5168\u90E8"}`,
-    `\u5171 ${matches.length} \u6761${pages >= maxPages && cursor ? "\uFF08\u53EF\u80FD\u672A\u626B\u5168\uFF09" : ""}`,
+    `\u{1F50E} <b>\u5907\u6CE8\u641C\u7D22</b>${q ? ` \xB7 \u300C${escapeHtml(q)}\u300D` : " \xB7 \u6700\u8FD1"}`,
+    `\u5171 ${matches.length} \u6761${truncated ? "\uFF08\u5DF2\u622A\u65AD\uFF0C\u53EF\u52A0\u5173\u952E\u8BCD\u7F29\u5C0F\uFF09" : ""}`,
     "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
   ];
   const jumpUsers = [];
@@ -4359,7 +4453,8 @@ async function handleWhoamiCommand(env, threadId, senderId) {
     chat_id: env.SUPERGROUP_ID,
     message_thread_id: threadId,
     text,
-    parse_mode: "HTML"
+    parse_mode: "HTML",
+    reply_markup: buildAdminHomeKeyboard(owner)
   });
 }
 async function handleFindCommand(env, threadId, queryText) {
@@ -4861,7 +4956,26 @@ async function handleAdminUiCallback(query, env, ctx) {
     else if (nav === "stats") await handleStatsCommand(env, threadId);
     else if (nav === "rank" || nav === "activity") await handleRankCommand(env, threadId);
     else if (nav === "notes") await handleNotesCommand(env, threadId, "/notes");
-    else if (nav === "whoami") await handleWhoamiCommand(env, threadId, senderId);
+    else if (nav === "find") {
+      await tgCall(env, "sendMessage", {
+        chat_id: env.SUPERGROUP_ID,
+        message_thread_id: threadId,
+        text: [
+          "\u{1F50D} <b>\u67E5\u627E\u7528\u6237</b>",
+          "\u7528\u6CD5: <code>/find UID\u6216\u7528\u6237\u540D\u6216\u59D3\u540D</code>",
+          "\u5907\u6CE8: <code>/notes \u5173\u952E\u8BCD</code>",
+          "\u6D3B\u8DC3: <code>/rank</code>"
+        ].join("\n"),
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [[
+            { text: "\u{1F50E} \u5907\u6CE8\u5217\u8868", callback_data: "adm:nav:notes" },
+            { text: "\u{1F525} \u6D3B\u8DC3", callback_data: "adm:nav:rank" },
+            { text: "\u{1F3E0} \u83DC\u5355", callback_data: "adm:nav:menu" }
+          ]]
+        }
+      });
+    } else if (nav === "whoami") await handleWhoamiCommand(env, threadId, senderId);
     else if (nav === "listwords") await handleListWordsCommand(env, threadId);
     else if (nav === "help") await handleHelpCommand(env, threadId, senderId);
     else if (nav === "menu") await handleMenuCommand(env, threadId, senderId);

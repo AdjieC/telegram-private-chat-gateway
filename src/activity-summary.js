@@ -2,10 +2,23 @@
  * 管理看板：消息活跃汇总与热力展示（纯函数，便于单测）
  */
 
+/** 默认运维时区：中国（UTC+8） */
+export const OPS_TZ_OFFSET_HOURS = 8;
+
 /** 当日 UTC 0 点毫秒时间戳 */
 export function utcDayStartMs(now = Date.now()) {
   const d = new Date(Number(now) || Date.now());
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/** UTC 日历日 YYYY-MM-DD */
+export function utcDayKey(now = Date.now()) {
+  return new Date(Number(now) || Date.now()).toISOString().slice(0, 10);
+}
+
+/** 前一 UTC 日 YYYY-MM-DD */
+export function utcYesterdayKey(now = Date.now()) {
+  return utcDayKey(Number(now) - 86400_000);
 }
 
 /**
@@ -35,13 +48,43 @@ export function summarizeInboundActivity(rows, opts = {}) {
     .slice(0, topN)
     .map(([userId, count]) => ({ userId, count }));
 
-  const peakHours = hours
-    .map((count, hour) => ({ hour, count }))
+  return {
+    total,
+    hours,
+    ranking,
+    peakHours: peakHoursFromBuckets(hours, 3),
+    uniqueUsers: byUser.size,
+  };
+}
+
+/**
+ * 将 UTC 小时桶平移到目标时区（offset 为正表示东时区）
+ * @param {number[]} hours
+ * @param {number} offsetHours
+ */
+export function shiftHourBuckets(hours, offsetHours = OPS_TZ_OFFSET_HOURS) {
+  const list = Array.isArray(hours) && hours.length === 24
+    ? hours.map(n => Math.max(0, Number(n) || 0))
+    : Array.from({ length: 24 }, () => 0);
+  const off = ((Number(offsetHours) % 24) + 24) % 24;
+  if (off === 0) return list;
+  const out = Array.from({ length: 24 }, () => 0);
+  for (let utc = 0; utc < 24; utc += 1) {
+    out[(utc + off) % 24] = list[utc];
+  }
+  return out;
+}
+
+/** 从小时桶提取高峰 */
+export function peakHoursFromBuckets(hours, topN = 3) {
+  const list = Array.isArray(hours) && hours.length === 24
+    ? hours
+    : Array.from({ length: 24 }, () => 0);
+  return list
+    .map((count, hour) => ({ hour, count: Number(count) || 0 }))
     .filter(item => item.count > 0)
     .sort((a, b) => b.count - a.count || a.hour - b.hour)
-    .slice(0, 3);
-
-  return { total, hours, ranking, peakHours, uniqueUsers: byUser.size };
+    .slice(0, Math.min(Math.max(Number(topN) || 3, 1), 24));
 }
 
 /**
@@ -61,6 +104,11 @@ export function formatHeatBars(hours) {
     const level = Math.min(8, Math.max(1, Math.ceil((n / max) * 8)));
     return blocks[level - 1];
   }).join('');
+}
+
+/** 热力轴刻度（与 24 格对齐的近似标记） */
+export function formatHeatAxis() {
+  return '0·····6····12····18···23';
 }
 
 /**
@@ -83,4 +131,46 @@ export function rankMedal(index0) {
   if (index0 === 1) return '🥈';
   if (index0 === 2) return '🥉';
   return `${index0 + 1}.`;
+}
+
+/** 用户展示名（优先姓名） */
+export function displayUserLabel(u) {
+  if (!u || typeof u !== 'object') return '未知';
+  const name = [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
+  if (name) return name;
+  if (u.username) return `@${u.username}`;
+  return String(u.userId || '未知');
+}
+
+/** 姓名行是否还需追加 @username（避免 @bob @bob） */
+export function shouldAppendUsername(u, label) {
+  if (!u?.username) return false;
+  const un = String(u.username);
+  const lb = String(label || '');
+  return lb !== `@${un}` && lb !== un;
+}
+
+/**
+ * 今日 vs 昨日增量文案
+ * @param {number} current
+ * @param {number} previous
+ */
+export function formatDelta(current, previous) {
+  const c = Number(current) || 0;
+  const p = Number(previous) || 0;
+  const d = c - p;
+  if (d === 0) return '持平';
+  return d > 0 ? `↑${d}` : `↓${Math.abs(d)}`;
+}
+
+/** 活跃数据源中文标签 */
+export function activitySourceLabel(source) {
+  switch (String(source || '')) {
+    case 'message_links': return '消息映射';
+    case 'kv_hours': return 'KV 小时桶';
+    case 'last_message': return '最近活跃';
+    case 'kv_hours+last_message': return 'KV热力+最近活跃';
+    case 'none': return '暂无';
+    default: return source || '未知';
+  }
 }
