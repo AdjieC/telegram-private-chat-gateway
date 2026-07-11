@@ -184,18 +184,18 @@ export function buildAdminHomeKeyboard(isOwner = false) {
       { text: '🔥 活跃', callback_data: 'adm:nav:rank' },
     ],
     [
-      { text: '🔍 查找', callback_data: 'adm:nav:find' },
-      { text: '🔎 备注', callback_data: 'adm:nav:notes' },
-      { text: '📝 屏蔽词', callback_data: 'adm:nav:listwords' },
+      { text: '🔍 查找用户', callback_data: 'adm:nav:find' },
+      { text: '🔎 搜备注', callback_data: 'adm:nav:notes' },
+      { text: '📝 词库', callback_data: 'adm:nav:listwords' },
     ],
     [
       { text: '🧹 清理', callback_data: 'adm:nav:cleanup_ask' },
-      { text: '🪪 我', callback_data: 'adm:nav:whoami' },
+      { text: '🪪 身份', callback_data: 'adm:nav:whoami' },
       { text: '❓ 帮助', callback_data: 'adm:nav:help' },
     ],
   ];
   if (isOwner) {
-    rows.push([{ text: '📡 同步命令菜单', callback_data: 'adm:nav:synccommands' }]);
+    rows.push([{ text: '📡 同步 Bot 菜单', callback_data: 'adm:nav:synccommands' }]);
   }
   return { inline_keyboard: rows };
 }

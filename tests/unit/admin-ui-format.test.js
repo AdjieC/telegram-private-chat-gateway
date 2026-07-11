@@ -19,6 +19,7 @@ describe('admin-ui-format', () => {
     const flat = kb.inline_keyboard.flat().map(b => b.callback_data);
     expect(flat).toContain('adm:nav:rank');
     expect(flat).toContain('adm:nav:find');
+    expect(flat).toContain('adm:nav:notes');
     expect(flat).not.toContain('adm:nav:synccommands');
   });
 

@@ -42,6 +42,7 @@ import {
 } from './src/admin-ui-format.js';
 import { createAdminCommandHandlers } from './src/admin-commands.js';
 import { VERIFY_COPY } from './src/verify-copy.js';
+import { USER_COPY, ADMIN_COPY } from './src/user-copy.js';
 
 // Telegram Private Chat Gateway — Cloudflare Workers 私聊安全接入与双向会话网关
 
@@ -965,7 +966,7 @@ async function spamCheck(msg, userId, env) {
  * @param {string} message - 告警内容（Markdown 格式）
  * @param {number} [threadId] - 可选，发送到指定话题
  */
-async function notifyAdmin(env, alertType, message, threadId) {
+async function notifyAdmin(env, alertType, message, threadId, parseMode = 'HTML') {
   Logger.warn('admin_alert', { alertType, messageLength: message.length });
 
   const body = threadId ? { message_thread_id: threadId } : {};
@@ -974,7 +975,7 @@ async function notifyAdmin(env, alertType, message, threadId) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       text: message,
-      parse_mode: 'Markdown',
+      parse_mode: parseMode,
       ...body
     });
   } catch (e) {
@@ -1027,10 +1028,10 @@ async function handleSpamMessage(env, userId, msg, spamResult, threadId, ctx) {
   if (CONFIG.SPAM_NOTIFY_ADMIN && !CONFIG.SPAM_SILENCE_MODE) {
     const reasonText = spamResult.reasons.map(r => {
       switch (r) {
-        case 'keyword': return `🔑 关键词: \`${spamResult.details.keyword}\``;
+        case 'keyword': return `🔑 关键词: <code>${escapeHtml(spamResult.details.keyword)}</code>`;
         case 'new_user_link': return `🔗 新用户链接 (剩余 ${spamResult.details.linkBlockRemainingHours}h)`;
         case 'repeat_message': return `🔄 重复消息 (${spamResult.details.repeatCount}次)`;
-        default: return r;
+        default: return escapeHtml(String(r));
       }
     }).join('\n');
 
@@ -1038,8 +1039,8 @@ async function handleSpamMessage(env, userId, msg, spamResult, threadId, ctx) {
 
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
-      text: `⚠️ **检测到疑似骚扰消息**\n\n👤 用户: \`${userId}\`\n${reasonText}\n\n📝 消息已拦截。使用 /ban 封禁该用户。`,
-      parse_mode: 'Markdown',
+      text: ADMIN_COPY.spamIntercepted(escapeHtml(String(userId)), reasonText),
+      parse_mode: 'HTML',
       ...body
     });
   }
@@ -1096,7 +1097,7 @@ function showStatus(msg, cls) {
 function onTurnstileSuccess(token) {
   if (submitted) return;
   submitted = true;
-  showStatus('✅ 验证通过！正在通知机器人...', 'success');
+  showStatus('✅ 验证通过，正在通知机器人…', 'success');
   fetch('{{WORKER_URL}}/verify-callback', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1105,12 +1106,12 @@ function onTurnstileSuccess(token) {
   .then(function(r) { return r.json(); })
   .then(function(data) {
     if (data.success) {
-      var msg = '✅ 验证成功！机器人已收到您的消息。';
+      var msg = '✅ 验证成功！请返回 Telegram 继续对话。';
       if (data.pendingCount > 0) {
         msg += '（' + data.pendingCount + ' 条消息将于数秒内送达）';
       }
       showStatus(msg, 'success');
-      document.querySelector('.desc').textContent = '请返回 Telegram，机器人已向您发送了验证通过通知。';
+      document.querySelector('.desc').textContent = '验证完成，请返回 Telegram 查看机器人消息。';
       // 显示返回 Telegram 按钮
       var btn = document.getElementById('back-btn');
       if (btn) {
@@ -1119,7 +1120,7 @@ function onTurnstileSuccess(token) {
     } else {
       var errMap = {
         'turnstile_failed': '人机验证未通过，请刷新页面重试',
-        'code_invalid_or_expired': '验证链接已过期（有效期10分钟），请返回 Telegram 重新发送消息获取新的验证链接',
+        'code_invalid_or_expired': '验证链接已过期（约 10 分钟），请返回 Telegram 重新发消息获取新链接',
         'server_not_configured': '服务器未完成配置，请联系管理员'
       };
       var errMsg = errMap[data.error] || ('验证失败: ' + (data.detail || data.error || '未知错误'));
@@ -1346,7 +1347,8 @@ const legacyApp = {
                 if (forwardedCount > 0) {
                   await tgCall(normalizedEnv, "sendMessage", {
                     chat_id: Number(userId),
-                    text: `📩 刚才的 ${forwardedCount} 条消息已帮您送达。`
+                    text: USER_COPY.pendingDelivered(forwardedCount),
+                    parse_mode: 'HTML',
                   });
                 }
                 await env.TOPIC_MAP.delete(pendingKey);
@@ -1433,14 +1435,14 @@ const legacyApp = {
               '👋 <b>私聊网关</b>',
               '',
               '直接发送文字 / 图片 / 文件即可联系管理员。',
-              '首次使用可能需要完成人机验证（按钮或网页）。',
+              '首次使用可能需要人机验证（题目按钮或网页验证）。',
               '若被静音或封禁，会收到单独通知。',
               '',
-              '常用：',
-              '• /start — 开始或重新触发验证',
-              '• /help — 显示本说明',
+              '<b>常用</b>',
+              '• /start — 开始或重新验证',
+              '• /help — 本说明',
               '',
-              '<i>管理指令仅在超级群话题内由管理员使用。</i>',
+              '<i>请勿在此使用管理指令；管理操作仅在超级群话题内有效。</i>',
             ].join('\n'),
             parse_mode: 'HTML',
           });
@@ -1456,8 +1458,10 @@ const legacyApp = {
         await handlePrivateMessage(msg, normalizedEnv, ctx);
       } catch (e) {
         // 不向用户泄露技术细节
-        const errText = `⚠️ 系统繁忙，请稍后再试。`;
-        await tgCall(normalizedEnv, "sendMessage", { chat_id: msg.chat.id, text: errText });
+        await tgCall(normalizedEnv, "sendMessage", {
+          chat_id: msg.chat.id,
+          text: USER_COPY.systemBusy,
+        });
         Logger.error('private_message_failed', e, { userId: msg.chat.id });
       }
       return new Response("OK");
@@ -1501,7 +1505,7 @@ async function handlePrivateMessage(msg, env, ctx) {
   if (!rateLimit.allowed) {
     await tgCall(env, "sendMessage", {
       chat_id: userId,
-      text: "⚠️ 发送过于频繁，请稍后再试。"
+      text: USER_COPY.rateLimited,
     });
     return;
   }
@@ -1543,7 +1547,7 @@ async function handlePrivateMessage(msg, env, ctx) {
       if (!noticed) {
         await tgCall(env, 'sendMessage', {
           chat_id: userId,
-          text: '🚫 您已被管理员封禁，暂时无法继续发送消息。如有疑问请等待管理员处理。',
+          text: USER_COPY.bannedHourly,
         });
         await env.TOPIC_MAP.put(noticeKey, '1', { expirationTtl: 3600 });
       }
@@ -1559,7 +1563,7 @@ async function handlePrivateMessage(msg, env, ctx) {
       if (!(await env.TOPIC_MAP.get(noticeKey))) {
         await tgCall(env, 'sendMessage', {
           chat_id: userId,
-          text: '🔇 您当前处于静音状态，消息不会送达管理员。请等待管理员取消静音。',
+          text: USER_COPY.mutedHourly,
         });
         await env.TOPIC_MAP.put(noticeKey, '1', { expirationTtl: 3600 });
       }
@@ -1571,7 +1575,7 @@ async function handlePrivateMessage(msg, env, ctx) {
     Logger.info('message_blocked_by_word', { userId, word: blockedWords[matchedIndex] });
     await tgCall(env, "sendMessage", {
       chat_id: userId,
-      text: "🚫 您的消息包含违规内容，已被拦截，请修改后重新发送。"
+      text: USER_COPY.blockedWord,
     });
     return;
   }
@@ -1621,7 +1625,7 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
   let rec = await safeGetJSON(env, key, null);
 
   if (rec && rec.closed) {
-    await tgCall(env, "sendMessage", { chat_id: userId, text: "🚫 当前对话已被管理员关闭。" });
+    await tgCall(env, "sendMessage", { chat_id: userId, text: USER_COPY.conversationClosed });
     return;
   }
 
@@ -1629,7 +1633,7 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
   const retryKey = `retry:${userId}`;
   let retryCount = parseInt((await env.TOPIC_MAP.get(retryKey)) ?? "0", 10);
   if (retryCount > CONFIG.MAX_RETRY_ATTEMPTS) {
-    await tgCall(env, "sendMessage", { chat_id: userId, text: "❌ 系统繁忙，请稍后再试。" });
+    await tgCall(env, "sendMessage", { chat_id: userId, text: USER_COPY.systemBusy });
     await env.TOPIC_MAP.delete(retryKey);
     return;
   }
@@ -1870,8 +1874,15 @@ async function handleForwardFailure(res, msg, userId, threadId, env) {
 
   if (!copyRes.ok) {
     Logger.error('forward_and_copy_both_failed', copyRes.description, { userId, threadId });
-    await notifyAdmin(env, 'forward_failed',
-      `⚠️ **消息转发完全失败**\n\n👤 用户: \`${userId}\`\n📝 话题: \`${threadId}\`\n❌ forwardMessage: \`${res.description}\`\n❌ copyMessage: \`${copyRes.description}\``
+    await notifyAdmin(
+      env,
+      'forward_failed',
+      ADMIN_COPY.forwardTotalFail(
+        escapeHtml(String(userId)),
+        escapeHtml(String(threadId)),
+        escapeHtml(res.description || ''),
+        escapeHtml(copyRes.description || ''),
+      ),
     );
   }
 }
@@ -1994,19 +2005,30 @@ async function handlePanelCommand(env, threadId, userId) {
   const muted = await env.TOPIC_MAP.get(`muted:${userId}`);
   const rec = await safeGetJSON(env, `user:${userId}`, null);
   const note = await env.TOPIC_MAP.get(`note:${userId}`);
+  let lastMsgLine = '最近消息: 无';
+  let d1Status = null;
+  if (env.TG_BOT_DB) {
+    try {
+      const u = await createD1Storage(env.TG_BOT_DB).getUser(userId);
+      if (u?.lastMessageAt) lastMsgLine = `最近消息: ${formatTimeBoth(u.lastMessageAt)}`;
+      d1Status = u?.status || null;
+    } catch { /* ignore */ }
+  }
   const text = [
     '🎛 <b>用户面板</b>',
     '────────────────',
     `👤 ${name} · ${un}`,
     `UID <code>${userId}</code>`,
     `状态  封禁:${ban ? '🚫 是' : '否'} · 静音:${muted ? '🔇 是' : '否'} · 关闭:${rec?.closed ? '🔒 是' : '否'}`,
+    d1Status ? `D1: <code>${escapeHtml(d1Status)}</code>` : '',
+    lastMsgLine,
     note
       ? `📝 ${escapeHtml(String(note).slice(0, 80))}${String(note).length > 80 ? '…' : ''}`
       : '📝 无备注 · <code>/note 内容</code> 添加',
     '',
     '👇 点按钮操作',
     '<i>封禁 / 关闭 / 重置需二次确认</i>',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
   await tgCall(env, 'sendMessage', {
     chat_id: env.SUPERGROUP_ID,
     message_thread_id: threadId,
@@ -2029,7 +2051,7 @@ async function handleMuteCommand(env, threadId, userId) {
   });
   await tgCall(env, 'sendMessage', {
     chat_id: userId,
-    text: '🔇 您已被管理员静音，消息暂时不会送达管理员。',
+    text: USER_COPY.muteUserNotify,
   });
 }
 
@@ -2047,7 +2069,7 @@ async function handleUnmuteCommand(env, threadId, userId) {
   });
   await tgCall(env, 'sendMessage', {
     chat_id: userId,
-    text: '🔊 您的静音已取消，可以继续联系管理员。',
+    text: USER_COPY.unmuteUserNotify,
   });
 }
 
@@ -2086,7 +2108,12 @@ async function handleNoteCommand(env, threadId, userId, text) {
 async function handleAddWordCommand(env, threadId, text, senderId) {
   const word = text.slice(9).trim();
   if (!word) {
-    await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: "⚠️ 用法: `/addword 屏蔽词`", parse_mode: "Markdown" });
+    await tgCall(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: ADMIN_COPY.wordUsageAdd,
+      parse_mode: "HTML",
+    });
     return;
   }
   let kvWords = [];
@@ -2099,7 +2126,12 @@ async function handleAddWordCommand(env, threadId, text, senderId) {
   // 检查是否已存在（合并硬编码一起判断）
   const allWords = [...new Set([...BLOCKED_WORDS, ...kvWords])];
   if (allWords.map(w => w.toLowerCase()).includes(word.toLowerCase())) {
-    await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `⚠️ 屏蔽词「${word}」已存在。`, parse_mode: "Markdown" });
+    await tgCall(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: ADMIN_COPY.wordExists(escapeHtml(word)),
+      parse_mode: "HTML",
+    });
     return;
   }
 
@@ -2107,19 +2139,34 @@ async function handleAddWordCommand(env, threadId, text, senderId) {
   await env.TOPIC_MAP.put("blocked_words_kv", JSON.stringify(kvWords));
   blockedWordsCache.data = null; // 强制刷新缓存
   Logger.info('blocked_word_added', { word, by: senderId });
-  await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `✅ 已添加屏蔽词「${word}」\n当前动态词库共 ${kvWords.length} 个词`, parse_mode: "Markdown" });
+  await tgCall(env, "sendMessage", {
+    chat_id: env.SUPERGROUP_ID,
+    message_thread_id: threadId,
+    text: ADMIN_COPY.wordAdded(escapeHtml(word), kvWords.length),
+    parse_mode: "HTML",
+  });
 }
 
 async function handleDelWordCommand(env, threadId, text, senderId) {
   const word = text.slice(9).trim();
   if (!word) {
-    await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: "⚠️ 用法: `/delword 屏蔽词`", parse_mode: "Markdown" });
+    await tgCall(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: ADMIN_COPY.wordUsageDel,
+      parse_mode: "HTML",
+    });
     return;
   }
 
   // 检查是否为硬编码词
   if (BLOCKED_WORDS.map(w => w.toLowerCase()).includes(word.toLowerCase())) {
-    await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `⚠️「${word}」是硬编码屏蔽词，无法通过命令删除，请直接修改代码中的 BLOCKED_WORDS 数组。`, parse_mode: "Markdown" });
+    await tgCall(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: ADMIN_COPY.wordHardcoded(escapeHtml(word)),
+      parse_mode: "HTML",
+    });
     return;
   }
 
@@ -2134,14 +2181,24 @@ async function handleDelWordCommand(env, threadId, text, senderId) {
   kvWords = kvWords.filter(w => w.toLowerCase() !== word.toLowerCase());
 
   if (kvWords.length === before) {
-    await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `⚠️ 屏蔽词「${word}」不存在于动态词库中。`, parse_mode: "Markdown" });
+    await tgCall(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: ADMIN_COPY.wordMissing(escapeHtml(word)),
+      parse_mode: "HTML",
+    });
     return;
   }
 
   await env.TOPIC_MAP.put("blocked_words_kv", JSON.stringify(kvWords));
   blockedWordsCache.data = null; // 强制刷新缓存
   Logger.info('blocked_word_removed', { word, by: senderId });
-  await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `✅ 已删除屏蔽词「${word}」\n当前动态词库共 ${kvWords.length} 个词`, parse_mode: "Markdown" });
+  await tgCall(env, "sendMessage", {
+    chat_id: env.SUPERGROUP_ID,
+    message_thread_id: threadId,
+    text: ADMIN_COPY.wordDeleted(escapeHtml(word), kvWords.length),
+    parse_mode: "HTML",
+  });
 }
 
 async function handleListWordsCommand(env, threadId) {
@@ -2159,19 +2216,31 @@ async function handleListWordsCommand(env, threadId) {
   const spamKeywords = parseSpamKeywords((env.SPAM_KEYWORDS || '').toString());
 
   const blockedTotal = allWords.length;
-  let reply = `📝 **内容过滤词库**\n\n`;
-  reply += `**一、屏蔽词**（命中后拦截并提示用户，共 ${blockedTotal} 个）\n\n`;
-  reply += `🔧 **硬编码词** (${hardcoded.length} 个，修改需改代码):\n`;
-  reply += hardcoded.length > 0 ? hardcoded.map(w => `  • ${w}`).join("\n") : "  (无)";
-  reply += `\n\n💾 **动态词** (${dynamic.length} 个，可通过 /addword /delword 管理):\n`;
-  reply += dynamic.length > 0 ? dynamic.map(w => `  • ${w}`).join("\n") : "  (无)";
-  reply += `\n\n**二、垃圾关键词 SPAM_KEYWORDS**（环境变量，走 spam 检测；共 ${spamKeywords.length} 个）\n`;
-  reply += spamKeywords.length > 0
-    ? spamKeywords.map(w => `  • ${w}`).join("\n")
-    : "  (未配置或为空；在 Cloudflare Variables 中设置 SPAM_KEYWORDS，逗号分隔)";
-  reply += `\n\n说明：/addword 只写入「动态屏蔽词」，不会改 SPAM_KEYWORDS 环境变量。`;
+  const lines = [
+    '📝 <b>内容过滤词库</b>',
+    '',
+    `<b>一、屏蔽词</b>（命中后拦截并提示用户，共 ${blockedTotal} 个）`,
+    '',
+    `🔧 <b>硬编码词</b> (${hardcoded.length} 个，修改需改代码):`,
+    hardcoded.length > 0 ? hardcoded.map(w => `  • ${escapeHtml(w)}`).join('\n') : '  (无)',
+    '',
+    `💾 <b>动态词</b> (${dynamic.length} 个，可用 /addword /delword):`,
+    dynamic.length > 0 ? dynamic.map(w => `  • ${escapeHtml(w)}`).join('\n') : '  (无)',
+    '',
+    `<b>二、垃圾关键词 SPAM_KEYWORDS</b>（环境变量，共 ${spamKeywords.length} 个）`,
+    spamKeywords.length > 0
+      ? spamKeywords.map(w => `  • ${escapeHtml(w)}`).join('\n')
+      : '  (未配置；在 Cloudflare Variables 中设置 SPAM_KEYWORDS)',
+    '',
+    '<i>说明：/addword 只写入动态屏蔽词，不会改 SPAM_KEYWORDS。</i>',
+  ];
 
-  await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: reply, parse_mode: "Markdown" });
+  await tgCall(env, "sendMessage", {
+    chat_id: env.SUPERGROUP_ID,
+    message_thread_id: threadId,
+    text: lines.join('\n'),
+    parse_mode: "HTML",
+  });
 }
 
 async function handleCloseCommand(env, threadId, userId) {
@@ -2272,7 +2341,7 @@ async function handleBanCommand(env, threadId, userId) {
   // 主动告知用户已被封禁，避免对方不知情仍持续发消息
   const notify = await tgCall(env, 'sendMessage', {
     chat_id: userId,
-    text: '🚫 您已被管理员封禁，暂时无法继续发送消息。如有疑问请等待管理员处理。',
+    text: USER_COPY.banUserNotify,
   });
   if (!notify?.ok) {
     Logger.warn('ban_user_notify_failed', {
@@ -2308,7 +2377,7 @@ async function handleUnbanCommand(env, threadId, userId) {
   });
   const notify = await tgCall(env, 'sendMessage', {
     chat_id: userId,
-    text: '✅ 您已被管理员解封，可以继续发送消息了。',
+    text: USER_COPY.unbanUserNotify,
   });
   if (!notify?.ok) {
     Logger.warn('unban_user_notify_failed', {
@@ -3137,21 +3206,21 @@ async function handleCleanupCommand(threadId, env) {
     } while (cursor);
 
     // 生成并发送清理报告
-    let reportText = `✅ **清理完成**\n\n`;
-    reportText += `📊 **统计信息**\n`;
-    reportText += `- 扫描用户数: ${scannedCount}\n`;
-    reportText += `- 已清理用户数: ${cleanedCount}\n`;
-    reportText += `- 错误数: ${errorCount}\n\n`;
+    let reportText = `✅ <b>清理完成</b>\n\n`;
+    reportText += `📊 <b>统计</b>\n`;
+    reportText += `• 扫描用户: <b>${scannedCount}</b>\n`;
+    reportText += `• 已清理: <b>${cleanedCount}</b>\n`;
+    reportText += `• 错误: ${errorCount}\n\n`;
 
     if (cleanedCount > 0) {
-      reportText += `🗑️ **已清理的用户** (话题已删除):\n`;
+      reportText += `🗑 <b>已清理用户</b>（话题已删除）:\n`;
       for (const user of cleanedUsers.slice(0, CONFIG.MAX_CLEANUP_DISPLAY)) {
-        reportText += `- UID: \`${user.userId}\` | 话题: ${user.title}\n`;
+        reportText += `• UID <code>${escapeHtml(String(user.userId))}</code> · ${escapeHtml(user.title || '')}\n`;
       }
       if (cleanedUsers.length > CONFIG.MAX_CLEANUP_DISPLAY) {
-        reportText += `\n...(还有 ${cleanedUsers.length - CONFIG.MAX_CLEANUP_DISPLAY} 个用户)\n`;
+        reportText += `\n…还有 ${cleanedUsers.length - CONFIG.MAX_CLEANUP_DISPLAY} 个\n`;
       }
-      reportText += `\n💡 这些用户下次发消息时将重新进行人机验证并创建新话题。`;
+      reportText += `\n💡 这些用户下次发消息将重新验证并创建新话题。`;
     } else {
       reportText += `✨ 没有发现需要清理的用户记录。`;
     }
@@ -3165,7 +3234,7 @@ async function handleCleanupCommand(threadId, env) {
     await tgCall(env, "sendMessage", withMessageThreadId({
       chat_id: env.SUPERGROUP_ID,
       text: reportText,
-      parse_mode: "Markdown"
+      parse_mode: "HTML"
     }, threadId));
 
   } catch (e) {

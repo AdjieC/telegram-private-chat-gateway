@@ -258,11 +258,12 @@ async function handleMenuCommand(env, threadId, senderId) {
   const text = [
     `🏠 <b>管理菜单</b> · v${GATEWAY_VERSION}`,
     '────────────',
-    '点下方按钮快速打开功能，无需记忆命令。',
+    '点下方按钮即可，无需记忆命令。',
     '',
-    '🔥 <b>活跃</b> 今日排行 + 中国时间热力',
-    '🔍 <b>查找</b> /find · 🔎 <b>备注</b> /notes',
-    '💡 用户会话请进入对应 Forum Topic 使用 <b>面板/资料</b>。',
+    '📊 今日统计 · 🔥 活跃排行（CST）',
+    '🔍 /find · 🔎 /notes · 🎛 话题内 /panel',
+    '',
+    '<i>危险操作（封禁/关闭/重置）均需二次确认</i>',
   ].join('\n');
   await tgCall(env, 'sendMessage', {
     chat_id: env.SUPERGROUP_ID,
@@ -718,12 +719,23 @@ async function handleWhoamiCommand(env, threadId, senderId) {
     });
     member = res.result?.status || res.description || 'unknown';
   } catch { /* ignore */ }
+  const memberLabel = {
+    creator: '创建者',
+    administrator: '管理员',
+    member: '成员',
+    restricted: '受限',
+    left: '已离开',
+    kicked: '已移出',
+  }[member] || member;
   const text = [
     '🪪 <b>Whoami</b>',
+    '────────────────',
     `UID: <code>${senderId}</code>`,
-    `群身份: <code>${escapeHtml(member)}</code>`,
-    `管理指令权限: ${admin ? '✅ 是' : '❌ 否'}`,
-    `OWNER_IDS: ${owner ? '✅ 是' : '❌ 否'}`,
+    `群身份: <code>${escapeHtml(member)}</code> · ${escapeHtml(memberLabel)}`,
+    `管理指令: ${admin ? '✅ 可用' : '❌ 不可用'}`,
+    `OWNER_IDS: ${owner ? '✅ 是（含同步命令菜单）' : '❌ 否'}`,
+    '',
+    '<i>权限 = 群主/管理员 或 ADMIN_IDS 或 OWNER_IDS</i>',
   ].join('\n');
   await tgCall(env, 'sendMessage', {
     chat_id: env.SUPERGROUP_ID,
@@ -765,12 +777,18 @@ async function handleFindCommand(env, threadId, queryText) {
       });
       return;
     }
+    const statusLabel = (s) => {
+      if (s === 'banned') return '🚫 封禁';
+      if (s === 'closed') return '🔒 关闭';
+      if (s === 'active') return '✅ 正常';
+      return escapeHtml(s || '?');
+    };
     const lines = [`🔎 <b>查找结果</b> · ${hits.length} 条`, ''];
     for (const u of hits) {
       const name = escapeHtml([u.firstName, u.lastName].filter(Boolean).join(' ').trim() || '未知');
       const un = u.username ? `@${escapeHtml(u.username)}` : '无用户名';
       lines.push(`• ${name} · ${un}`);
-      lines.push(`  UID <code>${escapeHtml(u.userId)}</code> · Topic <code>${escapeHtml(u.topicId || '-')}</code> · ${escapeHtml(u.status || '?')}`);
+      lines.push(`  UID <code>${escapeHtml(u.userId)}</code> · Topic <code>${escapeHtml(u.topicId || '-')}</code> · ${statusLabel(u.status)}`);
       lines.push(`  最近: ${formatTimeBoth(u.lastMessageAt)}`);
     }
     lines.push('', '<i>点下方按钮直接打开用户面板</i>');
@@ -831,7 +849,7 @@ async function handleSyncCommandsCommand(env, threadId, senderId) {
     chat_id: env.SUPERGROUP_ID,
     message_thread_id: threadId,
     text: res?.ok
-      ? `✅ 已同步 ${commands.length} 条命令到 Bot 菜单`
+      ? `✅ 已同步 <b>${commands.length}</b> 条命令到 Bot 菜单\n\n<i>客户端可能需重启或等几分钟后刷新菜单</i>`
       : `❌ 同步失败: ${escapeHtml(res?.description || 'unknown')}`,
     parse_mode: 'HTML',
   });

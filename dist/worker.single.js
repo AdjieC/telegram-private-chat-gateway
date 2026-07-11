@@ -2416,18 +2416,18 @@ function buildAdminHomeKeyboard(isOwner = false) {
       { text: "\u{1F525} \u6D3B\u8DC3", callback_data: "adm:nav:rank" }
     ],
     [
-      { text: "\u{1F50D} \u67E5\u627E", callback_data: "adm:nav:find" },
-      { text: "\u{1F50E} \u5907\u6CE8", callback_data: "adm:nav:notes" },
-      { text: "\u{1F4DD} \u5C4F\u853D\u8BCD", callback_data: "adm:nav:listwords" }
+      { text: "\u{1F50D} \u67E5\u627E\u7528\u6237", callback_data: "adm:nav:find" },
+      { text: "\u{1F50E} \u641C\u5907\u6CE8", callback_data: "adm:nav:notes" },
+      { text: "\u{1F4DD} \u8BCD\u5E93", callback_data: "adm:nav:listwords" }
     ],
     [
       { text: "\u{1F9F9} \u6E05\u7406", callback_data: "adm:nav:cleanup_ask" },
-      { text: "\u{1FAAA} \u6211", callback_data: "adm:nav:whoami" },
+      { text: "\u{1FAAA} \u8EAB\u4EFD", callback_data: "adm:nav:whoami" },
       { text: "\u2753 \u5E2E\u52A9", callback_data: "adm:nav:help" }
     ]
   ];
   if (isOwner) {
-    rows.push([{ text: "\u{1F4E1} \u540C\u6B65\u547D\u4EE4\u83DC\u5355", callback_data: "adm:nav:synccommands" }]);
+    rows.push([{ text: "\u{1F4E1} \u540C\u6B65 Bot \u83DC\u5355", callback_data: "adm:nav:synccommands" }]);
   }
   return { inline_keyboard: rows };
 }
@@ -2673,11 +2673,12 @@ function createAdminCommandHandlers(deps) {
     const text = [
       `\u{1F3E0} <b>\u7BA1\u7406\u83DC\u5355</b> \xB7 v${GATEWAY_VERSION2}`,
       "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
-      "\u70B9\u4E0B\u65B9\u6309\u94AE\u5FEB\u901F\u6253\u5F00\u529F\u80FD\uFF0C\u65E0\u9700\u8BB0\u5FC6\u547D\u4EE4\u3002",
+      "\u70B9\u4E0B\u65B9\u6309\u94AE\u5373\u53EF\uFF0C\u65E0\u9700\u8BB0\u5FC6\u547D\u4EE4\u3002",
       "",
-      "\u{1F525} <b>\u6D3B\u8DC3</b> \u4ECA\u65E5\u6392\u884C + \u4E2D\u56FD\u65F6\u95F4\u70ED\u529B",
-      "\u{1F50D} <b>\u67E5\u627E</b> /find \xB7 \u{1F50E} <b>\u5907\u6CE8</b> /notes",
-      "\u{1F4A1} \u7528\u6237\u4F1A\u8BDD\u8BF7\u8FDB\u5165\u5BF9\u5E94 Forum Topic \u4F7F\u7528 <b>\u9762\u677F/\u8D44\u6599</b>\u3002"
+      "\u{1F4CA} \u4ECA\u65E5\u7EDF\u8BA1 \xB7 \u{1F525} \u6D3B\u8DC3\u6392\u884C\uFF08CST\uFF09",
+      "\u{1F50D} /find \xB7 \u{1F50E} /notes \xB7 \u{1F39B} \u8BDD\u9898\u5185 /panel",
+      "",
+      "<i>\u5371\u9669\u64CD\u4F5C\uFF08\u5C01\u7981/\u5173\u95ED/\u91CD\u7F6E\uFF09\u5747\u9700\u4E8C\u6B21\u786E\u8BA4</i>"
     ].join("\n");
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
@@ -3090,12 +3091,23 @@ function createAdminCommandHandlers(deps) {
       member = res.result?.status || res.description || "unknown";
     } catch {
     }
+    const memberLabel = {
+      creator: "\u521B\u5EFA\u8005",
+      administrator: "\u7BA1\u7406\u5458",
+      member: "\u6210\u5458",
+      restricted: "\u53D7\u9650",
+      left: "\u5DF2\u79BB\u5F00",
+      kicked: "\u5DF2\u79FB\u51FA"
+    }[member] || member;
     const text = [
       "\u{1FAAA} <b>Whoami</b>",
+      "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
       `UID: <code>${senderId}</code>`,
-      `\u7FA4\u8EAB\u4EFD: <code>${escapeHtml(member)}</code>`,
-      `\u7BA1\u7406\u6307\u4EE4\u6743\u9650: ${admin ? "\u2705 \u662F" : "\u274C \u5426"}`,
-      `OWNER_IDS: ${owner ? "\u2705 \u662F" : "\u274C \u5426"}`
+      `\u7FA4\u8EAB\u4EFD: <code>${escapeHtml(member)}</code> \xB7 ${escapeHtml(memberLabel)}`,
+      `\u7BA1\u7406\u6307\u4EE4: ${admin ? "\u2705 \u53EF\u7528" : "\u274C \u4E0D\u53EF\u7528"}`,
+      `OWNER_IDS: ${owner ? "\u2705 \u662F\uFF08\u542B\u540C\u6B65\u547D\u4EE4\u83DC\u5355\uFF09" : "\u274C \u5426"}`,
+      "",
+      "<i>\u6743\u9650 = \u7FA4\u4E3B/\u7BA1\u7406\u5458 \u6216 ADMIN_IDS \u6216 OWNER_IDS</i>"
     ].join("\n");
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
@@ -3137,12 +3149,18 @@ function createAdminCommandHandlers(deps) {
         });
         return;
       }
+      const statusLabel = (s) => {
+        if (s === "banned") return "\u{1F6AB} \u5C01\u7981";
+        if (s === "closed") return "\u{1F512} \u5173\u95ED";
+        if (s === "active") return "\u2705 \u6B63\u5E38";
+        return escapeHtml(s || "?");
+      };
       const lines = [`\u{1F50E} <b>\u67E5\u627E\u7ED3\u679C</b> \xB7 ${hits.length} \u6761`, ""];
       for (const u of hits) {
         const name = escapeHtml([u.firstName, u.lastName].filter(Boolean).join(" ").trim() || "\u672A\u77E5");
         const un = u.username ? `@${escapeHtml(u.username)}` : "\u65E0\u7528\u6237\u540D";
         lines.push(`\u2022 ${name} \xB7 ${un}`);
-        lines.push(`  UID <code>${escapeHtml(u.userId)}</code> \xB7 Topic <code>${escapeHtml(u.topicId || "-")}</code> \xB7 ${escapeHtml(u.status || "?")}`);
+        lines.push(`  UID <code>${escapeHtml(u.userId)}</code> \xB7 Topic <code>${escapeHtml(u.topicId || "-")}</code> \xB7 ${statusLabel(u.status)}`);
         lines.push(`  \u6700\u8FD1: ${formatTimeBoth(u.lastMessageAt)}`);
       }
       lines.push("", "<i>\u70B9\u4E0B\u65B9\u6309\u94AE\u76F4\u63A5\u6253\u5F00\u7528\u6237\u9762\u677F</i>");
@@ -3200,7 +3218,9 @@ function createAdminCommandHandlers(deps) {
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: res?.ok ? `\u2705 \u5DF2\u540C\u6B65 ${commands.length} \u6761\u547D\u4EE4\u5230 Bot \u83DC\u5355` : `\u274C \u540C\u6B65\u5931\u8D25: ${escapeHtml(res?.description || "unknown")}`,
+      text: res?.ok ? `\u2705 \u5DF2\u540C\u6B65 <b>${commands.length}</b> \u6761\u547D\u4EE4\u5230 Bot \u83DC\u5355
+
+<i>\u5BA2\u6237\u7AEF\u53EF\u80FD\u9700\u91CD\u542F\u6216\u7B49\u51E0\u5206\u949F\u540E\u5237\u65B0\u83DC\u5355</i>` : `\u274C \u540C\u6B65\u5931\u8D25: ${escapeHtml(res?.description || "unknown")}`,
       parse_mode: "HTML"
     });
   }
@@ -3522,6 +3542,64 @@ ${question}
   successBodyWithPending: "\u2705 <b>\u9A8C\u8BC1\u6210\u529F</b>\n\n\u6B63\u5728\u4E3A\u60A8\u9001\u8FBE\u521A\u624D\u7684\u6D88\u606F\uFF0C\u8BF7\u7A0D\u5019\u2026",
   /** 答错时在题目下追加的提示（编辑消息用） */
   wrongAnswerHint: "\n\n\u26A0\uFE0F \u56DE\u7B54\u4E0D\u6B63\u786E\uFF0C\u8BF7\u518D\u9009\u4E00\u6B21\u3002\u94FE\u63A5\u672A\u8FC7\u671F\u524D\u53EF\u7EE7\u7EED\u5C1D\u8BD5\u3002"
+};
+
+// src/user-copy.js
+var USER_COPY = {
+  rateLimited: "\u26A0\uFE0F \u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+  systemBusy: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+  bannedHourly: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
+  mutedHourly: "\u{1F507} \u60A8\u5F53\u524D\u5904\u4E8E\u9759\u97F3\u72B6\u6001\uFF0C\u6D88\u606F\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u53D6\u6D88\u9759\u97F3\u3002",
+  blockedWord: "\u{1F6AB} \u60A8\u7684\u6D88\u606F\u5305\u542B\u8FDD\u89C4\u5185\u5BB9\uFF0C\u5DF2\u88AB\u62E6\u622A\u3002\u8BF7\u4FEE\u6539\u540E\u91CD\u65B0\u53D1\u9001\u3002",
+  conversationClosed: "\u{1F6AB} \u5F53\u524D\u5BF9\u8BDD\u5DF2\u88AB\u7BA1\u7406\u5458\u5173\u95ED\u3002\u5982\u9700\u7EE7\u7EED\uFF0C\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u91CD\u65B0\u6253\u5F00\u3002",
+  pendingDelivered(count) {
+    return `\u{1F4E9} \u521A\u624D\u7684 <b>${count}</b> \u6761\u6D88\u606F\u5DF2\u5E2E\u60A8\u9001\u8FBE\u7BA1\u7406\u5458\u3002`;
+  },
+  muteUserNotify: "\u{1F507} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u9759\u97F3\uFF0C\u6D88\u606F\u6682\u65F6\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002",
+  unmuteUserNotify: "\u{1F50A} \u60A8\u7684\u9759\u97F3\u5DF2\u53D6\u6D88\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
+  banUserNotify: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
+  unbanUserNotify: "\u2705 \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u89E3\u5C01\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u4E86\u3002"
+};
+var ADMIN_COPY = {
+  spamIntercepted(userId, reasonText) {
+    return [
+      "\u26A0\uFE0F <b>\u68C0\u6D4B\u5230\u7591\u4F3C\u9A9A\u6270\u6D88\u606F</b>",
+      "",
+      `\u{1F464} \u7528\u6237: <code>${userId}</code>`,
+      reasonText,
+      "",
+      "\u{1F4DD} \u6D88\u606F\u5DF2\u62E6\u622A\u3002\u53EF\u5728\u7528\u6237\u8BDD\u9898\u5185\u4F7F\u7528\u9762\u677F <b>\u5C01\u7981</b>\u3002"
+    ].join("\n");
+  },
+  forwardTotalFail(userId, threadId, fwdDesc, copyDesc) {
+    return [
+      "\u26A0\uFE0F <b>\u6D88\u606F\u8F6C\u53D1\u5B8C\u5168\u5931\u8D25</b>",
+      "",
+      `\u{1F464} \u7528\u6237: <code>${userId}</code>`,
+      `\u{1F4DD} \u8BDD\u9898: <code>${threadId}</code>`,
+      `\u274C forwardMessage: <code>${fwdDesc || "unknown"}</code>`,
+      `\u274C copyMessage: <code>${copyDesc || "unknown"}</code>`
+    ].join("\n");
+  },
+  wordUsageAdd: "\u26A0\uFE0F \u7528\u6CD5: <code>/addword \u5C4F\u853D\u8BCD</code>",
+  wordUsageDel: "\u26A0\uFE0F \u7528\u6CD5: <code>/delword \u5C4F\u853D\u8BCD</code>",
+  wordExists(word) {
+    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u5DF2\u5B58\u5728\u3002`;
+  },
+  wordAdded(word, count) {
+    return `\u2705 \u5DF2\u6DFB\u52A0\u5C4F\u853D\u8BCD\u300C${word}\u300D
+\u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 <b>${count}</b> \u4E2A\u8BCD`;
+  },
+  wordHardcoded(word) {
+    return `\u26A0\uFE0F\u300C${word}\u300D\u662F\u786C\u7F16\u7801\u5C4F\u853D\u8BCD\uFF0C\u65E0\u6CD5\u901A\u8FC7\u547D\u4EE4\u5220\u9664\uFF0C\u8BF7\u76F4\u63A5\u4FEE\u6539\u4EE3\u7801\u4E2D\u7684 BLOCKED_WORDS\u3002`;
+  },
+  wordMissing(word) {
+    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u4E0D\u5B58\u5728\u4E8E\u52A8\u6001\u8BCD\u5E93\u4E2D\u3002`;
+  },
+  wordDeleted(word, count) {
+    return `\u2705 \u5DF2\u5220\u9664\u5C4F\u853D\u8BCD\u300C${word}\u300D
+\u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 <b>${count}</b> \u4E2A\u8BCD`;
+  }
 };
 
 // worker.js
@@ -4223,14 +4301,14 @@ async function spamCheck(msg, userId, env) {
     details
   };
 }
-async function notifyAdmin(env, alertType, message, threadId) {
+async function notifyAdmin(env, alertType, message, threadId, parseMode = "HTML") {
   Logger.warn("admin_alert", { alertType, messageLength: message.length });
   const body = threadId ? { message_thread_id: threadId } : {};
   try {
     await tgCall(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       text: message,
-      parse_mode: "Markdown",
+      parse_mode: parseMode,
       ...body
     });
   } catch (e) {
@@ -4264,25 +4342,20 @@ async function handleSpamMessage(env, userId, msg, spamResult, threadId, ctx) {
     const reasonText = spamResult.reasons.map((r) => {
       switch (r) {
         case "keyword":
-          return `\u{1F511} \u5173\u952E\u8BCD: \`${spamResult.details.keyword}\``;
+          return `\u{1F511} \u5173\u952E\u8BCD: <code>${escapeHtml(spamResult.details.keyword)}</code>`;
         case "new_user_link":
           return `\u{1F517} \u65B0\u7528\u6237\u94FE\u63A5 (\u5269\u4F59 ${spamResult.details.linkBlockRemainingHours}h)`;
         case "repeat_message":
           return `\u{1F504} \u91CD\u590D\u6D88\u606F (${spamResult.details.repeatCount}\u6B21)`;
         default:
-          return r;
+          return escapeHtml(String(r));
       }
     }).join("\n");
     const body = threadId ? { message_thread_id: threadId } : {};
     await tgCall(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
-      text: `\u26A0\uFE0F **\u68C0\u6D4B\u5230\u7591\u4F3C\u9A9A\u6270\u6D88\u606F**
-
-\u{1F464} \u7528\u6237: \`${userId}\`
-${reasonText}
-
-\u{1F4DD} \u6D88\u606F\u5DF2\u62E6\u622A\u3002\u4F7F\u7528 /ban \u5C01\u7981\u8BE5\u7528\u6237\u3002`,
-      parse_mode: "Markdown",
+      text: ADMIN_COPY.spamIntercepted(escapeHtml(String(userId)), reasonText),
+      parse_mode: "HTML",
       ...body
     });
   }
@@ -4333,7 +4406,7 @@ function showStatus(msg, cls) {
 function onTurnstileSuccess(token) {
   if (submitted) return;
   submitted = true;
-  showStatus('\u2705 \u9A8C\u8BC1\u901A\u8FC7\uFF01\u6B63\u5728\u901A\u77E5\u673A\u5668\u4EBA...', 'success');
+  showStatus('\u2705 \u9A8C\u8BC1\u901A\u8FC7\uFF0C\u6B63\u5728\u901A\u77E5\u673A\u5668\u4EBA\u2026', 'success');
   fetch('{{WORKER_URL}}/verify-callback', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -4342,12 +4415,12 @@ function onTurnstileSuccess(token) {
   .then(function(r) { return r.json(); })
   .then(function(data) {
     if (data.success) {
-      var msg = '\u2705 \u9A8C\u8BC1\u6210\u529F\uFF01\u673A\u5668\u4EBA\u5DF2\u6536\u5230\u60A8\u7684\u6D88\u606F\u3002';
+      var msg = '\u2705 \u9A8C\u8BC1\u6210\u529F\uFF01\u8BF7\u8FD4\u56DE Telegram \u7EE7\u7EED\u5BF9\u8BDD\u3002';
       if (data.pendingCount > 0) {
         msg += '\uFF08' + data.pendingCount + ' \u6761\u6D88\u606F\u5C06\u4E8E\u6570\u79D2\u5185\u9001\u8FBE\uFF09';
       }
       showStatus(msg, 'success');
-      document.querySelector('.desc').textContent = '\u8BF7\u8FD4\u56DE Telegram\uFF0C\u673A\u5668\u4EBA\u5DF2\u5411\u60A8\u53D1\u9001\u4E86\u9A8C\u8BC1\u901A\u8FC7\u901A\u77E5\u3002';
+      document.querySelector('.desc').textContent = '\u9A8C\u8BC1\u5B8C\u6210\uFF0C\u8BF7\u8FD4\u56DE Telegram \u67E5\u770B\u673A\u5668\u4EBA\u6D88\u606F\u3002';
       // \u663E\u793A\u8FD4\u56DE Telegram \u6309\u94AE
       var btn = document.getElementById('back-btn');
       if (btn) {
@@ -4356,7 +4429,7 @@ function onTurnstileSuccess(token) {
     } else {
       var errMap = {
         'turnstile_failed': '\u4EBA\u673A\u9A8C\u8BC1\u672A\u901A\u8FC7\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5',
-        'code_invalid_or_expired': '\u9A8C\u8BC1\u94FE\u63A5\u5DF2\u8FC7\u671F\uFF08\u6709\u6548\u671F10\u5206\u949F\uFF09\uFF0C\u8BF7\u8FD4\u56DE Telegram \u91CD\u65B0\u53D1\u9001\u6D88\u606F\u83B7\u53D6\u65B0\u7684\u9A8C\u8BC1\u94FE\u63A5',
+        'code_invalid_or_expired': '\u9A8C\u8BC1\u94FE\u63A5\u5DF2\u8FC7\u671F\uFF08\u7EA6 10 \u5206\u949F\uFF09\uFF0C\u8BF7\u8FD4\u56DE Telegram \u91CD\u65B0\u53D1\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5',
         'server_not_configured': '\u670D\u52A1\u5668\u672A\u5B8C\u6210\u914D\u7F6E\uFF0C\u8BF7\u8054\u7CFB\u7BA1\u7406\u5458'
       };
       var errMsg = errMap[data.error] || ('\u9A8C\u8BC1\u5931\u8D25: ' + (data.detail || data.error || '\u672A\u77E5\u9519\u8BEF'));
@@ -4538,7 +4611,8 @@ var legacyApp = {
                 if (forwardedCount > 0) {
                   await tgCall(normalizedEnv, "sendMessage", {
                     chat_id: Number(userId),
-                    text: `\u{1F4E9} \u521A\u624D\u7684 ${forwardedCount} \u6761\u6D88\u606F\u5DF2\u5E2E\u60A8\u9001\u8FBE\u3002`
+                    text: USER_COPY.pendingDelivered(forwardedCount),
+                    parse_mode: "HTML"
                   });
                 }
                 await env.TOPIC_MAP.delete(pendingKey);
@@ -4611,14 +4685,14 @@ var legacyApp = {
               "\u{1F44B} <b>\u79C1\u804A\u7F51\u5173</b>",
               "",
               "\u76F4\u63A5\u53D1\u9001\u6587\u5B57 / \u56FE\u7247 / \u6587\u4EF6\u5373\u53EF\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
-              "\u9996\u6B21\u4F7F\u7528\u53EF\u80FD\u9700\u8981\u5B8C\u6210\u4EBA\u673A\u9A8C\u8BC1\uFF08\u6309\u94AE\u6216\u7F51\u9875\uFF09\u3002",
+              "\u9996\u6B21\u4F7F\u7528\u53EF\u80FD\u9700\u8981\u4EBA\u673A\u9A8C\u8BC1\uFF08\u9898\u76EE\u6309\u94AE\u6216\u7F51\u9875\u9A8C\u8BC1\uFF09\u3002",
               "\u82E5\u88AB\u9759\u97F3\u6216\u5C01\u7981\uFF0C\u4F1A\u6536\u5230\u5355\u72EC\u901A\u77E5\u3002",
               "",
-              "\u5E38\u7528\uFF1A",
-              "\u2022 /start \u2014 \u5F00\u59CB\u6216\u91CD\u65B0\u89E6\u53D1\u9A8C\u8BC1",
-              "\u2022 /help \u2014 \u663E\u793A\u672C\u8BF4\u660E",
+              "<b>\u5E38\u7528</b>",
+              "\u2022 /start \u2014 \u5F00\u59CB\u6216\u91CD\u65B0\u9A8C\u8BC1",
+              "\u2022 /help \u2014 \u672C\u8BF4\u660E",
               "",
-              "<i>\u7BA1\u7406\u6307\u4EE4\u4EC5\u5728\u8D85\u7EA7\u7FA4\u8BDD\u9898\u5185\u7531\u7BA1\u7406\u5458\u4F7F\u7528\u3002</i>"
+              "<i>\u8BF7\u52FF\u5728\u6B64\u4F7F\u7528\u7BA1\u7406\u6307\u4EE4\uFF1B\u7BA1\u7406\u64CD\u4F5C\u4EC5\u5728\u8D85\u7EA7\u7FA4\u8BDD\u9898\u5185\u6709\u6548\u3002</i>"
             ].join("\n"),
             parse_mode: "HTML"
           });
@@ -4632,8 +4706,10 @@ var legacyApp = {
         }
         await handlePrivateMessage(msg, normalizedEnv, ctx);
       } catch (e) {
-        const errText = `\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002`;
-        await tgCall(normalizedEnv, "sendMessage", { chat_id: msg.chat.id, text: errText });
+        await tgCall(normalizedEnv, "sendMessage", {
+          chat_id: msg.chat.id,
+          text: USER_COPY.systemBusy
+        });
         Logger.error("private_message_failed", e, { userId: msg.chat.id });
       }
       return new Response("OK");
@@ -4665,7 +4741,7 @@ async function handlePrivateMessage(msg, env, ctx) {
   if (!rateLimit.allowed) {
     await tgCall(env, "sendMessage", {
       chat_id: userId,
-      text: "\u26A0\uFE0F \u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002"
+      text: USER_COPY.rateLimited
     });
     return;
   }
@@ -4702,7 +4778,7 @@ async function handlePrivateMessage(msg, env, ctx) {
       if (!noticed) {
         await tgCall(env, "sendMessage", {
           chat_id: userId,
-          text: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002"
+          text: USER_COPY.bannedHourly
         });
         await env.TOPIC_MAP.put(noticeKey, "1", { expirationTtl: 3600 });
       }
@@ -4717,7 +4793,7 @@ async function handlePrivateMessage(msg, env, ctx) {
       if (!await env.TOPIC_MAP.get(noticeKey)) {
         await tgCall(env, "sendMessage", {
           chat_id: userId,
-          text: "\u{1F507} \u60A8\u5F53\u524D\u5904\u4E8E\u9759\u97F3\u72B6\u6001\uFF0C\u6D88\u606F\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u53D6\u6D88\u9759\u97F3\u3002"
+          text: USER_COPY.mutedHourly
         });
         await env.TOPIC_MAP.put(noticeKey, "1", { expirationTtl: 3600 });
       }
@@ -4730,7 +4806,7 @@ async function handlePrivateMessage(msg, env, ctx) {
     Logger.info("message_blocked_by_word", { userId, word: blockedWords[matchedIndex] });
     await tgCall(env, "sendMessage", {
       chat_id: userId,
-      text: "\u{1F6AB} \u60A8\u7684\u6D88\u606F\u5305\u542B\u8FDD\u89C4\u5185\u5BB9\uFF0C\u5DF2\u88AB\u62E6\u622A\uFF0C\u8BF7\u4FEE\u6539\u540E\u91CD\u65B0\u53D1\u9001\u3002"
+      text: USER_COPY.blockedWord
     });
     return;
   }
@@ -4766,13 +4842,13 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
   }
   let rec = await safeGetJSON(env, key, null);
   if (rec && rec.closed) {
-    await tgCall(env, "sendMessage", { chat_id: userId, text: "\u{1F6AB} \u5F53\u524D\u5BF9\u8BDD\u5DF2\u88AB\u7BA1\u7406\u5458\u5173\u95ED\u3002" });
+    await tgCall(env, "sendMessage", { chat_id: userId, text: USER_COPY.conversationClosed });
     return;
   }
   const retryKey = `retry:${userId}`;
   let retryCount = parseInt(await env.TOPIC_MAP.get(retryKey) ?? "0", 10);
   if (retryCount > CONFIG.MAX_RETRY_ATTEMPTS) {
-    await tgCall(env, "sendMessage", { chat_id: userId, text: "\u274C \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002" });
+    await tgCall(env, "sendMessage", { chat_id: userId, text: USER_COPY.systemBusy });
     await env.TOPIC_MAP.delete(retryKey);
     return;
   }
@@ -4963,12 +5039,12 @@ async function handleForwardFailure(res, msg, userId, threadId, env) {
     await notifyAdmin(
       env,
       "forward_failed",
-      `\u26A0\uFE0F **\u6D88\u606F\u8F6C\u53D1\u5B8C\u5168\u5931\u8D25**
-
-\u{1F464} \u7528\u6237: \`${userId}\`
-\u{1F4DD} \u8BDD\u9898: \`${threadId}\`
-\u274C forwardMessage: \`${res.description}\`
-\u274C copyMessage: \`${copyRes.description}\``
+      ADMIN_COPY.forwardTotalFail(
+        escapeHtml(String(userId)),
+        escapeHtml(String(threadId)),
+        escapeHtml(res.description || ""),
+        escapeHtml(copyRes.description || "")
+      )
     );
   }
 }
@@ -5073,17 +5149,29 @@ async function handlePanelCommand(env, threadId, userId) {
   const muted = await env.TOPIC_MAP.get(`muted:${userId}`);
   const rec = await safeGetJSON(env, `user:${userId}`, null);
   const note = await env.TOPIC_MAP.get(`note:${userId}`);
+  let lastMsgLine = "\u6700\u8FD1\u6D88\u606F: \u65E0";
+  let d1Status = null;
+  if (env.TG_BOT_DB) {
+    try {
+      const u = await createD1Storage(env.TG_BOT_DB).getUser(userId);
+      if (u?.lastMessageAt) lastMsgLine = `\u6700\u8FD1\u6D88\u606F: ${formatTimeBoth(u.lastMessageAt)}`;
+      d1Status = u?.status || null;
+    } catch {
+    }
+  }
   const text = [
     "\u{1F39B} <b>\u7528\u6237\u9762\u677F</b>",
     "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
     `\u{1F464} ${name} \xB7 ${un}`,
     `UID <code>${userId}</code>`,
     `\u72B6\u6001  \u5C01\u7981:${ban ? "\u{1F6AB} \u662F" : "\u5426"} \xB7 \u9759\u97F3:${muted ? "\u{1F507} \u662F" : "\u5426"} \xB7 \u5173\u95ED:${rec?.closed ? "\u{1F512} \u662F" : "\u5426"}`,
+    d1Status ? `D1: <code>${escapeHtml(d1Status)}</code>` : "",
+    lastMsgLine,
     note ? `\u{1F4DD} ${escapeHtml(String(note).slice(0, 80))}${String(note).length > 80 ? "\u2026" : ""}` : "\u{1F4DD} \u65E0\u5907\u6CE8 \xB7 <code>/note \u5185\u5BB9</code> \u6DFB\u52A0",
     "",
     "\u{1F447} \u70B9\u6309\u94AE\u64CD\u4F5C",
     "<i>\u5C01\u7981 / \u5173\u95ED / \u91CD\u7F6E\u9700\u4E8C\u6B21\u786E\u8BA4</i>"
-  ].join("\n");
+  ].filter(Boolean).join("\n");
   await tgCall(env, "sendMessage", {
     chat_id: env.SUPERGROUP_ID,
     message_thread_id: threadId,
@@ -5108,7 +5196,7 @@ async function handleMuteCommand(env, threadId, userId) {
   });
   await tgCall(env, "sendMessage", {
     chat_id: userId,
-    text: "\u{1F507} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u9759\u97F3\uFF0C\u6D88\u606F\u6682\u65F6\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002"
+    text: USER_COPY.muteUserNotify
   });
 }
 async function handleUnmuteCommand(env, threadId, userId) {
@@ -5128,7 +5216,7 @@ async function handleUnmuteCommand(env, threadId, userId) {
   });
   await tgCall(env, "sendMessage", {
     chat_id: userId,
-    text: "\u{1F50A} \u60A8\u7684\u9759\u97F3\u5DF2\u53D6\u6D88\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u8054\u7CFB\u7BA1\u7406\u5458\u3002"
+    text: USER_COPY.unmuteUserNotify
   });
 }
 async function handleNoteCommand(env, threadId, userId, text) {
@@ -5167,7 +5255,12 @@ ${escapeHtml(note.slice(0, 500))}`,
 async function handleAddWordCommand(env, threadId, text, senderId) {
   const word = text.slice(9).trim();
   if (!word) {
-    await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: "\u26A0\uFE0F \u7528\u6CD5: `/addword \u5C4F\u853D\u8BCD`", parse_mode: "Markdown" });
+    await tgCall(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: ADMIN_COPY.wordUsageAdd,
+      parse_mode: "HTML"
+    });
     return;
   }
   let kvWords = [];
@@ -5179,24 +5272,43 @@ async function handleAddWordCommand(env, threadId, text, senderId) {
   if (!Array.isArray(kvWords)) kvWords = [];
   const allWords = [.../* @__PURE__ */ new Set([...BLOCKED_WORDS, ...kvWords])];
   if (allWords.map((w) => w.toLowerCase()).includes(word.toLowerCase())) {
-    await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u5DF2\u5B58\u5728\u3002`, parse_mode: "Markdown" });
+    await tgCall(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: ADMIN_COPY.wordExists(escapeHtml(word)),
+      parse_mode: "HTML"
+    });
     return;
   }
   kvWords.push(word);
   await env.TOPIC_MAP.put("blocked_words_kv", JSON.stringify(kvWords));
   blockedWordsCache.data = null;
   Logger.info("blocked_word_added", { word, by: senderId });
-  await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `\u2705 \u5DF2\u6DFB\u52A0\u5C4F\u853D\u8BCD\u300C${word}\u300D
-\u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 ${kvWords.length} \u4E2A\u8BCD`, parse_mode: "Markdown" });
+  await tgCall(env, "sendMessage", {
+    chat_id: env.SUPERGROUP_ID,
+    message_thread_id: threadId,
+    text: ADMIN_COPY.wordAdded(escapeHtml(word), kvWords.length),
+    parse_mode: "HTML"
+  });
 }
 async function handleDelWordCommand(env, threadId, text, senderId) {
   const word = text.slice(9).trim();
   if (!word) {
-    await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: "\u26A0\uFE0F \u7528\u6CD5: `/delword \u5C4F\u853D\u8BCD`", parse_mode: "Markdown" });
+    await tgCall(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: ADMIN_COPY.wordUsageDel,
+      parse_mode: "HTML"
+    });
     return;
   }
   if (BLOCKED_WORDS.map((w) => w.toLowerCase()).includes(word.toLowerCase())) {
-    await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `\u26A0\uFE0F\u300C${word}\u300D\u662F\u786C\u7F16\u7801\u5C4F\u853D\u8BCD\uFF0C\u65E0\u6CD5\u901A\u8FC7\u547D\u4EE4\u5220\u9664\uFF0C\u8BF7\u76F4\u63A5\u4FEE\u6539\u4EE3\u7801\u4E2D\u7684 BLOCKED_WORDS \u6570\u7EC4\u3002`, parse_mode: "Markdown" });
+    await tgCall(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: ADMIN_COPY.wordHardcoded(escapeHtml(word)),
+      parse_mode: "HTML"
+    });
     return;
   }
   let kvWords = [];
@@ -5209,14 +5321,23 @@ async function handleDelWordCommand(env, threadId, text, senderId) {
   const before = kvWords.length;
   kvWords = kvWords.filter((w) => w.toLowerCase() !== word.toLowerCase());
   if (kvWords.length === before) {
-    await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u4E0D\u5B58\u5728\u4E8E\u52A8\u6001\u8BCD\u5E93\u4E2D\u3002`, parse_mode: "Markdown" });
+    await tgCall(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: ADMIN_COPY.wordMissing(escapeHtml(word)),
+      parse_mode: "HTML"
+    });
     return;
   }
   await env.TOPIC_MAP.put("blocked_words_kv", JSON.stringify(kvWords));
   blockedWordsCache.data = null;
   Logger.info("blocked_word_removed", { word, by: senderId });
-  await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `\u2705 \u5DF2\u5220\u9664\u5C4F\u853D\u8BCD\u300C${word}\u300D
-\u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 ${kvWords.length} \u4E2A\u8BCD`, parse_mode: "Markdown" });
+  await tgCall(env, "sendMessage", {
+    chat_id: env.SUPERGROUP_ID,
+    message_thread_id: threadId,
+    text: ADMIN_COPY.wordDeleted(escapeHtml(word), kvWords.length),
+    parse_mode: "HTML"
+  });
 }
 async function handleListWordsCommand(env, threadId) {
   const allWords = await getBlockedWords(env, true);
@@ -5231,29 +5352,28 @@ async function handleListWordsCommand(env, threadId) {
   const dynamic = kvWords.filter((w) => !BLOCKED_WORDS.map((h) => h.toLowerCase()).includes(w.toLowerCase()));
   const spamKeywords = parseSpamKeywords((env.SPAM_KEYWORDS || "").toString());
   const blockedTotal = allWords.length;
-  let reply = `\u{1F4DD} **\u5185\u5BB9\u8FC7\u6EE4\u8BCD\u5E93**
-
-`;
-  reply += `**\u4E00\u3001\u5C4F\u853D\u8BCD**\uFF08\u547D\u4E2D\u540E\u62E6\u622A\u5E76\u63D0\u793A\u7528\u6237\uFF0C\u5171 ${blockedTotal} \u4E2A\uFF09
-
-`;
-  reply += `\u{1F527} **\u786C\u7F16\u7801\u8BCD** (${hardcoded.length} \u4E2A\uFF0C\u4FEE\u6539\u9700\u6539\u4EE3\u7801):
-`;
-  reply += hardcoded.length > 0 ? hardcoded.map((w) => `  \u2022 ${w}`).join("\n") : "  (\u65E0)";
-  reply += `
-
-\u{1F4BE} **\u52A8\u6001\u8BCD** (${dynamic.length} \u4E2A\uFF0C\u53EF\u901A\u8FC7 /addword /delword \u7BA1\u7406):
-`;
-  reply += dynamic.length > 0 ? dynamic.map((w) => `  \u2022 ${w}`).join("\n") : "  (\u65E0)";
-  reply += `
-
-**\u4E8C\u3001\u5783\u573E\u5173\u952E\u8BCD SPAM_KEYWORDS**\uFF08\u73AF\u5883\u53D8\u91CF\uFF0C\u8D70 spam \u68C0\u6D4B\uFF1B\u5171 ${spamKeywords.length} \u4E2A\uFF09
-`;
-  reply += spamKeywords.length > 0 ? spamKeywords.map((w) => `  \u2022 ${w}`).join("\n") : "  (\u672A\u914D\u7F6E\u6216\u4E3A\u7A7A\uFF1B\u5728 Cloudflare Variables \u4E2D\u8BBE\u7F6E SPAM_KEYWORDS\uFF0C\u9017\u53F7\u5206\u9694)";
-  reply += `
-
-\u8BF4\u660E\uFF1A/addword \u53EA\u5199\u5165\u300C\u52A8\u6001\u5C4F\u853D\u8BCD\u300D\uFF0C\u4E0D\u4F1A\u6539 SPAM_KEYWORDS \u73AF\u5883\u53D8\u91CF\u3002`;
-  await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: reply, parse_mode: "Markdown" });
+  const lines = [
+    "\u{1F4DD} <b>\u5185\u5BB9\u8FC7\u6EE4\u8BCD\u5E93</b>",
+    "",
+    `<b>\u4E00\u3001\u5C4F\u853D\u8BCD</b>\uFF08\u547D\u4E2D\u540E\u62E6\u622A\u5E76\u63D0\u793A\u7528\u6237\uFF0C\u5171 ${blockedTotal} \u4E2A\uFF09`,
+    "",
+    `\u{1F527} <b>\u786C\u7F16\u7801\u8BCD</b> (${hardcoded.length} \u4E2A\uFF0C\u4FEE\u6539\u9700\u6539\u4EE3\u7801):`,
+    hardcoded.length > 0 ? hardcoded.map((w) => `  \u2022 ${escapeHtml(w)}`).join("\n") : "  (\u65E0)",
+    "",
+    `\u{1F4BE} <b>\u52A8\u6001\u8BCD</b> (${dynamic.length} \u4E2A\uFF0C\u53EF\u7528 /addword /delword):`,
+    dynamic.length > 0 ? dynamic.map((w) => `  \u2022 ${escapeHtml(w)}`).join("\n") : "  (\u65E0)",
+    "",
+    `<b>\u4E8C\u3001\u5783\u573E\u5173\u952E\u8BCD SPAM_KEYWORDS</b>\uFF08\u73AF\u5883\u53D8\u91CF\uFF0C\u5171 ${spamKeywords.length} \u4E2A\uFF09`,
+    spamKeywords.length > 0 ? spamKeywords.map((w) => `  \u2022 ${escapeHtml(w)}`).join("\n") : "  (\u672A\u914D\u7F6E\uFF1B\u5728 Cloudflare Variables \u4E2D\u8BBE\u7F6E SPAM_KEYWORDS)",
+    "",
+    "<i>\u8BF4\u660E\uFF1A/addword \u53EA\u5199\u5165\u52A8\u6001\u5C4F\u853D\u8BCD\uFF0C\u4E0D\u4F1A\u6539 SPAM_KEYWORDS\u3002</i>"
+  ];
+  await tgCall(env, "sendMessage", {
+    chat_id: env.SUPERGROUP_ID,
+    message_thread_id: threadId,
+    text: lines.join("\n"),
+    parse_mode: "HTML"
+  });
 }
 async function handleCloseCommand(env, threadId, userId) {
   const key = `user:${userId}`;
@@ -5348,7 +5468,7 @@ async function handleBanCommand(env, threadId, userId) {
   });
   const notify = await tgCall(env, "sendMessage", {
     chat_id: userId,
-    text: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002"
+    text: USER_COPY.banUserNotify
   });
   if (!notify?.ok) {
     Logger.warn("ban_user_notify_failed", {
@@ -5383,7 +5503,7 @@ async function handleUnbanCommand(env, threadId, userId) {
   });
   const notify = await tgCall(env, "sendMessage", {
     chat_id: userId,
-    text: "\u2705 \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u89E3\u5C01\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u4E86\u3002"
+    text: USER_COPY.unbanUserNotify
   });
   if (!notify?.ok) {
     Logger.warn("unban_user_notify_failed", {
@@ -6072,32 +6192,32 @@ async function handleCleanupCommand(threadId, env) {
         await new Promise((r) => setTimeout(r, 200));
       }
     } while (cursor);
-    let reportText = `\u2705 **\u6E05\u7406\u5B8C\u6210**
+    let reportText = `\u2705 <b>\u6E05\u7406\u5B8C\u6210</b>
 
 `;
-    reportText += `\u{1F4CA} **\u7EDF\u8BA1\u4FE1\u606F**
+    reportText += `\u{1F4CA} <b>\u7EDF\u8BA1</b>
 `;
-    reportText += `- \u626B\u63CF\u7528\u6237\u6570: ${scannedCount}
+    reportText += `\u2022 \u626B\u63CF\u7528\u6237: <b>${scannedCount}</b>
 `;
-    reportText += `- \u5DF2\u6E05\u7406\u7528\u6237\u6570: ${cleanedCount}
+    reportText += `\u2022 \u5DF2\u6E05\u7406: <b>${cleanedCount}</b>
 `;
-    reportText += `- \u9519\u8BEF\u6570: ${errorCount}
+    reportText += `\u2022 \u9519\u8BEF: ${errorCount}
 
 `;
     if (cleanedCount > 0) {
-      reportText += `\u{1F5D1}\uFE0F **\u5DF2\u6E05\u7406\u7684\u7528\u6237** (\u8BDD\u9898\u5DF2\u5220\u9664):
+      reportText += `\u{1F5D1} <b>\u5DF2\u6E05\u7406\u7528\u6237</b>\uFF08\u8BDD\u9898\u5DF2\u5220\u9664\uFF09:
 `;
       for (const user of cleanedUsers.slice(0, CONFIG.MAX_CLEANUP_DISPLAY)) {
-        reportText += `- UID: \`${user.userId}\` | \u8BDD\u9898: ${user.title}
+        reportText += `\u2022 UID <code>${escapeHtml(String(user.userId))}</code> \xB7 ${escapeHtml(user.title || "")}
 `;
       }
       if (cleanedUsers.length > CONFIG.MAX_CLEANUP_DISPLAY) {
         reportText += `
-...(\u8FD8\u6709 ${cleanedUsers.length - CONFIG.MAX_CLEANUP_DISPLAY} \u4E2A\u7528\u6237)
+\u2026\u8FD8\u6709 ${cleanedUsers.length - CONFIG.MAX_CLEANUP_DISPLAY} \u4E2A
 `;
       }
       reportText += `
-\u{1F4A1} \u8FD9\u4E9B\u7528\u6237\u4E0B\u6B21\u53D1\u6D88\u606F\u65F6\u5C06\u91CD\u65B0\u8FDB\u884C\u4EBA\u673A\u9A8C\u8BC1\u5E76\u521B\u5EFA\u65B0\u8BDD\u9898\u3002`;
+\u{1F4A1} \u8FD9\u4E9B\u7528\u6237\u4E0B\u6B21\u53D1\u6D88\u606F\u5C06\u91CD\u65B0\u9A8C\u8BC1\u5E76\u521B\u5EFA\u65B0\u8BDD\u9898\u3002`;
     } else {
       reportText += `\u2728 \u6CA1\u6709\u53D1\u73B0\u9700\u8981\u6E05\u7406\u7684\u7528\u6237\u8BB0\u5F55\u3002`;
     }
@@ -6109,7 +6229,7 @@ async function handleCleanupCommand(threadId, env) {
     await tgCall(env, "sendMessage", withMessageThreadId({
       chat_id: env.SUPERGROUP_ID,
       text: reportText,
-      parse_mode: "Markdown"
+      parse_mode: "HTML"
     }, threadId));
   } catch (e) {
     Logger.error("cleanup_failed", e, { threadId });
