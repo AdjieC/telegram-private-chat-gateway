@@ -1,0 +1,146 @@
+# Telegram Private Chat Gateway
+
+> A secure Telegram private-chat gateway built on Cloudflare Workers.
+
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Silentely/telegram-private-chat-gateway)
+![GitHub stars](https://img.shields.io/github/stars/Silentely/telegram-private-chat-gateway?style=social)
+![License](https://img.shields.io/badge/License-MIT-blue.svg)
+
+[English](README_EN.md) | [简体中文](README.md)
+
+Telegram Private Chat Gateway securely routes bot private chats into Telegram Forum Topics. Each user receives an isolated conversation, while administrators can reply, manage user state, and audit sensitive operations from one group without maintaining a server.
+
+## Why Use It
+
+- **Centralized private chats**: Each user is mapped to a dedicated Forum Topic.
+- **Reduced abuse**: Human verification, keyword filtering, link controls, repeated-message detection, and dynamic rules.
+- **Controlled administration**: Explicit Owner, Operator, and Rules Manager permissions.
+- **Traceable state**: D1 stores users, Topics, message links, rules, administrators, and audits.
+- **Serverless operation**: Cloudflare Workers runs the gateway, KV stores temporary state, and Cron removes expired records.
+
+## Core Capabilities
+
+| Capability | Description |
+|------------|-------------|
+| Two-way conversations | Private messages enter a dedicated Forum Topic; administrator replies return to the correct user |
+| Secure Webhook | Validates the Telegram Secret Token, JSON Content-Type, and a 1 MiB request-body limit |
+| Idempotent processing | Each Telegram Update is processed once, with explicit retryable failure state |
+| Human verification | Supports Cloudflare Turnstile and a local question set when Turnstile is not configured |
+| Content policy | Blocked words, link controls, repeated-message detection, and D1-backed dynamic rules |
+| User management | Trust, ban, close, mute, and profile-card status actions |
+| Role permissions | Recovery Owners, Operators, and Rules Managers |
+| Data and audits | Durable D1 state with administrator audit records |
+| Observability | Structured JSON logs redact message content, credentials, and verification challenge identifiers |
+| Scheduled maintenance | Cron removes expired idempotency records, message links, and administrator audits |
+
+## How It Works
+
+```mermaid
+flowchart LR
+    U[Telegram private-chat user] --> W[Cloudflare Worker]
+    W --> A{Webhook and idempotency checks}
+    A --> V{Verification and content policy}
+    V --> T[Dedicated Forum Topic]
+    T --> M[Administrator reply or action]
+    M --> W
+    W --> U
+    W --> D[(D1 durable state)]
+    W --> K[(KV temporary state)]
+```
+
+1. Telegram sends an Update to the Worker through a Secret Token-protected Webhook.
+2. The Worker validates the request, claims the Update, and evaluates verification and content policy.
+3. An accepted message is copied into the user's Forum Topic; a concurrency lock protects Topic creation.
+4. Administrators reply in the Topic or use authorized profile-card actions.
+5. D1 stores durable state and audits, while KV stores verification, rate limits, and temporary caches.
+
+## Five-Minute Deployment
+
+### 1. Get the project and install dependencies
+
+```bash
+git clone https://github.com/Silentely/telegram-private-chat-gateway.git
+cd telegram-private-chat-gateway
+npm install
+```
+
+### 2. Create Cloudflare resources
+
+- Create a KV Namespace and bind it as `TOPIC_MAP`.
+- Create a D1 Database and bind it as `TG_BOT_DB`.
+- Add your resource IDs to `wrangler.toml`.
+
+### 3. Configure Secrets and variables
+
+```bash
+npx wrangler secret put BOT_TOKEN
+npx wrangler secret put WEBHOOK_SECRET
+```
+
+Also configure:
+
+- `SUPERGROUP_ID`: A Telegram supergroup with Topics enabled; the ID must start with `-100`.
+- `OWNER_IDS`: Comma-separated recovery Owner IDs; strongly recommended.
+
+### 4. Verify and deploy
+
+```bash
+npm test
+npx wrangler deploy --dry-run
+npm run deploy
+```
+
+### 5. Register the Telegram Webhook
+
+```text
+https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<WORKER_URL>&secret_token=<WEBHOOK_SECRET>&allowed_updates=%5B%22message%22,%22edited_message%22,%22callback_query%22%5D
+```
+
+See the [deployment guide](docs/deployment.md) for resource creation, Cron configuration, and post-deployment checks.
+
+## Architecture Overview
+
+The project uses ES Modules and separates HTTP security, conversations, policy, Telegram API access, storage, and maintenance responsibilities:
+
+- `worker.js`: Telegram orchestration and the Worker export entry.
+- `src/app.js`: HTTP validation, idempotent routing, and the Scheduled entry.
+- `src/conversation-service.js`: Topic lifecycle, two-way messages, and profile synchronization.
+- `src/admin-service.js`: Role authorization, profile-card actions, rule management, and audits.
+- `src/message-policy.js`: Content classification, rule validation, and policy evaluation.
+- `src/storage/`: D1, KV, temporary state, and schema migrations.
+- `src/telegram-client.js`: Telegram API timeouts, retries, and error classification.
+
+See [system architecture](docs/architecture.md) for module boundaries and data flows.
+
+## Documentation
+
+- [Deployment](docs/deployment.md)
+- [Configuration](docs/configuration.md)
+- [Architecture](docs/architecture.md)
+- [Operations](docs/operations.md)
+- [Development](docs/development.md)
+- [Security](docs/security.md)
+- [Changelog](CHANGELOG.md)
+
+## Project Status
+
+- Current version: `1.0.0`
+- Runtime: Cloudflare Workers ES Modules
+- Durable storage: Cloudflare D1
+- Temporary state: Cloudflare KV
+- Test framework: Vitest
+- Primary language: JavaScript
+
+The project includes unit tests, integration tests, coverage checks, documentation synchronization, and a Wrangler dry-run. Telegram Bot permissions, Cloudflare Bindings, and Cron should still be validated on a staging Worker.
+
+## Security
+
+- Store `BOT_TOKEN`, `WEBHOOK_SECRET`, and the Turnstile Secret with `wrangler secret put`.
+- Use a high-entropy `WEBHOOK_SECRET` of at least 32 bytes.
+- Never commit real credentials to the repository, logs, issues, or chat messages.
+- Do not expose the Vitest UI or a local Wrangler development server directly to the internet.
+- Review the [security design](docs/security.md) and [operations checklist](docs/operations.md) before release.
+
+## License
+
+This project is released under the [MIT License](LICENSE).

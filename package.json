@@ -1,0 +1,22 @@
+{
+  "name": "telegram-private-chat-gateway",
+  "version": "1.0.0",
+  "description": "部署在 Cloudflare Workers 上的 Telegram 私聊安全接入与双向会话网关",
+  "private": true,
+  "type": "module",
+  "main": "worker.js",
+  "scripts": {
+    "test": "node --require ./scripts/localhost-dns.cjs ./node_modules/vitest/vitest.mjs run",
+    "test:unit": "node --require ./scripts/localhost-dns.cjs ./node_modules/vitest/vitest.mjs run tests/unit/",
+    "test:integration": "node --require ./scripts/localhost-dns.cjs ./node_modules/vitest/vitest.mjs run tests/integration/",
+    "test:watch": "node --require ./scripts/localhost-dns.cjs ./node_modules/vitest/vitest.mjs",
+    "test:coverage": "node --require ./scripts/localhost-dns.cjs ./node_modules/vitest/vitest.mjs run --coverage",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "sync-docs": "node scripts/sync-claude-md.js"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^2.1.9",
+    "vitest": "^2.1.8"
+  }
+}
