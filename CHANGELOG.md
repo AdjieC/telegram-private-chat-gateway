@@ -7,8 +7,10 @@
 ### 管理体验
 
 - 新增 `/panel` 用户快捷按钮面板；`/info` 附带操作按钮与备注/静音/最近消息。
-- `/sysinfo` 分页：概览 / 存储 / 错误 / 今日统计，带刷新按钮。
-- 新增 `/menu` 管理首页按钮；`/stats` `/whoami` `/find` `/note` `/mute` `/unmute`；Owner `/synccommands`。
+- `/sysinfo` 分页：概览 / 存储 / 错误 / 今日统计 / 活跃，带刷新按钮。
+- 新增 `/menu` 管理首页按钮；`/stats` `/rank` `/notes` `/whoami` `/find` `/note` `/mute` `/unmute`；Owner `/synccommands`。
+- 今日活跃：入站消息排行（奖牌）、UTC 小时热力条、高峰时段；无 message_links 时用 KV 小时桶与 last_message 兜底。
+- `/notes 关键词` 扫描管理员备注；`/find` 与排行结果可一键打开用户面板。
 - 封禁与清理支持二次确认；时间显示相对时间；非管理员误发指令有提示。
 - 私聊 `/help` 对普通用户可见；封禁/静音会通知用户；话题标题缺资料时自动补全与修复。
 

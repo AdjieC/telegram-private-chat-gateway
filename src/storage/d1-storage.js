@@ -479,6 +479,55 @@ export function createD1Storage(db) {
       `).bind(like, like, like, lim).all();
       return (result.results || []).map(mapUser);
     },
+
+    /**
+     * 指定时间之后有 last_message_at 的用户（今日活跃兜底）
+     */
+    async getUsersActiveSince(sinceMs, limit = 10) {
+      const since = Number(sinceMs) || 0;
+      const lim = Math.min(Math.max(Number(limit) || 10, 1), 30);
+      const result = await db.prepare(`
+        SELECT user_id, username, first_name, last_name, last_message_at, topic_id, status, trust_level
+        FROM users
+        WHERE COALESCE(last_message_at, 0) >= ?
+        ORDER BY COALESCE(last_message_at, 0) DESC
+        LIMIT ?
+      `).bind(since, lim).all();
+      return (result.results || []).map(mapUser);
+    },
+
+    /**
+     * 拉取入站（user_to_admin）消息行，供 JS 侧汇总热力与排行
+     */
+    async getInboundMessageRows(sinceMs, maxRows = 2000) {
+      const since = Number(sinceMs) || 0;
+      const lim = Math.min(Math.max(Number(maxRows) || 2000, 1), 5000);
+      const result = await db.prepare(`
+        SELECT user_id, created_at
+        FROM message_links
+        WHERE created_at >= ? AND direction = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+      `).bind(since, 'user_to_admin', lim).all();
+      return (result.results || []).map(row => ({
+        userId: String(row.user_id),
+        createdAt: Number(row.created_at || 0),
+      }));
+    },
+
+    /**
+     * 批量取用户资料（排行展示姓名）
+     */
+    async getUsersByIds(userIds) {
+      const ids = [...new Set((userIds || []).map(String).filter(Boolean))].slice(0, 30);
+      if (!ids.length) return new Map();
+      const map = new Map();
+      await Promise.all(ids.map(async (id) => {
+        const u = await this.getUser(id);
+        if (u) map.set(id, u);
+      }));
+      return map;
+    },
   };
 
   return storage;

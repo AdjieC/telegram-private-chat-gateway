@@ -52,6 +52,60 @@ describe('D1 system stats', () => {
       expect.objectContaining({ userId: '99', username: 'findme' }),
     ]);
   });
+
+  it('活跃查询：since 用户与入站 message_links 行', async () => {
+    const db = createMockD1();
+    await ensureMigrations(db, 1000);
+    const storage = createD1Storage(db);
+    const day = Date.UTC(2026, 6, 11, 0, 0, 0);
+    await storage.upsertUser({
+      userId: '10', username: 'hot', firstName: 'Hot', topicId: '1', lastMessageAt: day + 1000,
+    });
+    await storage.upsertUser({
+      userId: '11', username: 'old', firstName: 'Old', lastMessageAt: day - 86400_000,
+    });
+    await storage.saveMessageLink({
+      direction: 'user_to_admin',
+      sourceChatId: '10',
+      sourceMessageId: '1',
+      targetChatId: '-100',
+      targetMessageId: '100',
+      topicId: '1',
+      userId: '10',
+      createdAt: day + 3600_000,
+    });
+    await storage.saveMessageLink({
+      direction: 'user_to_admin',
+      sourceChatId: '10',
+      sourceMessageId: '2',
+      targetChatId: '-100',
+      targetMessageId: '101',
+      topicId: '1',
+      userId: '10',
+      createdAt: day + 2 * 3600_000,
+    });
+    await storage.saveMessageLink({
+      direction: 'admin_to_user',
+      sourceChatId: '-100',
+      sourceMessageId: '9',
+      targetChatId: '10',
+      targetMessageId: '3',
+      topicId: '1',
+      userId: '10',
+      createdAt: day + 3 * 3600_000,
+    });
+
+    const active = await storage.getUsersActiveSince(day, 10);
+    expect(active.map(u => u.userId)).toEqual(['10']);
+
+    const rows = await storage.getInboundMessageRows(day, 100);
+    expect(rows).toHaveLength(2);
+    expect(rows.every(r => r.userId === '10')).toBe(true);
+
+    const map = await storage.getUsersByIds(['10', 'missing']);
+    expect(map.get('10')?.username).toBe('hot');
+    expect(map.has('missing')).toBe(false);
+  });
 });
 
 describe('D1 migrations', () => {

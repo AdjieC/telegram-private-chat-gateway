@@ -13,6 +13,13 @@ import { ensureMigrations } from './src/storage/migrations.js';
 import { createEphemeralStore } from './src/storage/kv-ephemeral-store.js';
 import { createKVStorage } from './src/storage/kv-storage.js';
 import { createUpdateHandler } from './src/update-router.js';
+import {
+  utcDayStartMs,
+  summarizeInboundActivity,
+  formatHeatBars,
+  formatPeakHours,
+  rankMedal,
+} from './src/activity-summary.js';
 
 // Telegram Private Chat Gateway — Cloudflare Workers 私聊安全接入与双向会话网关
 
@@ -1907,19 +1914,36 @@ function buildUserActionKeyboard(userId) {
 
 function buildSysinfoKeyboard(page = 'overview') {
   const mark = (p, label) => (p === page ? `·${label}·` : label);
+  const refreshPage = ['overview', 'storage', 'errors', 'stats', 'activity'].includes(page)
+    ? page
+    : 'overview';
   return {
     inline_keyboard: [
       [
         { text: mark('overview', '概览'), callback_data: 'adm:sys:overview' },
         { text: mark('storage', '存储'), callback_data: 'adm:sys:storage' },
         { text: mark('errors', '错误'), callback_data: 'adm:sys:errors' },
-        { text: mark('stats', '今日'), callback_data: 'adm:sys:stats' },
       ],
       [
-        { text: '🔄 刷新', callback_data: `adm:sys:${page === 'stats' ? 'stats' : page}` },
+        { text: mark('stats', '今日'), callback_data: 'adm:sys:stats' },
+        { text: mark('activity', '活跃'), callback_data: 'adm:sys:activity' },
+        { text: '🔄 刷新', callback_data: `adm:sys:${refreshPage}` },
+      ],
+      [
         { text: '🏠 菜单', callback_data: 'adm:nav:menu' },
       ],
     ],
+  };
+}
+
+function emptyDailyStats(day) {
+  return {
+    day,
+    messages_in: 0,
+    bans: 0,
+    verifies: 0,
+    spam: 0,
+    hours: Array.from({ length: 24 }, () => 0),
   };
 }
 
@@ -1935,6 +1959,14 @@ async function bumpDailyStat(env, field, n = 1) {
     } catch { obj = {}; }
     if (!obj || typeof obj !== 'object') obj = {};
     obj[field] = Number(obj[field] || 0) + Number(n || 0);
+    // 入站消息同步累计小时热力（UTC），D1 不可用时仍可看趋势
+    if (field === 'messages_in') {
+      if (!Array.isArray(obj.hours) || obj.hours.length !== 24) {
+        obj.hours = Array.from({ length: 24 }, () => 0);
+      }
+      const h = new Date().getUTCHours();
+      obj.hours[h] = Number(obj.hours[h] || 0) + Number(n || 0);
+    }
     obj.updated_at = Date.now();
     await env.TOPIC_MAP.put(key, JSON.stringify(obj), { expirationTtl: 21 * 86400 });
   } catch { /* 统计失败不影响主流程 */ }
@@ -1943,19 +1975,156 @@ async function bumpDailyStat(env, field, n = 1) {
 async function getDailyStats(env, day = new Date().toISOString().slice(0, 10)) {
   try {
     const raw = await env.TOPIC_MAP.get(`stats:${day}`);
-    if (!raw) return { day, messages_in: 0, bans: 0, verifies: 0, spam: 0 };
+    if (!raw) return emptyDailyStats(day);
     const obj = JSON.parse(raw);
+    const hours = Array.isArray(obj.hours) && obj.hours.length === 24
+      ? obj.hours.map(n => Number(n || 0))
+      : Array.from({ length: 24 }, () => 0);
     return {
       day,
       messages_in: Number(obj.messages_in || 0),
       bans: Number(obj.bans || 0),
       verifies: Number(obj.verifies || 0),
       spam: Number(obj.spam || 0),
+      hours,
       updated_at: obj.updated_at,
     };
   } catch {
-    return { day, messages_in: 0, bans: 0, verifies: 0, spam: 0 };
+    return emptyDailyStats(day);
   }
+}
+
+/**
+ * 今日活跃：优先 message_links 入站汇总，不足时用 last_message_at / KV 小时桶兜底
+ */
+async function loadTodayActivity(env) {
+  const dayStart = utcDayStartMs();
+  const day = new Date().toISOString().slice(0, 10);
+  const today = await getDailyStats(env, day);
+  let summary = summarizeInboundActivity([], { topN: 10 });
+  let source = 'none';
+  const storage = env.TG_BOT_DB ? createD1Storage(env.TG_BOT_DB) : null;
+
+  if (storage) {
+    try {
+      await ensureMigrations(env.TG_BOT_DB);
+      const rows = await storage.getInboundMessageRows(dayStart, 2000);
+      if (rows.length) {
+        summary = summarizeInboundActivity(rows, { topN: 10 });
+        source = 'message_links';
+      }
+    } catch (e) {
+      recordSystemError('activity_links_failed', e, {}, env);
+    }
+  }
+
+  // 热力：D1 无数据时用 KV 小时桶
+  if (summary.total === 0 && today.hours?.some(n => n > 0)) {
+    summary = {
+      ...summary,
+      total: today.messages_in || today.hours.reduce((a, b) => a + b, 0),
+      hours: today.hours,
+      peakHours: today.hours
+        .map((count, hour) => ({ hour, count }))
+        .filter(item => item.count > 0)
+        .sort((a, b) => b.count - a.count || a.hour - b.hour)
+        .slice(0, 3),
+    };
+    source = source === 'none' ? 'kv_hours' : source;
+  }
+
+  // 排行兜底：今日有 last_message_at 的用户
+  let rankingUsers = [];
+  if (storage) {
+    try {
+      if (summary.ranking.length) {
+        const map = await storage.getUsersByIds(summary.ranking.map(r => r.userId));
+        rankingUsers = summary.ranking.map((r) => {
+          const u = map.get(r.userId);
+          return {
+            userId: r.userId,
+            count: r.count,
+            username: u?.username || null,
+            firstName: u?.firstName || null,
+            lastName: u?.lastName || null,
+            topicId: u?.topicId || null,
+            lastMessageAt: u?.lastMessageAt || null,
+            status: u?.status || null,
+          };
+        });
+      } else {
+        const active = await storage.getUsersActiveSince(dayStart, 10);
+        rankingUsers = active.map(u => ({
+          userId: u.userId,
+          count: null,
+          username: u.username,
+          firstName: u.firstName,
+          lastName: u.lastName,
+          topicId: u.topicId,
+          lastMessageAt: u.lastMessageAt,
+          status: u.status,
+        }));
+        if (rankingUsers.length && source === 'none') source = 'last_message';
+        else if (rankingUsers.length && source === 'kv_hours') source = 'kv_hours+last_message';
+      }
+    } catch (e) {
+      recordSystemError('activity_rank_failed', e, {}, env);
+    }
+  }
+
+  return {
+    day,
+    dayStart,
+    today,
+    summary,
+    rankingUsers,
+    source,
+  };
+}
+
+function displayUserLabel(u) {
+  const name = [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
+  if (name) return name;
+  if (u.username) return `@${u.username}`;
+  return u.userId || '未知';
+}
+
+function buildUserJumpKeyboard(users, { includeMenu = true } = {}) {
+  const rows = (users || []).slice(0, 8).map((u) => {
+    const label = displayUserLabel(u).slice(0, 24);
+    return [{
+      text: `👤 ${label}`,
+      callback_data: `adm:u:panel:${u.userId}`,
+    }];
+  });
+  if (includeMenu) {
+    rows.push([{ text: '🏠 菜单', callback_data: 'adm:nav:menu' }]);
+  }
+  return { inline_keyboard: rows };
+}
+
+function formatRankingBlock(rankingUsers, { withCount = true } = {}) {
+  if (!rankingUsers?.length) return ['暂无今日活跃用户'];
+  const lines = [];
+  rankingUsers.slice(0, 10).forEach((u, i) => {
+    const name = escapeHtml(displayUserLabel(u));
+    const un = u.username ? ` @${escapeHtml(u.username)}` : '';
+    const cnt = withCount && u.count != null ? ` · <b>${u.count}</b> 条` : '';
+    const when = u.lastMessageAt && u.count == null
+      ? ` · ${formatRelativeTime(u.lastMessageAt)}`
+      : '';
+    lines.push(`${rankMedal(i)} ${name}${un}${cnt}${when}`);
+    lines.push(`   <code>${escapeHtml(u.userId)}</code>${u.topicId ? ` · T${escapeHtml(u.topicId)}` : ''}`);
+  });
+  return lines;
+}
+
+function formatHeatBlock(hours, peakHours) {
+  return [
+    '🌡 <b>小时热力</b> <i>UTC 0–23</i>',
+    `<code>${formatHeatBars(hours)}</code>`,
+    `高峰 ${escapeHtml(formatPeakHours(peakHours))}`,
+  ];
 }
 
 async function resolveThreadIdForUser(env, userId) {
@@ -1980,10 +2149,11 @@ async function handleHelpCommand(env, threadId, senderId = null) {
 <b>推荐用法</b>
 • <code>/menu</code> — 按钮首页（最省事）
 • 用户话题内 <code>/panel</code> 或 <code>/info</code> — 一键操作
-• <code>/sysinfo</code> — 系统分页看板
+• <code>/sysinfo</code> / <code>/rank</code> — 系统与今日活跃看板
 
 <b>全局命令</b>
-/menu /sysinfo /stats /whoami /find 词
+/menu /sysinfo /stats /rank /whoami
+/find 词 · /notes 关键词
 /cleanup /listwords /addword /delword
 /synccommands <i>(Owner)</i>
 
@@ -2005,6 +2175,8 @@ async function handleMenuCommand(env, threadId, senderId) {
     '────────────',
     '点下方按钮快速打开功能，无需记忆命令。',
     '',
+    '🔥 <b>活跃</b> 今日排行与小时热力',
+    '🔎 <b>备注</b> 按关键词搜管理员备注',
     '💡 用户会话请进入对应 Forum Topic 使用 <b>面板/资料</b>。',
   ].join('\n');
   await tgCall(env, 'sendMessage', {
@@ -2056,11 +2228,15 @@ function buildAdminHomeKeyboard(isOwner = false) {
     [
       { text: '🖥 系统', callback_data: 'adm:nav:sysinfo' },
       { text: '📊 今日', callback_data: 'adm:nav:stats' },
-      { text: '🪪 我', callback_data: 'adm:nav:whoami' },
+      { text: '🔥 活跃', callback_data: 'adm:nav:rank' },
     ],
     [
+      { text: '🔎 备注', callback_data: 'adm:nav:notes' },
       { text: '📝 屏蔽词', callback_data: 'adm:nav:listwords' },
       { text: '🧹 清理', callback_data: 'adm:nav:cleanup_ask' },
+    ],
+    [
+      { text: '🪪 我', callback_data: 'adm:nav:whoami' },
       { text: '❓ 帮助', callback_data: 'adm:nav:help' },
     ],
   ];
@@ -2156,7 +2332,7 @@ async function getCachedKvPrefixCounts(env) {
 
 /**
  * 构建 sysinfo 某一页正文
- * @param {'overview'|'storage'|'errors'|'stats'} page
+ * @param {'overview'|'storage'|'errors'|'stats'|'activity'} page
  */
 async function buildSysinfoPageText(env, page = 'overview') {
   const started = Date.now();
@@ -2218,13 +2394,21 @@ async function buildSysinfoPageText(env, page = 'overview') {
     }
 
     if (page === 'stats') {
-      const today = await getDailyStats(env);
+      const activity = await loadTodayActivity(env);
+      const today = activity.today;
       lines.push('');
       lines.push(`📅 <b>今日</b> <code>${escapeHtml(today.day)}</code>`);
       lines.push(`  💬 入站  <b>${today.messages_in}</b>`);
       lines.push(`  ✅ 验证  ${today.verifies}`);
       lines.push(`  🚫 封禁  ${today.bans}`);
       lines.push(`  🛡 垃圾  ${today.spam}`);
+      lines.push('');
+      lines.push(...formatHeatBlock(activity.summary.hours, activity.summary.peakHours));
+      if (activity.rankingUsers.length) {
+        lines.push('');
+        lines.push('🏆 <b>今日 Top</b> <i>（完整见 /rank）</i>');
+        lines.push(...formatRankingBlock(activity.rankingUsers.slice(0, 3)));
+      }
     }
 
     lines.push('');
@@ -2232,6 +2416,24 @@ async function buildSysinfoPageText(env, page = 'overview') {
     lines.push(`<code>${escapeHtml(baseUrl)}/health</code>`);
     lines.push(`<code>…/health/env</code> · <code>…/health/d1</code> · <code>…/verify</code>`);
     lines.push(`Webhook <code>POST ${escapeHtml(baseUrl)}/</code>`);
+  }
+
+  if (page === 'activity') {
+    const activity = await loadTodayActivity(env);
+    lines.push('🔥 <b>系统 · 今日活跃</b>');
+    lines.push(`<code>v${GATEWAY_VERSION}</code> · <code>${escapeHtml(activity.day)}</code> UTC`);
+    lines.push('────────────────');
+    lines.push(`入站样本 <b>${activity.summary.total}</b> · 独立用户 <b>${activity.summary.uniqueUsers || activity.rankingUsers.length}</b>`);
+    lines.push(`数据源: <code>${escapeHtml(activity.source)}</code>`);
+    lines.push('');
+    lines.push(...formatHeatBlock(activity.summary.hours, activity.summary.peakHours));
+    lines.push('');
+    lines.push('🏆 <b>活跃排行</b>');
+    lines.push(...formatRankingBlock(activity.rankingUsers, {
+      withCount: activity.rankingUsers.some(u => u.count != null),
+    }));
+    lines.push('');
+    lines.push('<i>点下方用户按钮可打开面板 · 热力为 UTC 时区</i>');
   }
 
   if (page === 'storage') {
@@ -2295,13 +2497,26 @@ async function buildSysinfoPageText(env, page = 'overview') {
  * @param {object} env
  * @param {number|undefined} threadId
  * @param {object} [opts]
- * @param {'overview'|'storage'|'errors'|'stats'} [opts.page]
+ * @param {'overview'|'storage'|'errors'|'stats'|'activity'} [opts.page]
  * @param {{chatId:number,messageId:number}|null} [opts.edit]
  */
 async function handleSysinfoCommand(env, threadId, opts = {}) {
   const page = opts.page || 'overview';
   const text = await buildSysinfoPageText(env, page);
-  const markup = buildSysinfoKeyboard(page === 'stats' ? 'overview' : page);
+  let markup = buildSysinfoKeyboard(page);
+  // 活跃页附加用户跳转按钮
+  if (page === 'activity') {
+    try {
+      const activity = await loadTodayActivity(env);
+      const jump = buildUserJumpKeyboard(activity.rankingUsers, { includeMenu: false });
+      markup = {
+        inline_keyboard: [
+          ...buildSysinfoKeyboard('activity').inline_keyboard,
+          ...jump.inline_keyboard,
+        ],
+      };
+    } catch { /* 保留基础键盘 */ }
+  }
   if (opts.edit?.chatId && opts.edit?.messageId) {
     const res = await tgCall(env, 'editMessageText', {
       chat_id: opts.edit.chatId,
@@ -2335,6 +2550,108 @@ async function handleSysinfoCommand(env, threadId, opts = {}) {
 
 async function handleStatsCommand(env, threadId) {
   await handleSysinfoCommand(env, threadId, { page: 'stats' });
+}
+
+async function handleRankCommand(env, threadId, opts = {}) {
+  await handleSysinfoCommand(env, threadId, { page: 'activity', edit: opts.edit || null });
+}
+
+/**
+ * 备注搜索 /notes [关键词]；无关键词时列出最近备注
+ */
+async function handleNotesCommand(env, threadId, queryText = '') {
+  const q = String(queryText || '')
+    .replace(/^\/notes(@\w+)?\s*/i, '')
+    .trim();
+  if (!env.TOPIC_MAP?.list) {
+    await tgCall(env, 'sendMessage', {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: '❌ KV 未绑定，无法搜索备注',
+    });
+    return;
+  }
+
+  const needle = q.toLowerCase();
+  const matches = [];
+  let cursor;
+  let pages = 0;
+  const maxPages = 12;
+  try {
+    do {
+      const result = await env.TOPIC_MAP.list({ prefix: 'note:', cursor, limit: 100 });
+      for (const key of result.keys || []) {
+        const userId = String(key.name || '').slice(5);
+        if (!userId) continue;
+        const note = await env.TOPIC_MAP.get(key.name);
+        if (!note) continue;
+        const noteStr = String(note);
+        if (needle) {
+          const hitNote = noteStr.toLowerCase().includes(needle);
+          const hitId = userId.includes(needle);
+          if (!hitNote && !hitId) continue;
+        }
+        matches.push({ userId, note: noteStr });
+        if (matches.length >= 12) break;
+      }
+      cursor = result.list_complete ? undefined : result.cursor;
+      pages += 1;
+    } while (cursor && pages < maxPages && matches.length < 12);
+  } catch (e) {
+    recordSystemError('notes_search_failed', e, {}, env);
+    await tgCall(env, 'sendMessage', {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: `❌ 备注搜索失败: ${escapeHtml(e?.message || String(e))}`,
+      parse_mode: 'HTML',
+    });
+    return;
+  }
+
+  if (!matches.length) {
+    await tgCall(env, 'sendMessage', {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: q
+        ? `🔎 未找到含「${escapeHtml(q)}」的备注\n用法: <code>/notes 关键词</code>`
+        : '📝 暂无备注。在用户话题内用 <code>/note 内容</code> 添加。',
+      parse_mode: 'HTML',
+      reply_markup: buildAdminHomeKeyboard(false),
+    });
+    return;
+  }
+
+  // 补全显示名
+  let userMap = new Map();
+  if (env.TG_BOT_DB) {
+    try {
+      await ensureMigrations(env.TG_BOT_DB);
+      userMap = await createD1Storage(env.TG_BOT_DB).getUsersByIds(matches.map(m => m.userId));
+    } catch { /* ignore */ }
+  }
+
+  const lines = [
+    `🔎 <b>备注搜索</b>${q ? ` · 「${escapeHtml(q)}」` : ' · 全部'}`,
+    `共 ${matches.length} 条${pages >= maxPages && cursor ? '（可能未扫全）' : ''}`,
+    '────────────────',
+  ];
+  const jumpUsers = [];
+  for (const m of matches) {
+    const u = userMap.get(m.userId) || { userId: m.userId };
+    jumpUsers.push(u);
+    const label = escapeHtml(displayUserLabel(u));
+    lines.push(`• ${label} · <code>${escapeHtml(m.userId)}</code>`);
+    lines.push(`  📝 ${escapeHtml(m.note.slice(0, 120))}${m.note.length > 120 ? '…' : ''}`);
+  }
+  lines.push('', '<i>点下方按钮打开用户面板</i>');
+
+  await tgCall(env, 'sendMessage', {
+    chat_id: env.SUPERGROUP_ID,
+    message_thread_id: threadId,
+    text: lines.join('\n'),
+    parse_mode: 'HTML',
+    reply_markup: buildUserJumpKeyboard(jumpUsers),
+  });
 }
 
 async function handleWhoamiCommand(env, threadId, senderId) {
@@ -2389,7 +2706,7 @@ async function handleFindCommand(env, threadId, queryText) {
       await tgCall(env, 'sendMessage', {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: `未找到匹配「${escapeHtml(q)}」的用户`,
+        text: `未找到匹配「${escapeHtml(q)}」的用户\n也可试 <code>/notes ${escapeHtml(q)}</code> 搜备注`,
         parse_mode: 'HTML',
       });
       return;
@@ -2402,12 +2719,13 @@ async function handleFindCommand(env, threadId, queryText) {
       lines.push(`  UID <code>${escapeHtml(u.userId)}</code> · Topic <code>${escapeHtml(u.topicId || '-')}</code> · ${escapeHtml(u.status || '?')}`);
       lines.push(`  最近: ${formatTimeBoth(u.lastMessageAt)}`);
     }
-    lines.push('', '<i>请到对应用户 Forum Topic 内使用 /panel 操作</i>');
+    lines.push('', '<i>点下方按钮直接打开用户面板</i>');
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
       text: lines.join('\n'),
       parse_mode: 'HTML',
+      reply_markup: buildUserJumpKeyboard(hits),
     });
   } catch (e) {
     recordSystemError('find_failed', e, {}, env);
@@ -2436,9 +2754,11 @@ async function handleSyncCommandsCommand(env, threadId, senderId) {
     { command: 'menu', description: '管理菜单' },
     { command: 'sysinfo', description: '系统信息' },
     { command: 'stats', description: '今日统计' },
+    { command: 'rank', description: '今日活跃排行' },
     { command: 'panel', description: '用户快捷面板' },
     { command: 'info', description: '用户资料' },
     { command: 'find', description: '查找用户' },
+    { command: 'notes', description: '搜索备注' },
     { command: 'whoami', description: '查看我的权限' },
     { command: 'ban', description: '封禁用户' },
     { command: 'unban', description: '解封用户' },
@@ -2846,12 +3166,12 @@ async function handleAdminUiCallback(query, env, ctx) {
   const messageId = query.message?.message_id;
   const parts = data.split(':');
 
-  // adm:sys:overview | storage | errors | stats
+  // adm:sys:overview | storage | errors | stats | activity
   if (parts[0] === 'adm' && parts[1] === 'sys') {
     const page = parts[2] || 'overview';
     await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id, text: '已更新' });
     await handleSysinfoCommand(env, threadId, {
-      page: ['overview', 'storage', 'errors', 'stats'].includes(page) ? page : 'overview',
+      page: ['overview', 'storage', 'errors', 'stats', 'activity'].includes(page) ? page : 'overview',
       edit: chatId && messageId ? { chatId, messageId } : null,
     });
     return;
@@ -2890,6 +3210,8 @@ async function handleAdminUiCallback(query, env, ctx) {
     await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id });
     if (nav === 'sysinfo') await handleSysinfoCommand(env, threadId, { page: 'overview' });
     else if (nav === 'stats') await handleStatsCommand(env, threadId);
+    else if (nav === 'rank' || nav === 'activity') await handleRankCommand(env, threadId);
+    else if (nav === 'notes') await handleNotesCommand(env, threadId, '/notes');
     else if (nav === 'whoami') await handleWhoamiCommand(env, threadId, senderId);
     else if (nav === 'listwords') await handleListWordsCommand(env, threadId);
     else if (nav === 'help') await handleHelpCommand(env, threadId, senderId);
@@ -2999,7 +3321,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
   // 仅允许管理员在群内操作与回信，防止任意群成员向用户私聊注入消息
   if (!senderId || !(await isAdminUser(env, senderId))) {
     // 仅对已知管理命令提示，避免普通聊天被误伤
-    const known = /^\/(help|menu|sysinfo|system|status|stats|whoami|find|cleanup|listwords|addword|delword|panel|info|ban|unban|close|open|mute|unmute|trust|reset|note|synccommands)(@|\s|$)/i;
+    const known = /^\/(help|menu|sysinfo|system|status|stats|rank|activity|whoami|find|notes|cleanup|listwords|addword|delword|panel|info|ban|unban|close|open|mute|unmute|trust|reset|note|synccommands)(@|\s|$)/i;
     if (isCommand && senderId && known.test(text)) {
       await tgCall(env, 'sendMessage', {
         chat_id: env.SUPERGROUP_ID,
@@ -3039,6 +3361,10 @@ async function _handleAdminReplyInner(msg, env, ctx) {
     await handleStatsCommand(env, threadId);
     return;
   }
+  if (text === "/rank" || text === "/activity" || text === "/heat") {
+    await handleRankCommand(env, threadId);
+    return;
+  }
   if (text === "/whoami") {
     await handleWhoamiCommand(env, threadId, senderId);
     return;
@@ -3049,6 +3375,10 @@ async function _handleAdminReplyInner(msg, env, ctx) {
   }
   if (text.startsWith("/find")) {
     await handleFindCommand(env, threadId, text);
+    return;
+  }
+  if (text === "/notes" || text.startsWith("/notes ")) {
+    await handleNotesCommand(env, threadId, text);
     return;
   }
   if (text.startsWith("/addword ")) {
@@ -3111,7 +3441,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
       await tgCall(env, 'sendMessage', {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: '⚠️ 当前话题未关联用户。全局命令：/sysinfo /stats /find /help',
+        text: '⚠️ 当前话题未关联用户。全局命令：/sysinfo /stats /rank /find /notes /help',
       });
     }
     return;

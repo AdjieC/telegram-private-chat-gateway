@@ -107,10 +107,20 @@ export function createMockD1() {
       },
 
       async all() {
-        if (/FROM users[\s\S]*ORDER BY COALESCE\(last_message_at[\s\S]*LIMIT 5/i.test(normalized)) {
+        if (/FROM users[\s\S]*ORDER BY COALESCE\(last_message_at[\s\S]*LIMIT 5/i.test(normalized)
+          && !/WHERE COALESCE\(last_message_at/i.test(normalized)
+          && !/WHERE username LIKE/i.test(normalized)) {
           const rows = [...(tables.get('users') || [])]
             .sort((a, b) => Number(b.last_message_at || 0) - Number(a.last_message_at || 0))
             .slice(0, 5);
+          return { results: rows.map(row => ({ ...row })) };
+        }
+        if (/FROM users[\s\S]*WHERE COALESCE\(last_message_at,\s*0\) >= \?/i.test(normalized)) {
+          const [since, limit] = bindings;
+          const rows = [...(tables.get('users') || [])]
+            .filter(row => Number(row.last_message_at || 0) >= Number(since || 0))
+            .sort((a, b) => Number(b.last_message_at || 0) - Number(a.last_message_at || 0))
+            .slice(0, Number(limit || 10));
           return { results: rows.map(row => ({ ...row })) };
         }
         if (/FROM users[\s\S]*WHERE username LIKE \?/i.test(normalized)) {
@@ -123,6 +133,18 @@ export function createMockD1() {
             return u.includes(needle) || f.includes(needle) || l.includes(needle);
           }).slice(0, Number(bindings[3] || 10));
           return { results: rows.map(row => ({ ...row })) };
+        }
+        if (/SELECT user_id, created_at FROM message_links WHERE created_at >= \? AND direction = \?/i.test(normalized)) {
+          const [since, direction, limit] = bindings;
+          const rows = [...(tables.get('message_links') || [])]
+            .filter(row => (
+              Number(row.created_at || 0) >= Number(since || 0)
+              && row.direction === direction
+            ))
+            .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))
+            .slice(0, Number(limit || 2000))
+            .map(row => ({ user_id: row.user_id, created_at: row.created_at }));
+          return { results: rows };
         }
         if (/^SELECT \* FROM rules WHERE enabled = 1 ORDER BY priority/i.test(normalized)) {
           const rows = [...(tables.get('rules') || [])]
