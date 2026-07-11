@@ -3477,6 +3477,34 @@ function createAdminCommandHandlers(deps) {
   };
 }
 
+// src/verify-copy.js
+var VERIFY_COPY = {
+  /** Turnstile 私聊提示 */
+  turnstileChallenge: "\u{1F6E1} <b>\u4EBA\u673A\u9A8C\u8BC1</b>\n\n\u8BF7\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u5B8C\u6210\u9A8C\u8BC1\u3002\n\u901A\u8FC7\u540E\u60A8\u521A\u624D\u7684\u6D88\u606F\u4F1A\u81EA\u52A8\u9001\u8FBE\u7BA1\u7406\u5458\u3002",
+  /** 本地题库提示 */
+  quizChallenge(question) {
+    return `\u{1F6E1} <b>\u4EBA\u673A\u9A8C\u8BC1</b>
+
+${question}
+
+\u8BF7\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u4F5C\u7B54\uFF1B\u7B54\u5BF9\u540E\u6D88\u606F\u4F1A\u81EA\u52A8\u9001\u8FBE\u3002`;
+  },
+  buttonTurnstile: "\u{1F510} \u70B9\u51FB\u9A8C\u8BC1",
+  /** callback toast / alert */
+  expired: "\u274C \u9A8C\u8BC1\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u53D1\u4E00\u6761\u6D88\u606F",
+  dataError: "\u274C \u9A8C\u8BC1\u6570\u636E\u5F02\u5E38\uFF0C\u8BF7\u91CD\u65B0\u53D1\u6D88\u606F",
+  invalidUser: "\u274C \u9A8C\u8BC1\u65E0\u6548\uFF0C\u8BF7\u91CD\u65B0\u53D1\u6D88\u606F",
+  invalidOption: "\u274C \u65E0\u6548\u9009\u9879",
+  wrongAnswer: "\u274C \u56DE\u7B54\u9519\u8BEF\uFF0C\u8BF7\u518D\u8BD5\u4E00\u6B21",
+  successToast: "\u2705 \u9A8C\u8BC1\u901A\u8FC7",
+  systemError: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5",
+  /** 编辑/私聊成功正文 */
+  successBody: "\u2705 <b>\u9A8C\u8BC1\u6210\u529F</b>\n\n\u60A8\u73B0\u5728\u53EF\u4EE5\u6B63\u5E38\u5BF9\u8BDD\u4E86\u3002\u76F4\u63A5\u53D1\u6D88\u606F\u5373\u53EF\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
+  successBodyWithPending: "\u2705 <b>\u9A8C\u8BC1\u6210\u529F</b>\n\n\u6B63\u5728\u4E3A\u60A8\u9001\u8FBE\u521A\u624D\u7684\u6D88\u606F\uFF0C\u8BF7\u7A0D\u5019\u2026",
+  /** 答错时在题目下追加的提示（编辑消息用） */
+  wrongAnswerHint: "\n\n\u26A0\uFE0F \u56DE\u7B54\u4E0D\u6B63\u786E\uFF0C\u8BF7\u518D\u9009\u4E00\u6B21\u3002\u94FE\u63A5\u672A\u8FC7\u671F\u524D\u53EF\u7EE7\u7EED\u5C1D\u8BD5\u3002"
+};
+
 // worker.js
 function containsLink(text) {
   if (!text) return false;
@@ -4458,8 +4486,8 @@ var legacyApp = {
           }
           await tgCall(normalizedEnv, "sendMessage", {
             chat_id: Number(userId),
-            text: "\u2726 \u9A8C\u8BC1\u901A\u8FC7\n\n\u6709\u4EC0\u4E48\u53EF\u4EE5\u5E2E\u4F60\u7684\uFF1F\u76F4\u63A5\u53D1\u6D88\u606F\u5C31\u597D\u3002",
-            parse_mode: "Markdown"
+            text: VERIFY_COPY.successBody,
+            parse_mode: "HTML"
           });
         })());
         const pendingKey = `pending_turnstile:${userId}`;
@@ -5700,13 +5728,11 @@ async function sendTurnstileChallenge(userId, env, pendingMsgId, writtenKeys) {
   Logger.info("turnstile_verification_sent", { userId, verifyCode });
   const verifyMsg = await tgCall(env, "sendMessage", {
     chat_id: userId,
-    text: `\u{1F6E1}\uFE0F **\u4EBA\u673A\u9A8C\u8BC1**
-
-\u8BF7\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u5B8C\u6210\u9A8C\u8BC1\uFF0C\u9A8C\u8BC1\u901A\u8FC7\u540E\u60A8\u7684\u6D88\u606F\u5C06\u81EA\u52A8\u9001\u8FBE\u3002`,
-    parse_mode: "Markdown",
+    text: VERIFY_COPY.turnstileChallenge,
+    parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: [[
-        { text: "\u{1F510} \u70B9\u51FB\u9A8C\u8BC1", url: verifyUrl }
+        { text: VERIFY_COPY.buttonTurnstile, url: verifyUrl }
       ]]
     }
   });
@@ -5753,12 +5779,8 @@ async function sendLocalQuizChallenge(userId, env, pendingMsgId, writtenKeys) {
   }
   const quizMsg = await tgCall(env, "sendMessage", {
     chat_id: userId,
-    text: `\u{1F6E1}\uFE0F **\u4EBA\u673A\u9A8C\u8BC1**
-
-${challenge.question}
-
-\u8BF7\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u56DE\u7B54 (\u56DE\u7B54\u6B63\u786E\u540E\u5C06\u81EA\u52A8\u53D1\u9001\u60A8\u521A\u624D\u7684\u6D88\u606F)\u3002`,
-    parse_mode: "Markdown",
+    text: VERIFY_COPY.quizChallenge(escapeHtml(challenge.question)),
+    parse_mode: "HTML",
     reply_markup: { inline_keyboard: keyboard }
   });
   if (!quizMsg.ok) {
@@ -5778,7 +5800,7 @@ async function handleCallbackQuery(query, env, ctx) {
     if (!stateStr) {
       await tgCall(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "\u274C \u9A8C\u8BC1\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u53D1\u6D88\u606F",
+        text: VERIFY_COPY.expired,
         show_alert: true
       });
       return;
@@ -5789,7 +5811,7 @@ async function handleCallbackQuery(query, env, ctx) {
     } catch (e) {
       await tgCall(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "\u274C \u6570\u636E\u9519\u8BEF",
+        text: VERIFY_COPY.dataError,
         show_alert: true
       });
       return;
@@ -5797,7 +5819,7 @@ async function handleCallbackQuery(query, env, ctx) {
     if (state.userId && state.userId !== userId) {
       await tgCall(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "\u274C \u65E0\u6548\u7684\u9A8C\u8BC1",
+        text: VERIFY_COPY.invalidUser,
         show_alert: true
       });
       return;
@@ -5805,7 +5827,7 @@ async function handleCallbackQuery(query, env, ctx) {
     if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= state.options.length) {
       await tgCall(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "\u274C \u65E0\u6548\u9009\u9879",
+        text: VERIFY_COPY.invalidOption,
         show_alert: true
       });
       return;
@@ -5813,7 +5835,7 @@ async function handleCallbackQuery(query, env, ctx) {
     if (selectedIndex === state.answerIndex) {
       await tgCall(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "\u2705 \u9A8C\u8BC1\u901A\u8FC7"
+        text: VERIFY_COPY.successToast
       });
       Logger.info("verification_passed", {
         userId,
@@ -5828,13 +5850,13 @@ async function handleCallbackQuery(query, env, ctx) {
       await env.TOPIC_MAP.delete(`needs_verify:${userId}`);
       await env.TOPIC_MAP.delete(`chal:${verifyId}`);
       await env.TOPIC_MAP.delete(`user_challenge:${userId}`);
+      const hasPending = Array.isArray(state.pending_ids) && state.pending_ids.length > 0 || !!state.pending;
       await tgCall(env, "editMessageText", {
         chat_id: userId,
         message_id: query.message.message_id,
-        text: "\u2705 **\u9A8C\u8BC1\u6210\u529F**\n\n\u60A8\u73B0\u5728\u53EF\u4EE5\u81EA\u7531\u5BF9\u8BDD\u4E86\u3002",
-        parse_mode: "Markdown"
+        text: hasPending ? VERIFY_COPY.successBodyWithPending : VERIFY_COPY.successBody,
+        parse_mode: "HTML"
       });
-      const hasPending = Array.isArray(state.pending_ids) && state.pending_ids.length > 0 || !!state.pending;
       if (hasPending) {
         await forwardPendingMessages(state, userId, query, env, ctx);
       }
@@ -5847,9 +5869,31 @@ async function handleCallbackQuery(query, env, ctx) {
       });
       await tgCall(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "\u274C \u7B54\u6848\u9519\u8BEF",
+        text: VERIFY_COPY.wrongAnswer,
         show_alert: true
       });
+      try {
+        const base = VERIFY_COPY.quizChallenge(escapeHtml(state.options?.[state.answerIndex] ? (query.message?.text || "").split("\n\n")[1] || "\u8BF7\u91CD\u8BD5" : "\u8BF7\u91CD\u8BD5"));
+        const prev = String(query.message?.text || "");
+        if (prev && !prev.includes("\u56DE\u7B54\u4E0D\u6B63\u786E")) {
+          const buttons = (state.options || []).map((opt, idx) => ({
+            text: opt,
+            callback_data: `verify:${verifyId}:${idx}`
+          }));
+          const keyboard = [];
+          for (let i = 0; i < buttons.length; i += CONFIG.BUTTON_COLUMNS) {
+            keyboard.push(buttons.slice(i, i + CONFIG.BUTTON_COLUMNS));
+          }
+          await tgCall(env, "editMessageText", {
+            chat_id: userId,
+            message_id: query.message.message_id,
+            text: `${prev}${VERIFY_COPY.wrongAnswerHint}`,
+            parse_mode: "HTML",
+            reply_markup: { inline_keyboard: keyboard }
+          });
+        }
+      } catch {
+      }
     }
   } catch (e) {
     Logger.error("callback_query_error", e, {
@@ -5858,7 +5902,7 @@ async function handleCallbackQuery(query, env, ctx) {
     });
     await tgCall(env, "answerCallbackQuery", {
       callback_query_id: query.id,
-      text: `\u26A0\uFE0F \u7CFB\u7EDF\u9519\u8BEF\uFF0C\u8BF7\u91CD\u8BD5`,
+      text: VERIFY_COPY.systemError,
       show_alert: true
     });
   }

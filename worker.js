@@ -41,6 +41,7 @@ import {
   buildCleanupConfirmKeyboard,
 } from './src/admin-ui-format.js';
 import { createAdminCommandHandlers } from './src/admin-commands.js';
+import { VERIFY_COPY } from './src/verify-copy.js';
 
 // Telegram Private Chat Gateway — Cloudflare Workers 私聊安全接入与双向会话网关
 
@@ -1309,8 +1310,8 @@ const legacyApp = {
           }
           await tgCall(normalizedEnv, "sendMessage", {
             chat_id: Number(userId),
-            text: "✦ 验证通过\n\n有什么可以帮你的？直接发消息就好。",
-            parse_mode: "Markdown"
+            text: VERIFY_COPY.successBody,
+            parse_mode: "HTML",
           });
         })());
 
@@ -2717,11 +2718,11 @@ async function sendTurnstileChallenge(userId, env, pendingMsgId, writtenKeys) {
   // 发送验证按钮
   const verifyMsg = await tgCall(env, "sendMessage", {
     chat_id: userId,
-    text: `🛡️ **人机验证**\n\n请点击下方按钮完成验证，验证通过后您的消息将自动送达。`,
-    parse_mode: "Markdown",
+    text: VERIFY_COPY.turnstileChallenge,
+    parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: [[
-        { text: "🔐 点击验证", url: verifyUrl }
+        { text: VERIFY_COPY.buttonTurnstile, url: verifyUrl }
       ]]
     }
   });
@@ -2784,8 +2785,8 @@ async function sendLocalQuizChallenge(userId, env, pendingMsgId, writtenKeys) {
   // 发送验证题目
   const quizMsg = await tgCall(env, "sendMessage", {
     chat_id: userId,
-    text: `🛡️ **人机验证**\n\n${challenge.question}\n\n请点击下方按钮回答 (回答正确后将自动发送您刚才的消息)。`,
-    parse_mode: "Markdown",
+    text: VERIFY_COPY.quizChallenge(escapeHtml(challenge.question)),
+    parse_mode: "HTML",
     reply_markup: { inline_keyboard: keyboard }
   });
 
@@ -2811,7 +2812,7 @@ async function handleCallbackQuery(query, env, ctx) {
     if (!stateStr) {
       await tgCall(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "❌ 验证已过期，请重发消息",
+        text: VERIFY_COPY.expired,
         show_alert: true
       });
       return;
@@ -2823,7 +2824,7 @@ async function handleCallbackQuery(query, env, ctx) {
     } catch(e) {
       await tgCall(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "❌ 数据错误",
+        text: VERIFY_COPY.dataError,
         show_alert: true
       });
       return;
@@ -2833,7 +2834,7 @@ async function handleCallbackQuery(query, env, ctx) {
     if (state.userId && state.userId !== userId) {
       await tgCall(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "❌ 无效的验证",
+        text: VERIFY_COPY.invalidUser,
         show_alert: true
       });
       return;
@@ -2843,7 +2844,7 @@ async function handleCallbackQuery(query, env, ctx) {
     if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= state.options.length) {
       await tgCall(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "❌ 无效选项",
+        text: VERIFY_COPY.invalidOption,
         show_alert: true
       });
       return;
@@ -2852,7 +2853,7 @@ async function handleCallbackQuery(query, env, ctx) {
     if (selectedIndex === state.answerIndex) {
       await tgCall(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "✅ 验证通过"
+        text: VERIFY_COPY.successToast
       });
 
       Logger.info('verification_passed', {
@@ -2873,14 +2874,14 @@ async function handleCallbackQuery(query, env, ctx) {
       await env.TOPIC_MAP.delete(`chal:${verifyId}`);
       await env.TOPIC_MAP.delete(`user_challenge:${userId}`);
 
+      const hasPending = (Array.isArray(state.pending_ids) && state.pending_ids.length > 0) || !!state.pending;
       await tgCall(env, "editMessageText", {
         chat_id: userId,
         message_id: query.message.message_id,
-        text: "✅ **验证成功**\n\n您现在可以自由对话了。",
-        parse_mode: "Markdown"
+        text: hasPending ? VERIFY_COPY.successBodyWithPending : VERIFY_COPY.successBody,
+        parse_mode: "HTML"
       });
 
-      const hasPending = (Array.isArray(state.pending_ids) && state.pending_ids.length > 0) || !!state.pending;
       if (hasPending) {
         await forwardPendingMessages(state, userId, query, env, ctx);
       }
@@ -2894,9 +2895,34 @@ async function handleCallbackQuery(query, env, ctx) {
 
       await tgCall(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "❌ 答案错误",
+        text: VERIFY_COPY.wrongAnswer,
         show_alert: true
       });
+      // 在题目消息上追加提示，避免用户不知道还能继续选
+      try {
+        const base = VERIFY_COPY.quizChallenge(escapeHtml(state.options?.[state.answerIndex]
+          ? (query.message?.text || '').split('\n\n')[1] || '请重试'
+          : '请重试'));
+        // 优先用当前消息正文；若无则仅 toast
+        const prev = String(query.message?.text || '');
+        if (prev && !prev.includes('回答不正确')) {
+          const buttons = (state.options || []).map((opt, idx) => ({
+            text: opt,
+            callback_data: `verify:${verifyId}:${idx}`
+          }));
+          const keyboard = [];
+          for (let i = 0; i < buttons.length; i += CONFIG.BUTTON_COLUMNS) {
+            keyboard.push(buttons.slice(i, i + CONFIG.BUTTON_COLUMNS));
+          }
+          await tgCall(env, 'editMessageText', {
+            chat_id: userId,
+            message_id: query.message.message_id,
+            text: `${prev}${VERIFY_COPY.wrongAnswerHint}`,
+            parse_mode: 'HTML',
+            reply_markup: { inline_keyboard: keyboard },
+          });
+        }
+      } catch { /* 编辑失败不影响 toast */ }
     }
   } catch (e) {
     Logger.error('callback_query_error', e, {
@@ -2905,7 +2931,7 @@ async function handleCallbackQuery(query, env, ctx) {
     });
     await tgCall(env, "answerCallbackQuery", {
       callback_query_id: query.id,
-      text: `⚠️ 系统错误，请重试`,
+      text: VERIFY_COPY.systemError,
       show_alert: true
     });
   }
