@@ -34,7 +34,6 @@ Thumbs.db
 npm-debug.log*
 
 # 构建产物
-dist/
 build/
 
 # 临时文件

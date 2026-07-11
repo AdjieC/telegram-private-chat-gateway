@@ -19,7 +19,10 @@ export function createMockD1() {
       },
 
       async first() {
-        if (/^SELECT version FROM schema_migrations/i.test(normalized)) {
+        if (/^SELECT 1 AS ok$/i.test(normalized) || /^SELECT 1 as ok$/i.test(normalized)) {
+          return { ok: 1 };
+        }
+        if (/^SELECT version(?:,\s*name)? FROM schema_migrations/i.test(normalized)) {
           const rows = [...(tables.get('schema_migrations') || [])]
             .sort((left, right) => right.version - left.version);
           return rows[0] || null;

@@ -156,7 +156,7 @@ KV 保存短期状态和动态屏蔽词。重要部署前记录：
 推荐方式：
 
 1. 在 Cloudflare Dashboard 的 Deployments 中选择已验证的部署版本并执行回退；或
-2. 在 Git 中检出已验证提交，重新运行测试和 dry-run 后部署。
+2. 在 Git 中检出已验证提交，使用该版本的 `dist/worker.single.js` 重新粘贴到 Worker 并 Deploy。
 
 回退前确认：
 
@@ -174,16 +174,18 @@ KV 保存短期状态和动态屏蔽词。重要部署前记录：
 - [ ] `npm run test:integration` 通过
 - [ ] `npm test` 通过
 - [ ] `npm run test:coverage` 达到项目基线
-- [ ] `npx wrangler deploy --dry-run` 成功
+- [ ] `npm run build:single` 成功，`node --check dist/worker.single.js` 通过
+- [ ] `dist/worker.single.js` 已粘贴到 Worker 并 Deploy
 - [ ] `git diff --check` 无错误
 
 ### Cloudflare
 
-- [ ] `TOPIC_MAP` 指向正确环境
-- [ ] `TG_BOT_DB` 指向正确环境
+- [ ] Binding `TOPIC_MAP` 为 KV Namespace
+- [ ] Binding `TG_BOT_DB` 为 D1 Database（非 Text 变量）
 - [ ] Secrets 已配置且没有写入仓库
-- [ ] `SUPERGROUP_ID` 和 `OWNER_IDS` 已核对
+- [ ] `SUPERGROUP_ID` 和 `OWNER_IDS` 已核对（变量名无前导空格）
 - [ ] Cron Trigger 已启用
+- [ ] `GET /health`、`/health/env`、`/health/d1` 正常
 - [ ] Observability 采样率符合流量和费用要求
 
 ### Telegram

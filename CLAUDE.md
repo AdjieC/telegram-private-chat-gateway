@@ -60,9 +60,12 @@ npm run test:unit
 npm run test:integration
 npm test
 npm run test:coverage
+npm run build:single
 npm run sync-docs
-npx wrangler deploy --dry-run
 ```
+
+生产发布：粘贴 `dist/worker.single.js` 到 Cloudflare Dashboard，Bindings/变量/Cron 在控制台配置（见 `docs/deployment.md`）。  
+提交时 pre-commit 会自动构建 dist（`npm install` 后 hooks 生效）。
 
 项目没有独立 lint 或 TypeScript typecheck。提交前还应对全部 JavaScript 文件运行 `node --check`，并运行 `git diff --check`。
 

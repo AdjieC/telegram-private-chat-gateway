@@ -1,24 +1,24 @@
+# 本文件仅供本地 `wrangler dev` 开发参考。
+# 生产发布请使用 dist/worker.single.js 粘贴到 Cloudflare Dashboard，
+# 并在 Dashboard 配置 Bindings / Variables / Cron。详见 docs/deployment.md。
+
 name = "telegram-private-chat-gateway"
 main = "worker.js"
 compatibility_date = "2025-06-01"
 
-# 注意：KV 命名空间 ID 每个用户都不一样，
-# 所以不能写死在这里。用户需要在 Cloudflare 后台手动绑定。
-
-# D1 数据库绑定示例（取消注释后填写自己的资源信息）：
+# 本地开发时按需取消注释并填写自己的资源 ID（勿提交真实生产 ID 到公开仓库）：
+# [[kv_namespaces]]
+# binding = "TOPIC_MAP"
+# id = "<YOUR_KV_NAMESPACE_ID>"
+#
 # [[d1_databases]]
 # binding = "TG_BOT_DB"
 # database_name = "telegram-private-chat-gateway"
 # database_id = "<YOUR_D1_DATABASE_ID>"
 
-# 每天 UTC 03:00 清理过期幂等、消息映射和审计记录：
-# [triggers]
-# crons = ["0 3 * * *"]
-
-# --- 监控与可观测性 ---
 [observability]
 enabled = true
 
 [observability.logs]
 enabled = true
-head_sampling_rate = 0.1  # 10% 采样率（避免高频日志产生过多费用）
+head_sampling_rate = 0.1

@@ -2,7 +2,6 @@
 
 > 部署在 Cloudflare Workers 上的 Telegram 私聊安全接入与双向会话网关。
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Silentely/telegram-private-chat-gateway)
 ![GitHub stars](https://img.shields.io/github/stars/Silentely/telegram-private-chat-gateway?style=social)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
@@ -56,6 +55,9 @@ flowchart LR
 
 ## 五分钟快速部署
 
+官方方式：**打包 `dist/worker.single.js` → Cloudflare 控制台粘贴 Deploy → Dashboard 配置绑定与变量**。  
+不使用 `wrangler deploy` / Git 连接自动部署。
+
 ### 1. 获取项目并安装依赖
 
 ```bash
@@ -64,31 +66,31 @@ cd telegram-private-chat-gateway
 npm install
 ```
 
-### 2. 创建 Cloudflare 资源
+### 2. 确认单文件产物
 
-- 创建 KV Namespace，并绑定为 `TOPIC_MAP`。
-- 创建 D1 Database，并绑定为 `TG_BOT_DB`。
-- 在 `wrangler.toml` 中填写自己的资源 ID。
-
-### 3. 配置 Secrets 和变量
+仓库已包含 `dist/worker.single.js`。修改源码后可手动重建（提交时 pre-commit 也会自动构建）：
 
 ```bash
-npx wrangler secret put BOT_TOKEN
-npx wrangler secret put WEBHOOK_SECRET
+npm run build:single
 ```
 
-同时配置：
+### 3. 粘贴到 Cloudflare Worker
 
-- `SUPERGROUP_ID`：开启 Topics 的 Telegram 超级群组 ID，必须以 `-100` 开头。
-- `OWNER_IDS`：恢复 Owner 用户 ID，多个 ID 使用逗号分隔，强烈建议配置。
+1. Dashboard → **Workers & Pages** → 创建或打开 Worker  
+2. **Edit code** → 粘贴 `dist/worker.single.js` 全文 → **Deploy**  
 
-### 4. 检查并部署
+### 4. 在 Dashboard 配置资源（只做一次）
 
-```bash
-npm test
-npx wrangler deploy --dry-run
-npm run deploy
-```
+| 配置 | 要求 |
+|------|------|
+| Binding `TOPIC_MAP` | **KV Namespace** |
+| Binding `TG_BOT_DB` | **D1 Database**（不是 Text 变量） |
+| Secret `BOT_TOKEN` / `WEBHOOK_SECRET` | Secret；后者至少 32 字节 |
+| Text `SUPERGROUP_ID` | 必须以 `-100` 开头 |
+| Text `OWNER_IDS` | 恢复 Owner，强烈建议配置 |
+| Cron | 建议 `0 3 * * *` |
+
+变量名不要有前导空格。完整说明见[配置参考](docs/configuration.md)。
 
 ### 5. 设置 Telegram Webhook
 
@@ -96,7 +98,7 @@ npm run deploy
 https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<WORKER_URL>&secret_token=<WEBHOOK_SECRET>&allowed_updates=%5B%22message%22,%22edited_message%22,%22callback_query%22%5D
 ```
 
-完整资源创建、Cron 和发布后验证步骤请查看[部署指南](docs/deployment.md)。
+完整步骤与验收清单见[部署指南](docs/deployment.md)。
 
 ## 架构概览
 
@@ -131,14 +133,14 @@ https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<WORKER_URL>&secret_token
 - 测试框架：Vitest
 - 主要语言：JavaScript
 
-项目提供单元测试、集成测试、覆盖率检查、文档同步脚本和 Wrangler dry-run。真实 Telegram Bot 权限、Cloudflare Bindings 和 Cron 仍应在预发布 Worker 中验证。
+项目提供单元测试、集成测试、覆盖率检查、单文件打包与提交时自动构建 dist。真实 Telegram Bot 权限、Cloudflare Bindings 和 Cron 应在预发布 Worker 中验证。
 
 ## 安全提示
 
-- 使用 `wrangler secret put` 保存 `BOT_TOKEN`、`WEBHOOK_SECRET` 和 Turnstile Secret。
+- 在 Cloudflare Dashboard 的 **Variables and Secrets** 中保存 `BOT_TOKEN`、`WEBHOOK_SECRET` 和 Turnstile Secret。
 - `WEBHOOK_SECRET` 必须是至少 32 字节的高熵随机值。
 - 不要在仓库、日志、Issue 或聊天记录中提交真实凭据。
-- 不要将 Vitest UI 或本地 Wrangler 开发服务直接暴露到公网。
+- 不要将 Vitest UI 或本地开发服务直接暴露到公网。
 - 发布前阅读[安全设计](docs/security.md)并完成[运维检查清单](docs/operations.md)。
 
 ## License

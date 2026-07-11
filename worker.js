@@ -949,9 +949,29 @@ function onTurnstileSuccess(token) {
     }
   });
 }
-function onTurnstileError() {
-  showStatus('⚠️ 验证组件加载失败，请刷新页面重试', 'error');
+function onTurnstileError(errorCode) {
+  // Turnstile 客户端错误码：https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/
+  var code = (errorCode == null || errorCode === '') ? '' : String(errorCode);
+  var hint = '';
+  if (code === '110200') {
+    hint = '（域名未授权：请在 Cloudflare Turnstile → Hostname 中添加当前 Worker 域名，如 xxx.workers.dev）';
+  } else if (code === '110110') {
+    hint = '（Site Key 无效：请检查 Dashboard 中的 TURNSTILE_SITE_KEY）';
+  } else if (code === '110600') {
+    hint = '（挑战超时：请刷新页面重试；若在 Telegram 内置浏览器失败，可改用系统浏览器打开链接）';
+  } else if (code === '300030' || code === '300031') {
+    hint = '（组件初始化失败：多为 CSP/网络拦截 challenges.cloudflare.com）';
+  } else if (!code) {
+    hint = '（无法加载 challenges.cloudflare.com：请检查网络/代理/地区访问）';
+  }
+  showStatus('⚠️ 验证组件失败' + (code ? ' [' + code + ']' : '') + '，请刷新重试' + hint, 'error');
 }
+// 脚本长时间未就绪时给出提示（区分脚本被墙与 widget 配置错误）
+setTimeout(function() {
+  if (!window.turnstile && !submitted) {
+    showStatus('⚠️ 未能加载 Turnstile 脚本（challenges.cloudflare.com）。请检查网络，或让管理员暂时关闭 TURNSTILE_* 变量以使用本地题库验证。', 'error');
+  }
+}, 8000);
 </script>
 </body>
 </html>`;
@@ -1000,15 +1020,20 @@ const legacyApp = {
 
         const workerUrl = url.origin;
 
-        // 为内联脚本生成随机 nonce（允许验证页面的内联脚本和同源 fetch 执行）
-        const nonce = secureRandomId(16);
+        // Turnstile 专用 CSP：官方要求 script-src/frame-src 放行 challenges.cloudflare.com。
+        // 勿使用仅 nonce 的严格 script-src——Turnstile 会执行 javascript: URL，nonce 策略会触发
+        // onTurnstileError，页面显示「验证组件加载失败」。
+        // 本页为独立验证页，无第三方内容，unsafe-inline/eval 风险可控。
+        // 参考：https://developers.cloudflare.com/turnstile/reference/content-security-policy/
         const csp = [
           "default-src 'none'",
-          `script-src 'nonce-${nonce}' https://challenges.cloudflare.com`,
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com",
           "style-src 'unsafe-inline'",
           "img-src https://challenges.cloudflare.com data:",
-          `connect-src 'self'`,
+          "connect-src 'self' https://challenges.cloudflare.com",
           "frame-src https://challenges.cloudflare.com",
+          "child-src https://challenges.cloudflare.com",
+          "worker-src blob:",
           "base-uri 'none'",
           "form-action 'none'",
           "frame-ancestors 'none'",
@@ -1018,8 +1043,7 @@ const legacyApp = {
           .replace(/{{SITE_KEY}}/g, escapeHtml(siteKey))
           .replace(/{{CODE}}/g, escapeHtml(code))
           .replace(/{{USER_ID}}/g, escapeHtml(userId))
-          .replace(/{{WORKER_URL}}/g, escapeHtml(workerUrl))
-          .replace(/<script>/g, `<script nonce="${nonce}">`),
+          .replace(/{{WORKER_URL}}/g, escapeHtml(workerUrl)),
           { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': csp } }
         );
       }
@@ -1706,12 +1730,21 @@ async function handleListWordsCommand(env, threadId) {
 
   const hardcoded = BLOCKED_WORDS;
   const dynamic = kvWords.filter(w => !BLOCKED_WORDS.map(h => h.toLowerCase()).includes(w.toLowerCase()));
+  // SPAM_KEYWORDS 是独立的垃圾检测词库（环境变量），不进入 blocked_words_kv
+  const spamKeywords = parseSpamKeywords((env.SPAM_KEYWORDS || '').toString());
 
-  let reply = `📝 **屏蔽词列表** (共 ${allWords.length} 个)\n\n`;
+  const blockedTotal = allWords.length;
+  let reply = `📝 **内容过滤词库**\n\n`;
+  reply += `**一、屏蔽词**（命中后拦截并提示用户，共 ${blockedTotal} 个）\n\n`;
   reply += `🔧 **硬编码词** (${hardcoded.length} 个，修改需改代码):\n`;
   reply += hardcoded.length > 0 ? hardcoded.map(w => `  • ${w}`).join("\n") : "  (无)";
   reply += `\n\n💾 **动态词** (${dynamic.length} 个，可通过 /addword /delword 管理):\n`;
   reply += dynamic.length > 0 ? dynamic.map(w => `  • ${w}`).join("\n") : "  (无)";
+  reply += `\n\n**二、垃圾关键词 SPAM_KEYWORDS**（环境变量，走 spam 检测；共 ${spamKeywords.length} 个）\n`;
+  reply += spamKeywords.length > 0
+    ? spamKeywords.map(w => `  • ${w}`).join("\n")
+    : "  (未配置或为空；在 Cloudflare Variables 中设置 SPAM_KEYWORDS，逗号分隔)";
+  reply += `\n\n说明：/addword 只写入「动态屏蔽词」，不会改 SPAM_KEYWORDS 环境变量。`;
 
   await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: reply, parse_mode: "Markdown" });
 }

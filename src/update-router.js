@@ -39,20 +39,46 @@ export async function routeUpdate(update, {
     return new Response('Bad Request', { status: 400 });
   }
 
-  const claim = await storage.claimUpdate(updateId, getUpdateType(update), now());
+  let claim;
+  try {
+    claim = await storage.claimUpdate(updateId, getUpdateType(update), now());
+  } catch (error) {
+    return new Response(
+      `Error: claimUpdate failed: ${error?.message || String(error)}`,
+      { status: 500 },
+    );
+  }
   if (claim === 'duplicate') return new Response('OK');
 
   try {
     const response = await handleUpdate(update);
     if (response instanceof Response && response.status >= 500) {
-      await storage.markUpdateRetryable(updateId, `http_${response.status}`);
+      try {
+        await storage.markUpdateRetryable(updateId, `http_${response.status}`);
+      } catch {
+        // 保留原始业务 500，标记失败不二次抛出
+      }
       return response;
     }
 
-    await storage.completeUpdate(updateId, now());
+    try {
+      await storage.completeUpdate(updateId, now());
+    } catch (error) {
+      return new Response(
+        `Error: completeUpdate failed: ${error?.message || String(error)}`,
+        { status: 500 },
+      );
+    }
     return response instanceof Response ? response : new Response('OK');
   } catch (error) {
-    await storage.markUpdateRetryable(updateId, error?.category || 'temporary');
-    return new Response('Internal Server Error', { status: 500 });
+    try {
+      await storage.markUpdateRetryable(updateId, error?.category || 'temporary');
+    } catch {
+      // ignore secondary storage errors
+    }
+    return new Response(
+      `Error: handleUpdate failed: ${error?.message || String(error)}`,
+      { status: 500 },
+    );
   }
 }

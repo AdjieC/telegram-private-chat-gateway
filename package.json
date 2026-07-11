@@ -12,11 +12,14 @@
     "test:watch": "node --require ./scripts/localhost-dns.cjs ./node_modules/vitest/vitest.mjs",
     "test:coverage": "node --require ./scripts/localhost-dns.cjs ./node_modules/vitest/vitest.mjs run --coverage",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "build:single": "esbuild worker.js --bundle --format=esm --platform=neutral --target=es2022 --outfile=dist/worker.single.js --legal-comments=none",
+    "prepare": "node scripts/install-git-hooks.js",
+    "hooks:install": "node scripts/install-git-hooks.js",
     "sync-docs": "node scripts/sync-claude-md.js"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.10",
+    "esbuild": "^0.25.12",
     "vitest": "^4.1.10"
   }
 }

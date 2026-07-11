@@ -2,6 +2,15 @@
 
 本文件记录 Telegram Private Chat Gateway 的正式版本变化。
 
+## [Unreleased]
+
+### 文档与发布
+
+- 部署文档仅保留 **dist 单文件手动粘贴到 Cloudflare Worker** 路径，移除 Wrangler/Git 自动部署作为推荐方式。
+- 配置、运维、安全、开发文档统一为 Dashboard 配置 Bindings 与 Variables。
+- 新增提交钩子：变更源码时 pre-commit 自动 `npm run build:single` 并 stage `dist/worker.single.js`。
+- `/listwords` 增加展示环境变量 `SPAM_KEYWORDS` 一节，避免与动态屏蔽词混淆。
+
 ## [1.0.0] - 2026-07-11
 
 ### 核心能力
@@ -35,3 +44,4 @@
 - 提供结构化日志、Cloudflare Observability 示例和发布检查清单。
 - 提供从零部署、配置、架构、安全、运维和开发文档。
 - 提供 `npm run sync-docs` 自动生成函数、CONFIG 和 KV 键名索引。
+- 提供 `npm run build:single` 生成可粘贴的 `dist/worker.single.js`。

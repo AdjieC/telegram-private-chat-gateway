@@ -26,6 +26,58 @@ describe('createApp', () => {
     expect(await response.text()).toBe('OK');
   });
 
+  it('GET /health/env 报告运行时键在位情况且不含敏感值', async () => {
+    const app = createApp();
+    const response = await app.fetch(
+      new Request('https://worker.test/health/env'),
+      createMockEnv({
+        BOT_TOKEN: 'real-bot-token',
+        SUPERGROUP_ID: '',
+      }),
+      { waitUntil() {} },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.presence.BOT_TOKEN).toBe(true);
+    expect(body.presence.SUPERGROUP_ID).toBe(false);
+    expect(JSON.stringify(body)).not.toContain('real-bot-token');
+  });
+
+  it('GET /health/d1 在 D1 可用时返回 schema 版本', async () => {
+    const env = createMockEnv();
+    await ensureMigrations(env.TG_BOT_DB, 1000);
+    const app = createApp();
+    const response = await app.fetch(
+      new Request('https://worker.test/health/d1'),
+      env,
+      { waitUntil() {} },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.ok).toBe(true);
+    expect(body.schemaVersion).toBe(1);
+  });
+
+  it('缺少 SUPERGROUP_ID 时错误附带运行时在位诊断', async () => {
+    const app = createApp();
+    const response = await app.fetch(new Request('https://worker.test/', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'test-webhook-secret-at-least-32-bytes',
+      },
+      body: JSON.stringify({ update_id: 1 }),
+    }), createMockEnv({ SUPERGROUP_ID: '' }), { waitUntil() {} });
+
+    expect(response.status).toBe(500);
+    const text = await response.text();
+    expect(text).toContain('SUPERGROUP_ID not set');
+    expect(text).toContain('present=');
+    expect(text).toContain('missing=');
+  });
+
   it('缺少 TOPIC_MAP 时健康检查仍可用于存活探测', async () => {
     const app = createApp();
     const response = await app.fetch(

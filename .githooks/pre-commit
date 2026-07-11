@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+# 提交前自动构建单文件 Worker 产物，保证 dist 与源码一致。
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+# 仅在业务源码或打包配置变更时重建，避免无关提交拖慢
+if git diff --cached --name-only --diff-filter=ACMR | grep -Eq '^(worker\.js|src/|package\.json|package-lock\.json)'; then
+  echo "[pre-commit] building dist/worker.single.js ..."
+  npm run build:single
+  git add dist/worker.single.js
+  echo "[pre-commit] dist/worker.single.js staged"
+fi

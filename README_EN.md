@@ -2,7 +2,6 @@
 
 > A secure Telegram private-chat gateway built on Cloudflare Workers.
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Silentely/telegram-private-chat-gateway)
 ![GitHub stars](https://img.shields.io/github/stars/Silentely/telegram-private-chat-gateway?style=social)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
@@ -56,6 +55,9 @@ flowchart LR
 
 ## Five-Minute Deployment
 
+Supported release path only: **build `dist/worker.single.js` → paste into the Cloudflare Worker editor → configure Bindings and variables in the Dashboard**.  
+Do not use `wrangler deploy` or Cloudflare Git auto-deploy for production.
+
 ### 1. Get the project and install dependencies
 
 ```bash
@@ -64,31 +66,31 @@ cd telegram-private-chat-gateway
 npm install
 ```
 
-### 2. Create Cloudflare resources
+### 2. Confirm the single-file bundle
 
-- Create a KV Namespace and bind it as `TOPIC_MAP`.
-- Create a D1 Database and bind it as `TG_BOT_DB`.
-- Add your resource IDs to `wrangler.toml`.
-
-### 3. Configure Secrets and variables
+The repository ships `dist/worker.single.js`. Rebuild after source changes (pre-commit also rebuilds on commit):
 
 ```bash
-npx wrangler secret put BOT_TOKEN
-npx wrangler secret put WEBHOOK_SECRET
+npm run build:single
 ```
 
-Also configure:
+### 3. Paste into the Cloudflare Worker
 
-- `SUPERGROUP_ID`: A Telegram supergroup with Topics enabled; the ID must start with `-100`.
-- `OWNER_IDS`: Comma-separated recovery Owner IDs; strongly recommended.
+1. Dashboard → **Workers & Pages** → create or open a Worker  
+2. **Edit code** → paste the full contents of `dist/worker.single.js` → **Deploy**  
 
-### 4. Verify and deploy
+### 4. Configure resources in the Dashboard (once)
 
-```bash
-npm test
-npx wrangler deploy --dry-run
-npm run deploy
-```
+| Setting | Requirement |
+|---------|-------------|
+| Binding `TOPIC_MAP` | **KV Namespace** |
+| Binding `TG_BOT_DB` | **D1 Database** (not a Text variable) |
+| Secrets `BOT_TOKEN` / `WEBHOOK_SECRET` | Secrets; webhook secret ≥ 32 bytes |
+| Text `SUPERGROUP_ID` | Must start with `-100` |
+| Text `OWNER_IDS` | Recovery owners; strongly recommended |
+| Cron | Recommended: `0 3 * * *` |
+
+Do not put leading spaces in variable names. Full reference: [configuration](docs/configuration.md).
 
 ### 5. Register the Telegram Webhook
 
@@ -96,7 +98,7 @@ npm run deploy
 https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<WORKER_URL>&secret_token=<WEBHOOK_SECRET>&allowed_updates=%5B%22message%22,%22edited_message%22,%22callback_query%22%5D
 ```
 
-See the [deployment guide](docs/deployment.md) for resource creation, Cron configuration, and post-deployment checks.
+See the [deployment guide](docs/deployment.md) for the full walkthrough and post-deploy checks.
 
 ## Architecture Overview
 
@@ -131,14 +133,14 @@ See [system architecture](docs/architecture.md) for module boundaries and data f
 - Test framework: Vitest
 - Primary language: JavaScript
 
-The project includes unit tests, integration tests, coverage checks, documentation synchronization, and a Wrangler dry-run. Telegram Bot permissions, Cloudflare Bindings, and Cron should still be validated on a staging Worker.
+The project includes unit tests, integration tests, coverage checks, single-file bundling, and a pre-commit hook that rebuilds `dist/`. Telegram Bot permissions, Cloudflare Bindings, and Cron should still be validated on a staging Worker.
 
 ## Security
 
-- Store `BOT_TOKEN`, `WEBHOOK_SECRET`, and the Turnstile Secret with `wrangler secret put`.
+- Store `BOT_TOKEN`, `WEBHOOK_SECRET`, and the Turnstile Secret under Dashboard **Variables and Secrets**.
 - Use a high-entropy `WEBHOOK_SECRET` of at least 32 bytes.
 - Never commit real credentials to the repository, logs, issues, or chat messages.
-- Do not expose the Vitest UI or a local Wrangler development server directly to the internet.
+- Do not expose the Vitest UI or a local development server directly to the internet.
 - Review the [security design](docs/security.md) and [operations checklist](docs/operations.md) before release.
 
 ## License
