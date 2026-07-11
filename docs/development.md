@@ -24,7 +24,10 @@ npm install
 ├── worker.js                    # Telegram 业务编排和 Worker 导出
 ├── src/
 │   ├── app.js                   # HTTP 安全入口和 Scheduled 入口
-│   ├── admin-service.js         # 角色授权、资料卡和规则服务
+│   ├── admin-service.js         # 角色授权、资料卡和规则服务（v1 资料卡）
+│   ├── admin-ui-format.js       # 管理 UI 键盘与展示纯函数
+│   ├── admin-commands.js        # 管理命令编排（sysinfo/stats/rank/notes/adm 回调）
+│   ├── activity-summary.js      # CST 日切、热力、sparkline 纯函数
 │   ├── conversation-service.js  # Topic、双向消息和资料同步
 │   ├── message-policy.js        # 内容策略和规则校验
 │   ├── telegram-client.js       # Telegram API 客户端
