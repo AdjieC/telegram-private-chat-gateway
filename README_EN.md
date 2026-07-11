@@ -104,15 +104,37 @@ See the [deployment guide](docs/deployment.md) for the full walkthrough and post
 
 The project uses ES Modules and separates HTTP security, conversations, policy, Telegram API access, storage, and maintenance responsibilities:
 
-- `worker.js`: Telegram orchestration and the Worker export entry.
+- `worker.js`: Telegram orchestration, verification, media groups, and Worker export; wires admin board handlers.
 - `src/app.js`: HTTP validation, idempotent routing, and the Scheduled entry.
 - `src/conversation-service.js`: Topic lifecycle, two-way messages, and profile synchronization.
-- `src/admin-service.js`: Role authorization, profile-card actions, rule management, and audits.
+- `src/admin-service.js`: Role authorization, profile-card (`v1:*`) actions, rules, and audits.
+- `src/admin-commands.js` / `admin-ui-format.js` / `activity-summary.js`: Group admin menu, sysinfo/stats/rank, and CST stats UI.
+- `src/verify-copy.js` / `user-copy.js`: User-facing verification and intercept copy.
 - `src/message-policy.js`: Content classification, rule validation, and policy evaluation.
 - `src/storage/`: D1, KV, temporary state, and schema migrations.
 - `src/telegram-client.js`: Telegram API timeouts, retries, and error classification.
 
 See [system architecture](docs/architecture.md) for module boundaries and data flows.
+
+## Admin commands (quick reference)
+
+In the supergroup (sender must be group creator/admin, `ADMIN_IDS`, or `OWNER_IDS`). Full detail: [operations](docs/operations.md).
+
+| Entry | Purpose |
+|-------|---------|
+| `/menu` | Button home (recommended) |
+| `/sysinfo` | System pages: overview / storage / errors / today / activity |
+| `/stats` | Today stats (CST day boundary, vs yesterday, 7-day sparkline + peak days, heat) |
+| `/rank` | Today active ranking + CST hourly heat; open user panel from buttons |
+| `/find query` | Find by UID / username / name |
+| `/notes query` | Search admin notes |
+| `/panel` `/info` | In-user topic: action panel and profile |
+| `/ban` `/close` `/reset` | Require confirmation; also mute / open / trust, etc. |
+| `/synccommands` | Owner-only: register Bot slash command menu |
+
+Stats and heat use **China time CST (UTC+8)**. End users only get `/start`, `/help`, and the verification flow.
+
+After deploying a new `dist/worker.single.js`, Owners should run `/synccommands` again.
 
 ## Documentation
 

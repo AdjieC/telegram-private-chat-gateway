@@ -38,6 +38,7 @@
 - 配置、运维、安全、开发文档统一为 Dashboard 配置 Bindings 与 Variables。
 - 新增提交钩子：变更源码时 pre-commit 自动 `npm run build:single` 并 stage `dist/worker.single.js`。
 - `/listwords` 增加展示环境变量 `SPAM_KEYWORDS` 一节，避免与动态屏蔽词混淆。
+- 同步 README / README_EN / architecture / development / operations / security / Claude.md：管理模块拆分、CST 日切、命令速查、`OWNER_IDS` 管理权限与文案模块边界。
 
 ## [1.0.0] - 2026-07-11
 
