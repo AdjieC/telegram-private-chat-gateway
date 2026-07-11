@@ -130,10 +130,24 @@ KV 保存短期状态和动态屏蔽词。重要部署前记录：
 
 ### 管理员回复没有发送给用户
 
-- 检查发送者是否通过 `ADMIN_IDS` 或 Telegram 群组管理员检查。
+- 检查发送者是否通过 `OWNER_IDS`、`ADMIN_IDS` 或 Telegram 群组管理员检查（`OWNER_IDS` 视为管理权限）。
 - 确认消息位于用户专属 Topic。
 - 检查 KV 中 `thread:<topicId>` 映射和 D1 用户 Topic ID。
 - 检查用户是否封禁 Bot 或 Telegram API 返回 403。
+
+### 管理命令速查（群内）
+
+| 场景 | 命令 / 入口 |
+|------|-------------|
+| 按钮首页 | `/menu` |
+| 系统分页 | `/sysinfo`（概览/存储/错误/今日/活跃） |
+| 今日与对比 | `/stats`（较昨日增量 + 热力摘要） |
+| 活跃排行 | `/rank`（CST 热力 + Top 用户，可点进面板） |
+| 查找 | `/find 词` · `/notes 关键词` |
+| 用户操作 | 话题内 `/panel` `/info` `/note` `/ban`(确认) `/mute` 等 |
+| 同步斜杠菜单 | Owner `/synccommands` |
+
+部署新版本后请粘贴最新 `dist/worker.single.js`；命令列表变更后由 Owner 再跑一次 `/synccommands`。
 
 ### Turnstile 页面不可用
 

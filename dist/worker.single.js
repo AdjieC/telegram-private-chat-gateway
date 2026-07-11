@@ -2515,6 +2515,9 @@ function createLegacyConversationService(env) {
 function parseIdAllowlist(raw) {
   return String(raw || "").split(/[,;\s]+/g).map((value) => value.trim()).filter((value) => /^\d{1,20}$/.test(value));
 }
+function idAllowlistHas(raw, userId) {
+  return parseIdAllowlist(raw).includes(String(userId));
+}
 function createLegacyAdminService(env) {
   return createAdminService({
     storage: createD1Storage(env.TG_BOT_DB),
@@ -2800,6 +2803,7 @@ function parseAdminIdAllowlist(env) {
   return set.size > 0 ? set : null;
 }
 async function isAdminUser(env, userId) {
+  if (idAllowlistHas(env.OWNER_IDS, userId)) return true;
   const allowlist = parseAdminIdAllowlist(env);
   if (allowlist && allowlist.has(String(userId))) return true;
   const cacheKey = String(userId);
@@ -3707,7 +3711,7 @@ async function handleAdminReply(msg, env, ctx) {
   }
 }
 function isOwnerUser(env, userId) {
-  return parseIdAllowlist(env.OWNER_IDS).has(String(userId));
+  return idAllowlistHas(env.OWNER_IDS, userId);
 }
 function buildUserActionKeyboard(userId) {
   const id = String(userId);
@@ -3956,8 +3960,8 @@ async function handleHelpCommand(env, threadId, senderId = null) {
   const helpText = `\u{1F4CB} <b>\u7BA1\u7406\u5E2E\u52A9</b> \xB7 v${GATEWAY_VERSION}
 
 <b>\u6743\u9650</b>
-\u7FA4\u4E3B/\u7BA1\u7406\u5458\u6216 <code>ADMIN_IDS</code> \xB7 \u79C1\u804A\u7528\u6237\u4EC5 <code>/start</code> <code>/help</code>
-\u547D\u4EE4\u83DC\u5355\u9700\u6CE8\u518C\uFF08BotFather \u6216 Owner <code>/synccommands</code>\uFF09
+\u7FA4\u4E3B/\u7BA1\u7406\u5458\u3001<code>ADMIN_IDS</code> \u6216 <code>OWNER_IDS</code>
+\u79C1\u804A\u7528\u6237\u4EC5 <code>/start</code> <code>/help</code> \xB7 \u547D\u4EE4\u83DC\u5355\uFF1ABotFather \u6216 Owner <code>/synccommands</code>
 
 <b>\u63A8\u8350\u7528\u6CD5</b>
 \u2022 <code>/menu</code> \u2014 \u6309\u94AE\u9996\u9875\uFF08\u6700\u7701\u4E8B\uFF09
@@ -4147,7 +4151,7 @@ async function buildSysinfoPageText(env, page = "overview") {
     lines.push("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
     lines.push(`${statusChip(true, "Worker \u8FD0\u884C\u4E2D")}`);
     lines.push(`${statusChip(hasKv, "KV \u5DF2\u7ED1\u5B9A", "KV \u7F3A\u5931")} \xB7 ${statusChip(hasD1, "D1 \u5DF2\u7ED1\u5B9A", "D1 \u7F3A\u5931")}`);
-    lines.push(`\u9A8C\u8BC1: ${turnstileOn ? "\u{1F6E1} Turnstile" : "\u{1F4DD} \u672C\u5730\u9898\u5E93"} \xB7 Owner: ${parseIdAllowlist(env.OWNER_IDS).size > 0 ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E"}`);
+    lines.push(`\u9A8C\u8BC1: ${turnstileOn ? "\u{1F6E1} Turnstile" : "\u{1F4DD} \u672C\u5730\u9898\u5E93"} \xB7 Owner: ${parseIdAllowlist(env.OWNER_IDS).length > 0 ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E"}`);
     lines.push(`\u8D85\u7EA7\u7FA4 ID: ${String(env.SUPERGROUP_ID || "").startsWith("-100") ? "\u2705 \u683C\u5F0F\u6B63\u786E" : "\u274C \u9700 -100 \u5F00\u5934"}`);
     lines.push("");
     if (hasD1) {
@@ -4536,13 +4540,16 @@ async function handleSyncCommandsCommand(env, threadId, senderId) {
     { command: "info", description: "\u7528\u6237\u8D44\u6599" },
     { command: "find", description: "\u67E5\u627E\u7528\u6237" },
     { command: "notes", description: "\u641C\u7D22\u5907\u6CE8" },
+    { command: "note", description: "\u5199/\u770B\u5907\u6CE8" },
     { command: "whoami", description: "\u67E5\u770B\u6211\u7684\u6743\u9650" },
-    { command: "ban", description: "\u5C01\u7981\u7528\u6237" },
+    { command: "ban", description: "\u5C01\u7981\uFF08\u9700\u786E\u8BA4\uFF09" },
     { command: "unban", description: "\u89E3\u5C01\u7528\u6237" },
+    { command: "mute", description: "\u9759\u97F3\u7528\u6237" },
+    { command: "unmute", description: "\u53D6\u6D88\u9759\u97F3" },
     { command: "close", description: "\u5173\u95ED\u5BF9\u8BDD" },
     { command: "open", description: "\u6253\u5F00\u5BF9\u8BDD" },
-    { command: "mute", description: "\u9759\u97F3\u7528\u6237" },
     { command: "listwords", description: "\u5C4F\u853D\u8BCD\u5217\u8868" },
+    { command: "cleanup", description: "\u6E05\u7406\u65E0\u6548\u8BDD\u9898" },
     { command: "synccommands", description: "\u540C\u6B65\u547D\u4EE4\u83DC\u5355" }
   ];
   const res = await tgCall(env, "setMyCommands", { commands });
@@ -4744,32 +4751,78 @@ async function handleListWordsCommand(env, threadId) {
 }
 async function handleCloseCommand(env, threadId, userId) {
   const key = `user:${userId}`;
-  const rec = await safeGetJSON(env, key, null);
-  if (rec) {
+  let rec = await safeGetJSON(env, key, null);
+  if (!rec) {
+    rec = { thread_id: threadId, closed: true };
+  } else {
     rec.closed = true;
-    await env.TOPIC_MAP.put(key, JSON.stringify(rec));
-    await tgCall(env, "closeForumTopic", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId });
-    await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: "\u{1F6AB} **\u5BF9\u8BDD\u5DF2\u5F3A\u5236\u5173\u95ED**", parse_mode: "Markdown" });
+    if (!rec.thread_id) rec.thread_id = threadId;
   }
+  await env.TOPIC_MAP.put(key, JSON.stringify(rec));
+  if (env.TG_BOT_DB) {
+    try {
+      await createD1Storage(env.TG_BOT_DB).updateUserState(userId, { status: "closed" });
+    } catch (e) {
+      Logger.warn("close_d1_update_failed", { userId, error: e?.message });
+    }
+  }
+  await tgCall(env, "closeForumTopic", {
+    chat_id: env.SUPERGROUP_ID,
+    message_thread_id: threadId
+  });
+  await tgCall(env, "sendMessage", {
+    chat_id: env.SUPERGROUP_ID,
+    message_thread_id: threadId,
+    text: "\u{1F6AB} <b>\u5BF9\u8BDD\u5DF2\u5F3A\u5236\u5173\u95ED</b>",
+    parse_mode: "HTML"
+  });
 }
 async function handleOpenCommand(env, threadId, userId) {
   const key = `user:${userId}`;
-  const rec = await safeGetJSON(env, key, null);
-  if (rec) {
+  let rec = await safeGetJSON(env, key, null);
+  if (!rec) {
+    rec = { thread_id: threadId, closed: false };
+  } else {
     rec.closed = false;
-    await env.TOPIC_MAP.put(key, JSON.stringify(rec));
-    await tgCall(env, "reopenForumTopic", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId });
-    await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: "\u2705 **\u5BF9\u8BDD\u5DF2\u6062\u590D**", parse_mode: "Markdown" });
+    if (!rec.thread_id) rec.thread_id = threadId;
   }
+  await env.TOPIC_MAP.put(key, JSON.stringify(rec));
+  if (env.TG_BOT_DB) {
+    try {
+      await createD1Storage(env.TG_BOT_DB).updateUserState(userId, { status: "active" });
+    } catch (e) {
+      Logger.warn("open_d1_update_failed", { userId, error: e?.message });
+    }
+  }
+  await tgCall(env, "reopenForumTopic", {
+    chat_id: env.SUPERGROUP_ID,
+    message_thread_id: threadId
+  });
+  await tgCall(env, "sendMessage", {
+    chat_id: env.SUPERGROUP_ID,
+    message_thread_id: threadId,
+    text: "\u2705 <b>\u5BF9\u8BDD\u5DF2\u6062\u590D</b>",
+    parse_mode: "HTML"
+  });
 }
 async function handleResetCommand(env, threadId, userId) {
   await setPersistentTrust(env, userId, "normal");
-  await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: "\u{1F504} **\u9A8C\u8BC1\u91CD\u7F6E**", parse_mode: "Markdown" });
+  await tgCall(env, "sendMessage", {
+    chat_id: env.SUPERGROUP_ID,
+    message_thread_id: threadId,
+    text: "\u{1F504} <b>\u9A8C\u8BC1\u91CD\u7F6E</b>\uFF08\u5DF2\u53D6\u6D88\u6C38\u4E45\u4FE1\u4EFB\uFF0C\u4E0B\u6B21\u9700\u91CD\u65B0\u9A8C\u8BC1\uFF09",
+    parse_mode: "HTML"
+  });
 }
 async function handleTrustCommand(env, threadId, userId) {
   await setPersistentTrust(env, userId, "trusted");
   await env.TOPIC_MAP.delete(`needs_verify:${userId}`);
-  await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: "\u{1F31F} **\u5DF2\u8BBE\u7F6E\u6C38\u4E45\u4FE1\u4EFB**", parse_mode: "Markdown" });
+  await tgCall(env, "sendMessage", {
+    chat_id: env.SUPERGROUP_ID,
+    message_thread_id: threadId,
+    text: "\u{1F31F} <b>\u5DF2\u8BBE\u7F6E\u6C38\u4E45\u4FE1\u4EFB</b>",
+    parse_mode: "HTML"
+  });
 }
 async function handleBanCommand(env, threadId, userId) {
   await env.TOPIC_MAP.put(`banned:${userId}`, "1");
@@ -4784,8 +4837,8 @@ async function handleBanCommand(env, threadId, userId) {
   await tgCall(env, "sendMessage", {
     chat_id: env.SUPERGROUP_ID,
     message_thread_id: threadId,
-    text: "\u{1F6AB} **\u7528\u6237\u5DF2\u5C01\u7981**\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
-    parse_mode: "Markdown"
+    text: "\u{1F6AB} <b>\u7528\u6237\u5DF2\u5C01\u7981</b>\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
+    parse_mode: "HTML"
   });
   const notify = await tgCall(env, "sendMessage", {
     chat_id: userId,
@@ -4799,7 +4852,8 @@ async function handleBanCommand(env, threadId, userId) {
     await tgCall(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: `\u26A0\uFE0F \u5DF2\u5C01\u7981\uFF0C\u4F46\u901A\u77E5\u7528\u6237\u5931\u8D25\uFF08\u53EF\u80FD\u5BF9\u65B9\u672A\u79C1\u804A\u8FC7\u673A\u5668\u4EBA\u6216\u5DF2\u62C9\u9ED1\uFF09\uFF1A${notify?.description || "unknown"}`
+      text: `\u26A0\uFE0F \u5DF2\u5C01\u7981\uFF0C\u4F46\u901A\u77E5\u7528\u6237\u5931\u8D25\uFF08\u53EF\u80FD\u5BF9\u65B9\u672A\u79C1\u804A\u8FC7\u673A\u5668\u4EBA\u6216\u5DF2\u62C9\u9ED1\uFF09\uFF1A${escapeHtml(notify?.description || "unknown")}`,
+      parse_mode: "HTML"
     });
   } else {
     await env.TOPIC_MAP.put(`ban_notice:${userId}`, "1", { expirationTtl: 3600 });
@@ -4818,8 +4872,8 @@ async function handleUnbanCommand(env, threadId, userId) {
   await tgCall(env, "sendMessage", {
     chat_id: env.SUPERGROUP_ID,
     message_thread_id: threadId,
-    text: "\u2705 **\u7528\u6237\u5DF2\u89E3\u5C01**\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
-    parse_mode: "Markdown"
+    text: "\u2705 <b>\u7528\u6237\u5DF2\u89E3\u5C01</b>\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
+    parse_mode: "HTML"
   });
   const notify = await tgCall(env, "sendMessage", {
     chat_id: userId,
@@ -4901,168 +4955,196 @@ async function handleInfoCommand(env, threadId, userId) {
 async function handleAdminUiCallback(query, env, ctx) {
   const data = String(query.data || "");
   const senderId = query.from?.id;
-  if (!senderId || !await isAdminUser(env, senderId)) {
+  try {
+    if (!senderId || !await isAdminUser(env, senderId)) {
+      await tgCall(env, "answerCallbackQuery", {
+        callback_query_id: query.id,
+        text: "\u65E0\u6743\u9650",
+        show_alert: true
+      });
+      return;
+    }
+    const threadId = query.message?.message_thread_id;
+    const chatId = query.message?.chat?.id;
+    const messageId = query.message?.message_id;
+    const parts = data.split(":");
+    if (parts[0] === "adm" && parts[1] === "sys") {
+      const page = parts[2] || "overview";
+      await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u66F4\u65B0" });
+      await handleSysinfoCommand(env, threadId, {
+        page: ["overview", "storage", "errors", "stats", "activity"].includes(page) ? page : "overview",
+        edit: chatId && messageId ? { chatId, messageId } : null
+      });
+      return;
+    }
+    if (parts[0] === "adm" && parts[1] === "nav") {
+      const nav = parts[2];
+      if (nav === "cleanup_ask") {
+        await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id });
+        await tgCall(env, "sendMessage", {
+          chat_id: env.SUPERGROUP_ID,
+          message_thread_id: threadId,
+          text: "\u{1F9F9} <b>\u786E\u8BA4\u6E05\u7406\u65E0\u6548\u8BDD\u9898\uFF1F</b>\n\u5C06\u626B\u63CF\u5E76\u5904\u7406\u5931\u6548 Topic \u6620\u5C04\uFF0C\u53EF\u80FD\u8017\u65F6\u3002",
+          parse_mode: "HTML",
+          reply_markup: buildCleanupConfirmKeyboard()
+        });
+        return;
+      }
+      if (nav === "cleanup_ok") {
+        await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5F00\u59CB\u6E05\u7406" });
+        if (ctx?.waitUntil) ctx.waitUntil(handleCleanupCommand(threadId, env));
+        else await handleCleanupCommand(threadId, env);
+        return;
+      }
+      if (nav === "cleanup_cancel") {
+        await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u53D6\u6D88" });
+        if (chatId && messageId) {
+          await tgCall(env, "editMessageText", {
+            chat_id: chatId,
+            message_id: messageId,
+            text: "\u5DF2\u53D6\u6D88\u6E05\u7406\u3002"
+          });
+        }
+        return;
+      }
+      const navHandlers = {
+        sysinfo: () => handleSysinfoCommand(env, threadId, { page: "overview" }),
+        stats: () => handleStatsCommand(env, threadId),
+        rank: () => handleRankCommand(env, threadId),
+        activity: () => handleRankCommand(env, threadId),
+        notes: () => handleNotesCommand(env, threadId, "/notes"),
+        find: async () => {
+          await tgCall(env, "sendMessage", {
+            chat_id: env.SUPERGROUP_ID,
+            message_thread_id: threadId,
+            text: [
+              "\u{1F50D} <b>\u67E5\u627E\u7528\u6237</b>",
+              "\u7528\u6CD5: <code>/find UID\u6216\u7528\u6237\u540D\u6216\u59D3\u540D</code>",
+              "\u5907\u6CE8: <code>/notes \u5173\u952E\u8BCD</code>",
+              "\u6D3B\u8DC3: <code>/rank</code>"
+            ].join("\n"),
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: [[
+                { text: "\u{1F50E} \u5907\u6CE8\u5217\u8868", callback_data: "adm:nav:notes" },
+                { text: "\u{1F525} \u6D3B\u8DC3", callback_data: "adm:nav:rank" },
+                { text: "\u{1F3E0} \u83DC\u5355", callback_data: "adm:nav:menu" }
+              ]]
+            }
+          });
+        },
+        whoami: () => handleWhoamiCommand(env, threadId, senderId),
+        listwords: () => handleListWordsCommand(env, threadId),
+        help: () => handleHelpCommand(env, threadId, senderId),
+        menu: () => handleMenuCommand(env, threadId, senderId),
+        synccommands: () => handleSyncCommandsCommand(env, threadId, senderId)
+      };
+      const navFn = navHandlers[nav];
+      if (!navFn) {
+        await tgCall(env, "answerCallbackQuery", {
+          callback_query_id: query.id,
+          text: "\u672A\u77E5\u5BFC\u822A",
+          show_alert: true
+        });
+        return;
+      }
+      await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id });
+      await navFn();
+      return;
+    }
+    if (parts[0] === "adm" && parts[1] === "u" && parts.length >= 4) {
+      const action = parts[2];
+      const userId = parts[3];
+      if (!/^\d{1,20}$/.test(String(userId))) {
+        await tgCall(env, "answerCallbackQuery", {
+          callback_query_id: query.id,
+          text: "\u65E0\u6548\u7528\u6237 ID",
+          show_alert: true
+        });
+        return;
+      }
+      const tid = await resolveThreadIdForUser(env, userId) || threadId;
+      if (!tid) {
+        await tgCall(env, "answerCallbackQuery", {
+          callback_query_id: query.id,
+          text: "\u627E\u4E0D\u5230\u7528\u6237\u8BDD\u9898",
+          show_alert: true
+        });
+        return;
+      }
+      if (action === "banask") {
+        await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id });
+        await tgCall(env, "sendMessage", {
+          chat_id: env.SUPERGROUP_ID,
+          message_thread_id: tid,
+          text: `\u26A0\uFE0F <b>\u786E\u8BA4\u5C01\u7981\u7528\u6237</b> <code>${escapeHtml(userId)}</code>\uFF1F
+\u5BF9\u65B9\u5C06\u6536\u5230\u901A\u77E5\u4E14\u65E0\u6CD5\u7EE7\u7EED\u53D1\u6D88\u606F\u3002`,
+          parse_mode: "HTML",
+          reply_markup: buildBanConfirmKeyboard(userId)
+        });
+        return;
+      }
+      if (action === "bancancel") {
+        await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u53D6\u6D88" });
+        if (chatId && messageId) {
+          await tgCall(env, "editMessageText", {
+            chat_id: chatId,
+            message_id: messageId,
+            text: "\u5DF2\u53D6\u6D88\u5C01\u7981\u3002"
+          });
+        }
+        return;
+      }
+      if (action === "shownote") {
+        await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id });
+        await handleNoteCommand(env, tid, userId, "/note");
+        return;
+      }
+      const map = {
+        ban: () => handleBanCommand(env, tid, userId),
+        banok: () => handleBanCommand(env, tid, userId),
+        unban: () => handleUnbanCommand(env, tid, userId),
+        close: () => handleCloseCommand(env, tid, userId),
+        open: () => handleOpenCommand(env, tid, userId),
+        trust: () => handleTrustCommand(env, tid, userId),
+        reset: () => handleResetCommand(env, tid, userId),
+        mute: () => handleMuteCommand(env, tid, userId),
+        unmute: () => handleUnmuteCommand(env, tid, userId),
+        info: () => handleInfoCommand(env, tid, userId),
+        panel: () => handlePanelCommand(env, tid, userId)
+      };
+      const fn = map[action];
+      if (!fn) {
+        await tgCall(env, "answerCallbackQuery", {
+          callback_query_id: query.id,
+          text: "\u672A\u77E5\u64CD\u4F5C",
+          show_alert: true
+        });
+        return;
+      }
+      await tgCall(env, "answerCallbackQuery", {
+        callback_query_id: query.id,
+        text: action === "banok" || action === "ban" ? "\u6B63\u5728\u5C01\u7981\u2026" : "\u5904\u7406\u4E2D\u2026"
+      });
+      await fn();
+      return;
+    }
     await tgCall(env, "answerCallbackQuery", {
       callback_query_id: query.id,
-      text: "\u65E0\u6743\u9650",
+      text: "\u672A\u77E5\u56DE\u8C03",
       show_alert: true
     });
-    return;
-  }
-  const threadId = query.message?.message_thread_id;
-  const chatId = query.message?.chat?.id;
-  const messageId = query.message?.message_id;
-  const parts = data.split(":");
-  if (parts[0] === "adm" && parts[1] === "sys") {
-    const page = parts[2] || "overview";
-    await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u66F4\u65B0" });
-    await handleSysinfoCommand(env, threadId, {
-      page: ["overview", "storage", "errors", "stats", "activity"].includes(page) ? page : "overview",
-      edit: chatId && messageId ? { chatId, messageId } : null
-    });
-    return;
-  }
-  if (parts[0] === "adm" && parts[1] === "nav") {
-    const nav = parts[2];
-    if (nav === "cleanup_ask") {
-      await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id });
-      await tgCall(env, "sendMessage", {
-        chat_id: env.SUPERGROUP_ID,
-        message_thread_id: threadId,
-        text: "\u{1F9F9} <b>\u786E\u8BA4\u6E05\u7406\u65E0\u6548\u8BDD\u9898\uFF1F</b>\n\u5C06\u626B\u63CF\u5E76\u5904\u7406\u5931\u6548 Topic \u6620\u5C04\uFF0C\u53EF\u80FD\u8017\u65F6\u3002",
-        parse_mode: "HTML",
-        reply_markup: buildCleanupConfirmKeyboard()
-      });
-      return;
-    }
-    if (nav === "cleanup_ok") {
-      await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5F00\u59CB\u6E05\u7406" });
-      ctx.waitUntil(handleCleanupCommand(threadId, env));
-      return;
-    }
-    if (nav === "cleanup_cancel") {
-      await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u53D6\u6D88" });
-      if (chatId && messageId) {
-        await tgCall(env, "editMessageText", {
-          chat_id: chatId,
-          message_id: messageId,
-          text: "\u5DF2\u53D6\u6D88\u6E05\u7406\u3002"
-        });
-      }
-      return;
-    }
-    await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id });
-    if (nav === "sysinfo") await handleSysinfoCommand(env, threadId, { page: "overview" });
-    else if (nav === "stats") await handleStatsCommand(env, threadId);
-    else if (nav === "rank" || nav === "activity") await handleRankCommand(env, threadId);
-    else if (nav === "notes") await handleNotesCommand(env, threadId, "/notes");
-    else if (nav === "find") {
-      await tgCall(env, "sendMessage", {
-        chat_id: env.SUPERGROUP_ID,
-        message_thread_id: threadId,
-        text: [
-          "\u{1F50D} <b>\u67E5\u627E\u7528\u6237</b>",
-          "\u7528\u6CD5: <code>/find UID\u6216\u7528\u6237\u540D\u6216\u59D3\u540D</code>",
-          "\u5907\u6CE8: <code>/notes \u5173\u952E\u8BCD</code>",
-          "\u6D3B\u8DC3: <code>/rank</code>"
-        ].join("\n"),
-        parse_mode: "HTML",
-        reply_markup: {
-          inline_keyboard: [[
-            { text: "\u{1F50E} \u5907\u6CE8\u5217\u8868", callback_data: "adm:nav:notes" },
-            { text: "\u{1F525} \u6D3B\u8DC3", callback_data: "adm:nav:rank" },
-            { text: "\u{1F3E0} \u83DC\u5355", callback_data: "adm:nav:menu" }
-          ]]
-        }
-      });
-    } else if (nav === "whoami") await handleWhoamiCommand(env, threadId, senderId);
-    else if (nav === "listwords") await handleListWordsCommand(env, threadId);
-    else if (nav === "help") await handleHelpCommand(env, threadId, senderId);
-    else if (nav === "menu") await handleMenuCommand(env, threadId, senderId);
-    else if (nav === "synccommands") await handleSyncCommandsCommand(env, threadId, senderId);
-    else {
+  } catch (e) {
+    recordSystemError("admin_ui_callback_failed", e, { data }, env);
+    try {
       await tgCall(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "\u672A\u77E5\u5BFC\u822A",
+        text: "\u64CD\u4F5C\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5",
         show_alert: true
       });
+    } catch {
     }
-    return;
   }
-  if (parts[0] === "adm" && parts[1] === "u" && parts.length >= 4) {
-    const action = parts[2];
-    const userId = parts[3];
-    const tid = await resolveThreadIdForUser(env, userId) || threadId;
-    if (!tid) {
-      await tgCall(env, "answerCallbackQuery", {
-        callback_query_id: query.id,
-        text: "\u627E\u4E0D\u5230\u7528\u6237\u8BDD\u9898",
-        show_alert: true
-      });
-      return;
-    }
-    if (action === "banask") {
-      await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id });
-      await tgCall(env, "sendMessage", {
-        chat_id: env.SUPERGROUP_ID,
-        message_thread_id: tid,
-        text: `\u26A0\uFE0F <b>\u786E\u8BA4\u5C01\u7981\u7528\u6237</b> <code>${escapeHtml(userId)}</code>\uFF1F
-\u5BF9\u65B9\u5C06\u6536\u5230\u901A\u77E5\u4E14\u65E0\u6CD5\u7EE7\u7EED\u53D1\u6D88\u606F\u3002`,
-        parse_mode: "HTML",
-        reply_markup: buildBanConfirmKeyboard(userId)
-      });
-      return;
-    }
-    if (action === "bancancel") {
-      await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u53D6\u6D88" });
-      if (chatId && messageId) {
-        await tgCall(env, "editMessageText", {
-          chat_id: chatId,
-          message_id: messageId,
-          text: "\u5DF2\u53D6\u6D88\u5C01\u7981\u3002"
-        });
-      }
-      return;
-    }
-    if (action === "shownote") {
-      await tgCall(env, "answerCallbackQuery", { callback_query_id: query.id });
-      await handleNoteCommand(env, tid, userId, "/note");
-      return;
-    }
-    const map = {
-      ban: () => handleBanCommand(env, tid, userId),
-      banok: () => handleBanCommand(env, tid, userId),
-      unban: () => handleUnbanCommand(env, tid, userId),
-      close: () => handleCloseCommand(env, tid, userId),
-      open: () => handleOpenCommand(env, tid, userId),
-      trust: () => handleTrustCommand(env, tid, userId),
-      reset: () => handleResetCommand(env, tid, userId),
-      mute: () => handleMuteCommand(env, tid, userId),
-      unmute: () => handleUnmuteCommand(env, tid, userId),
-      info: () => handleInfoCommand(env, tid, userId),
-      panel: () => handlePanelCommand(env, tid, userId)
-    };
-    const fn = map[action];
-    if (!fn) {
-      await tgCall(env, "answerCallbackQuery", {
-        callback_query_id: query.id,
-        text: "\u672A\u77E5\u64CD\u4F5C",
-        show_alert: true
-      });
-      return;
-    }
-    await tgCall(env, "answerCallbackQuery", {
-      callback_query_id: query.id,
-      text: action === "banok" ? "\u5DF2\u5C01\u7981" : "\u5DF2\u6267\u884C"
-    });
-    await fn();
-    return;
-  }
-  await tgCall(env, "answerCallbackQuery", {
-    callback_query_id: query.id,
-    text: "\u672A\u77E5\u56DE\u8C03",
-    show_alert: true
-  });
 }
 async function _handleAdminReplyInner(msg, env, ctx) {
   const threadId = msg.message_thread_id;
@@ -5071,7 +5153,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
   const senderId = msg.from?.id;
   const isCommand = !!text && text.startsWith("/");
   if (!senderId || !await isAdminUser(env, senderId)) {
-    const known = /^\/(help|menu|sysinfo|system|status|stats|rank|activity|whoami|find|notes|cleanup|listwords|addword|delword|panel|info|ban|unban|close|open|mute|unmute|trust|reset|note|synccommands)(@|\s|$)/i;
+    const known = /^\/(help|menu|dashboard|sysinfo|system|status|stats|rank|activity|heat|whoami|find|notes|cleanup|listwords|addword|delword|panel|info|ban|unban|close|open|mute|unmute|trust|reset|note|synccommands)(@|\s|$)/i;
     if (isCommand && senderId && known.test(text)) {
       await tgCall(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
@@ -5197,7 +5279,14 @@ async function _handleAdminReplyInner(msg, env, ctx) {
     return;
   }
   if (text === "/ban") {
-    await handleBanCommand(env, threadId, userId);
+    await tgCall(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: `\u26A0\uFE0F <b>\u786E\u8BA4\u5C01\u7981\u7528\u6237</b> <code>${escapeHtml(String(userId))}</code>\uFF1F
+\u5BF9\u65B9\u5C06\u6536\u5230\u901A\u77E5\u4E14\u65E0\u6CD5\u7EE7\u7EED\u53D1\u6D88\u606F\u3002`,
+      parse_mode: "HTML",
+      reply_markup: buildBanConfirmKeyboard(userId)
+    });
     return;
   }
   if (text === "/unban") {
