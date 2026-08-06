@@ -106,8 +106,10 @@ https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<WORKER_URL>&secret_token
 
 - `worker.js`：Telegram 业务编排和 Worker 导出入口。
 - `src/app.js`：HTTP 请求校验、幂等路由和 Scheduled 入口。
-- `src/conversation-service.js`：Topic 生命周期、双向消息和资料同步。
+- `src/conversation-service.js`：编辑消息映射查询与修改通知。
 - `src/admin-service.js`：角色授权、资料卡操作、规则管理和审计。
+- `src/admin-actions.js`：用户状态操作、词库管理和批量清理。
+- `src/verification.js` / `media-group.js` / `blocked-words.js` / `daily-stats.js`：人机验证、媒体组、屏蔽词库与日统计子模块。
 - `src/message-policy.js`：内容分类、规则校验和消息策略评估。
 - `src/storage/`：D1、KV、短期状态和 Schema migrations。
 - `src/telegram-client.js`：Telegram API 超时、重试和错误分类。

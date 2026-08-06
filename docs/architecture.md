@@ -31,7 +31,6 @@ flowchart TB
     CONV --> D1[src/storage/d1-storage.js]
     ADMIN --> D1
     ACTIONS --> D1
-    POLICY --> D1
     WORKER --> KV[src/storage/kv-ephemeral-store.js]
 
     APP --> MAINT[src/maintenance-service.js]
@@ -47,6 +46,7 @@ flowchart TB
 |------|------|
 | `worker.js` | Telegram 业务编排、验证与会话转发、用户状态命令、媒体组；装配 `createAdminActions` / `createVerificationModule` / `createMediaGroupModule` / `createAdminCommandHandlers` 子模块 |
 | `src/app.js` | 健康检查、HTTP 请求限制、Webhook Secret 校验、D1 migrations、Scheduled 入口 |
+| `src/config.js` | 环境变量校验/归一化、绑定形态诊断、D1 绑定断言 |
 | `src/update-router.js` | Telegram Update ID 提取、幂等声明、完成和可重试失败状态 |
 | `src/conversation-service.js` | `createConversationService()`：编辑消息映射查询与修改通知；新消息转发与话题创建由 worker.js 编排 |
 | `src/admin-service.js` | `createAdminService()`：角色授权、私聊管理员入口、资料卡 Callback（`v1:*`）、规则写入和审计 |
@@ -60,12 +60,13 @@ flowchart TB
 | `src/activity-summary.js` | CST 日切、小时热力、7 日 sparkline、峰值日等统计纯函数 |
 | `src/verify-copy.js` | 人机验证用户侧文案常量（Turnstile / 题库 / 过期 / 答错 / 成功） |
 | `src/user-copy.js` | 用户拦截/限流/封禁静音与管理侧 spam/转发失败等文案常量 |
+| `src/utils.js` | 纯函数工具：文本清理、链接检测、垃圾关键词解析、消息哈希与验证码生成 |
 | `src/message-policy.js` | `evaluateMessagePolicy()`：内容类型识别、规则输入校验、规则匹配和策略结果生成 |
 | `src/telegram-client.js` | Telegram API Base 白名单、超时、重试、错误分类和退避 |
 | `src/logger.js` | 结构化 JSON 日志和递归脱敏 |
 | `src/maintenance-service.js` | `runRetentionCleanup()`：D1 保留期清理 |
-| `src/storage/d1-storage.js` | `createD1Storage()`：用户、Topic、消息映射、规则、管理员、审计和幂等记录 |
-| `src/storage/kv-ephemeral-store.js` | `createEphemeralStore()`：验证、管理员输入状态、Topic 健康和管理员缓存等短期状态 |
+| `src/storage/d1-storage.js` | `createD1Storage()`：用户（含 Topic ID 与创建锁）、幂等记录、消息映射、规则、设置、管理员和审计 |
+| `src/storage/kv-ephemeral-store.js` | `createEphemeralStore()`：验证、速率限制、管理员输入状态、Topic 健康和管理员缓存等短期状态 |
 | `src/storage/migrations.js` | D1 Schema 和索引的幂等创建 |
 
 ### 管理 UI 双轨
@@ -125,7 +126,7 @@ sequenceDiagram
     Worker->>D1: acquireTopicLock
     Worker->>Group: createForumTopic（必要时）
     Worker->>D1: setTopic
-    Worker->>Group: copyMessage
+    Worker->>Group: forwardMessage（失败时降级 copyMessage）
     Worker->>D1: saveMessageLink
 ```
 
@@ -196,11 +197,11 @@ Worker 还组合内置和 KV 动态屏蔽词、链接控制及重复消息检测
 
 ### D1 长期状态
 
-- 用户资料和会话状态
-- Topic ID 和创建锁
+- 用户资料和会话状态（含 Topic ID 与创建锁）
 - Telegram Update 幂等状态
 - 双向消息映射
 - 动态内容规则
+- 设置（`settings` 表，当前为预留，无读写代码）
 - 管理员角色
 - 管理员审计
 
@@ -216,13 +217,12 @@ Worker 还组合内置和 KV 动态屏蔽词、链接控制及重复消息检测
 
 实例内 Map 缓存均使用 TTL、容量上限、请求结束清理或 WeakMap 生命周期，避免长寿命 isolate 无界增长。
 
-## 用户资料同步
+## 用户资料快照与话题标题
 
-用户资料快照包含 username、first name 和 last name。资料没有变化且资料卡已存在时不调用 Telegram 或写 D1。资料变化时：
-
-- 按最小间隔更新 Forum Topic 名称。
-- 创建或编辑用户资料卡。
-- 使用 D1 原子部分更新保存资料字段，避免覆盖并发状态操作。
+- 消息 `from` 的资料（username、first name、last name）写入 KV `profile:{id}`（30 天 TTL），供 Turnstile 验证回放等缺少 `from` 的路径建话题时兜底解析。
+- 建话题时按「消息 `from` → KV 快照 → D1 → Telegram getChat」顺序解析资料，避免标题退化为 "User"。
+- 仅当 D1 用户资料稀疏（缺失且解析结果齐全）时，于建话题路径用 `updateUserState` 原子部分更新回填，避免覆盖并发状态操作。
+- 话题标题仅在占位（缺失或为 "User"）时通过 `editForumTopic` 修复，无定时或最小间隔更新。
 
 ## Scheduled 保留期清理
 

@@ -32,6 +32,7 @@ npm install
 │   ├── verification.js          # 人机验证编排：本地题库 + Turnstile + 待发消息回放
 │   ├── media-group.js           # 媒体组合并延迟转发与过期清理
 │   ├── blocked-words.js         # 硬编码 + KV 动态屏蔽词库共享读取
+│   ├── config.js                # 环境变量校验与归一化
 │   ├── daily-stats.js           # CST 日历日统计 KV 读写共享
 │   ├── verify-copy.js           # 人机验证用户侧文案常量
 │   ├── user-copy.js             # 限流/封禁静音/拦截与管理告警文案常量
@@ -39,6 +40,7 @@ npm install
 │   ├── message-policy.js        # 内容策略和规则校验
 │   ├── telegram-client.js       # Telegram API 客户端
 │   ├── update-router.js         # Update 幂等路由
+│   ├── utils.js                 # 纯函数工具（文本清理/链接检测/垃圾关键词解析）
 │   ├── logger.js                # 结构化脱敏日志
 │   ├── maintenance-service.js   # 保留期清理
 │   └── storage/                 # D1、KV 和 migrations
@@ -66,7 +68,7 @@ npm run dev
 npm run test:unit
 ```
 
-覆盖纯函数（含 `activity-summary`、`admin-ui-format`、`verify-copy`、`user-copy`）、配置、日志、Telegram Client、管理员权限、策略规则、KV 短期状态和资料卡行为。
+覆盖纯函数（含 `activity-summary`、`admin-ui-format`、`verify-copy`、`user-copy`）、配置、日志、Telegram Client、管理员权限、管理动作（`admin-actions`）、策略规则、KV 短期状态和资料卡行为。
 
 ### 集成测试
 
@@ -79,7 +81,7 @@ npm run test:integration
 - Worker HTTP 安全入口
 - Update 幂等
 - D1 migrations 和存储行为
-- Topic 并发创建
+- 用户初始化与 Topic 创建安全（`ensureUser` 幂等不覆盖已有状态）
 - 双向消息映射
 - 管理员资料卡和规则操作
 - 管理命令 handlers（menu / stats 等，Mock Telegram）
@@ -172,7 +174,7 @@ node --check dist/worker.single.js
 - `src/admin-ui-format.js`、`activity-summary.js`、`verify-copy.js`、`user-copy.js` 保持无 IO 纯函数/常量。
 - `src/message-policy.js` 保持纯策略计算和输入校验。
 - D1 SQL 集中在 `src/storage/d1-storage.js`，数据值使用 `.bind()`。
-- KV 短期状态集中在 `src/storage/kv-ephemeral-store.js`。
+- 短时信任/限流/Topic 健康/管理员缓存经 `src/storage/kv-ephemeral-store.js` 封装；验证挑战、待转发消息、媒体组、动态屏蔽词与会话映射由各模块直接读写 `env.TOPIC_MAP`。
 - 日统计 KV 键 `stats:YYYY-MM-DD` 的日期为 **CST（UTC+8）** 日历日。
 - 日志通过 `src/logger.js` 脱敏，不直接输出完整 Update。
 - 不要将 `docs/superpowers/` 提交进 Git（已在 `.gitignore`）。

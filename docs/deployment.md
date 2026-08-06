@@ -11,7 +11,7 @@
 ## 前置条件
 
 - Cloudflare 账号
-- Node.js 18 或更高版本（用于 `npm install` 与打包）
+- Node.js 20 或更高版本（`^20` / `^22` / `>=24`，用于 `npm install`、测试与打包）
 - npm
 - Telegram Bot Token
 - 已开启 Topics 的 Telegram 超级群组
@@ -115,7 +115,7 @@ Worker → **Settings** → **Bindings** → **Add**
 注意：
 
 - 名称必须**完全一致**（区分大小写，无前导空格）
-- **`TG_BOT_DB` 必须是 D1 Binding**，不要做成 Text/Secret 变量（否则会出现 `db.prepare is not a function`）
+- **`TG_BOT_DB` 必须是 D1 Binding**，不要做成 Text/Secret 变量（Webhook 路径会返回 `D1 'TG_BOT_DB' is a string variable, not a D1 Database binding`；Cron 路径可能显示原始 `db.prepare is not a function`）
 - **`TOPIC_MAP` 必须是 KV Binding**，不要做成普通变量
 
 保存后按提示 **Deploy**（如有）。
@@ -153,7 +153,7 @@ openssl rand -hex 32
 | 名称 | 类型 | 说明 |
 |------|------|------|
 | `ADMIN_IDS` | Text | 群命令权限快速白名单 |
-| `SPAM_KEYWORDS` | Text | 垃圾关键词，逗号分隔（与 `/addword` 屏蔽词是两套机制） |
+| `SPAM_KEYWORDS` | Text | 垃圾关键词，逗号/分号/换行分隔（与 `/addword` 屏蔽词是两套机制） |
 | `API_BASE` | Text | 仅允许 `https://api.telegram.org` 或 `https://api.telegram.dev` |
 | `TURNSTILE_SITE_KEY` | Text | Turnstile 站点 Key |
 | `TURNSTILE_SECRET_KEY` | Secret | Turnstile 密钥 |
@@ -257,7 +257,7 @@ git push   # 仅备份代码；不会自动更新 Cloudflare
 | 现象 | 处理 |
 |------|------|
 | `SUPERGROUP_ID not set` 但 Dashboard 有配置 | 检查变量名是否有前导空格；`GET /health/env` 看 `keys` |
-| `db.prepare is not a function` | `TG_BOT_DB` 必须是 **D1 Binding**，不能是 Text 变量 |
+| `D1 'TG_BOT_DB' is a string variable, not a D1 Database binding` | `TG_BOT_DB` 必须是 **D1 Binding**，不能是 Text 变量 |
 | Webhook 500 + pending > 0 | 看 Worker Logs 或 curl POST 响应正文中的 `Error: ...` |
 | `/listwords` 没有 `SPAM_KEYWORDS` | 屏蔽词与 spam 词库是两套；`SPAM_KEYWORDS` 走环境变量 |
 | 粘贴后 import 报错 | 粘贴的是源码 `worker.js` 而非 `dist/worker.single.js` |

@@ -74,7 +74,7 @@ openssl rand -hex 32
 - Telegram Update 幂等记录
 - Topic 创建锁
 
-若误配为字符串变量，会出现 `db.prepare is not a function`。
+若误配为字符串变量，Webhook 路径会返回 `D1 'TG_BOT_DB' is a string variable, not a D1 Database binding` 的引导性错误；Cron 路径可能仍显示原始 `db.prepare is not a function`。
 
 ## Turnstile 配置
 
@@ -120,7 +120,7 @@ telegram-private-chat-gateway.<subdomain>.workers.dev
 
 ### `SPAM_KEYWORDS`
 
-逗号分隔的**垃圾检测**关键词列表（Text），供 `spamCheck` 使用（与链接、重复消息等策略一起判断是否 spam）。
+逗号、分号或换行分隔的**垃圾检测**关键词列表（Text），供 `spamCheck` 使用（与链接、重复消息等策略一起判断是否 spam）；关键词会统一转为小写。
 
 示例：`keyword-a,keyword-b`
 

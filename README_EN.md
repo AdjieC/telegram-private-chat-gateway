@@ -106,8 +106,10 @@ The project uses ES Modules and separates HTTP security, conversations, policy, 
 
 - `worker.js`: Telegram orchestration, verification, media groups, and Worker export; wires admin board handlers.
 - `src/app.js`: HTTP validation, idempotent routing, and the Scheduled entry.
-- `src/conversation-service.js`: Topic lifecycle, two-way messages, and profile synchronization.
+- `src/conversation-service.js`: Edited-message mapping lookup and change notifications.
 - `src/admin-service.js`: Role authorization, profile-card (`v1:*`) actions, rules, and audits.
+- `src/admin-actions.js`: User-state actions, blocked-word management, and batch cleanup.
+- `src/verification.js` / `media-group.js` / `blocked-words.js` / `daily-stats.js`: Human verification, media groups, blocked words, and CST daily stats modules.
 - `src/admin-commands.js` / `admin-ui-format.js` / `activity-summary.js`: Group admin menu, sysinfo/stats/rank, and CST stats UI.
 - `src/verify-copy.js` / `user-copy.js`: User-facing verification and intercept copy.
 - `src/message-policy.js`: Content classification, rule validation, and policy evaluation.
