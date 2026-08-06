@@ -1510,7 +1510,6 @@ function createConversationService({
   storage,
   telegram,
   policy,
-  logger,
   now = Date.now
 }) {
   async function evaluate(message, user) {
@@ -1889,7 +1888,7 @@ var BLOCKED_WORDS = [
   // ↑ 在此添加更多屏蔽词，每行一个，用引号包裹、逗号结尾
 ];
 var blockedWordsCache = { data: null, ts: 0, ttl: 6e4 };
-async function getBlockedWords(env, forceRefresh = false) {
+async function getBlockedWords(env, forceRefresh = false, logger = null) {
   const now = Date.now();
   if (!forceRefresh && blockedWordsCache.data && now - blockedWordsCache.ts < blockedWordsCache.ttl) {
     return blockedWordsCache.data;
@@ -1904,7 +1903,7 @@ async function getBlockedWords(env, forceRefresh = false) {
       }
     }
   } catch (e) {
-    kvWords = [];
+    logger?.warn?.("blocked_words_kv_parse_error", { error: e.message });
   }
   const merged = [.../* @__PURE__ */ new Set([...BLOCKED_WORDS, ...kvWords])];
   blockedWordsCache.data = merged;
@@ -1999,8 +1998,7 @@ function createAdminActions(deps) {
     bumpDailyStat: bumpDailyStat2,
     probeForumThread: probeForumThread2,
     config,
-    logger,
-    recordSystemError: recordSystemError2
+    logger
   } = deps;
   async function panel(env, threadId, userId) {
     const from = await resolveUserFromForTopic2(env, userId, null);
@@ -2189,7 +2187,7 @@ ${escapeHtml2(content.slice(0, 500))}`,
     });
   }
   async function listWords(env, threadId) {
-    const allWords = await getBlockedWords(env, true);
+    const allWords = await getBlockedWords(env, true, logger);
     const kvWords = await readKvBlockedWords(env);
     const hardcoded = BLOCKED_WORDS;
     const dynamic = kvWords.filter((w) => !BLOCKED_WORDS.map((h) => h.toLowerCase()).includes(w.toLowerCase()));
@@ -4645,8 +4643,7 @@ var adminActions = createAdminActions({
   bumpDailyStat,
   probeForumThread,
   config: CONFIG,
-  logger: Logger,
-  recordSystemError
+  logger: Logger
 });
 var verificationModule = createVerificationModule({
   config: CONFIG,
@@ -4711,7 +4708,7 @@ async function getStoredRules(env) {
 }
 async function evaluateLegacyPolicy(env, message, user = {}) {
   const [blockedWords, verification, storedRules] = await Promise.all([
-    getBlockedWords(env),
+    getBlockedWords(env, false, Logger),
     getVerificationState(env, user.userId ?? message.chat?.id),
     getStoredRules(env)
   ]);
@@ -4738,8 +4735,7 @@ function createLegacyConversationService(env) {
   return createConversationService({
     storage: createD1Storage(env.TG_BOT_DB),
     telegram: { call: (method, body) => tgCall(env, method, body) },
-    policy: ({ message, user }) => evaluateLegacyPolicy(env, message, user),
-    logger: Logger
+    policy: ({ message, user }) => evaluateLegacyPolicy(env, message, user)
   });
 }
 var idAllowlistParseCache = /* @__PURE__ */ new Map();
@@ -5621,7 +5617,7 @@ async function handlePrivateMessage(msg, env, ctx) {
   const [isBanned, isMuted, blockedWords, verification] = await Promise.all([
     env.TOPIC_MAP.get(`banned:${userId}`),
     env.TOPIC_MAP.get(`muted:${userId}`),
-    getBlockedWords(env),
+    getBlockedWords(env, false, Logger),
     getVerificationState(env, userId)
   ]);
   const blockedRules = blockedWords.map((pattern, index) => ({

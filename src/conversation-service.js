@@ -24,7 +24,6 @@ export function createConversationService({
   storage,
   telegram,
   policy,
-  logger,
   now = Date.now,
 }) {
   async function evaluate(message, user) {

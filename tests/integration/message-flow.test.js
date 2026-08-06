@@ -70,11 +70,11 @@ function createTelegramMock(handlers = {}) {
   return { calls, fetchImpl };
 }
 
-/** ctx.waitUntil 捕获执行队列，测试中可显式 flush */
+/** ctx.waitUntil 捕获执行队列，测试中可显式 flush（真正等待每个 promise） */
 function createTestCtx() {
   const pending = [];
   return {
-    ctx: { waitUntil: (fn) => { pending.push(Promise.resolve().then(fn)); } },
+    ctx: { waitUntil: (promise) => { pending.push(Promise.resolve(promise)); } },
     async flush() {
       await Promise.all(pending);
       pending.length = 0;
@@ -85,7 +85,7 @@ function createTestCtx() {
 async function send(update, env, telegram) {
   const { ctx, flush } = createTestCtx();
   const response = await worker.fetch(createWebhookRequest(update), env, ctx);
-  await flush();
+  // 不自动 flush：媒体组等场景需要先推进假定时器再 flush
   return { response, flush };
 }
 
@@ -323,9 +323,12 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     await preVerify(env, userId);
     await seedTopic(env, userId, 88);
 
+    let flush;
     for (let i = 0; i < 3; i += 1) {
-      await send(messageUpdate(privateMessage(userId, 900 + i, { text: '重复骚扰内容' }), 8700 + i), env, telegram);
+      ({ flush } = await send(messageUpdate(privateMessage(userId, 900 + i, { text: '重复骚扰内容' }), 8700 + i), env, telegram));
     }
+    // 等待 waitUntil 中的 spam 统计写入
+    await flush();
 
     // 前 2 条转发，第 3 条被垃圾检测拦截
     expect(telegram.calls.filter(c => c.method === 'forwardMessage')).toHaveLength(2);

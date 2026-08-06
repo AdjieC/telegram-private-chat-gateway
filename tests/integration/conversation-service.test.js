@@ -77,7 +77,6 @@ async function createDependencies(overrides = {}) {
       shouldForward: true,
       shouldIncrementViolation: false,
     }),
-    logger: { info() {}, warn() {}, error() {} },
     now: () => 2000,
     ...overrides,
   };

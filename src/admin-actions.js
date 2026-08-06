@@ -31,7 +31,6 @@ export function createAdminActions(deps) {
     probeForumThread,
     config,
     logger,
-    recordSystemError,
   } = deps;
 
   async function panel(env, threadId, userId) {
@@ -229,7 +228,7 @@ export function createAdminActions(deps) {
   }
 
   async function listWords(env, threadId) {
-    const allWords = await getBlockedWords(env, true); // 强制刷新
+    const allWords = await getBlockedWords(env, true, logger); // 强制刷新
     const kvWords = await readKvBlockedWords(env);
 
     const hardcoded = BLOCKED_WORDS;

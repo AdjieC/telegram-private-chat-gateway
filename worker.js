@@ -163,7 +163,6 @@ const adminActions = createAdminActions({
   probeForumThread,
   config: CONFIG,
   logger: Logger,
-  recordSystemError,
 });
 
 const verificationModule = createVerificationModule({
@@ -239,7 +238,7 @@ async function getStoredRules(env) {
 
 async function evaluateLegacyPolicy(env, message, user = {}) {
   const [blockedWords, verification, storedRules] = await Promise.all([
-    getBlockedWords(env),
+    getBlockedWords(env, false, Logger),
     getVerificationState(env, user.userId ?? message.chat?.id),
     getStoredRules(env),
   ]);
@@ -268,7 +267,6 @@ function createLegacyConversationService(env) {
     storage: createD1Storage(env.TG_BOT_DB),
     telegram: { call: (method, body) => tgCall(env, method, body) },
     policy: ({ message, user }) => evaluateLegacyPolicy(env, message, user),
-    logger: Logger,
   });
 }
 
@@ -1386,7 +1384,7 @@ async function handlePrivateMessage(msg, env, ctx) {
   const [isBanned, isMuted, blockedWords, verification] = await Promise.all([
     env.TOPIC_MAP.get(`banned:${userId}`),
     env.TOPIC_MAP.get(`muted:${userId}`),
-    getBlockedWords(env),
+    getBlockedWords(env, false, Logger),
     getVerificationState(env, userId),
   ]);
   const blockedRules = blockedWords.map((pattern, index) => ({

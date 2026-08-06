@@ -27,10 +27,15 @@ npm install
 │   ├── admin-service.js         # 角色授权、资料卡和规则服务（v1 资料卡）
 │   ├── admin-ui-format.js       # 管理 UI 键盘与展示纯函数
 │   ├── admin-commands.js        # 管理命令编排（sysinfo/stats/rank/notes/adm 回调）
+│   ├── admin-actions.js         # 管理动作：用户状态操作、词库管理和批量清理
 │   ├── activity-summary.js      # CST 日切、热力、sparkline、峰值日纯函数
+│   ├── verification.js          # 人机验证编排：本地题库 + Turnstile + 待发消息回放
+│   ├── media-group.js           # 媒体组合并延迟转发与过期清理
+│   ├── blocked-words.js         # 硬编码 + KV 动态屏蔽词库共享读取
+│   ├── daily-stats.js           # CST 日历日统计 KV 读写共享
 │   ├── verify-copy.js           # 人机验证用户侧文案常量
 │   ├── user-copy.js             # 限流/封禁静音/拦截与管理告警文案常量
-│   ├── conversation-service.js  # Topic、双向消息和资料同步
+│   ├── conversation-service.js  # 编辑消息映射查询与修改通知
 │   ├── message-policy.js        # 内容策略和规则校验
 │   ├── telegram-client.js       # Telegram API 客户端
 │   ├── update-router.js         # Update 幂等路由

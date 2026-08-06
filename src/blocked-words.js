@@ -19,9 +19,10 @@ const blockedWordsCache = { data: null, ts: 0, ttl: 60000 }; // 缓存 60 秒
  * 获取完整屏蔽词列表 = 硬编码 + KV 动态词库（合并去重）
  * @param {object} env - Worker 环境
  * @param {boolean} forceRefresh - 是否强制刷新缓存
+ * @param {object} [logger] - 可选日志器（KV 解析失败时告警）
  * @returns {Promise<string[]>}
  */
-export async function getBlockedWords(env, forceRefresh = false) {
+export async function getBlockedWords(env, forceRefresh = false, logger = null) {
   const now = Date.now();
   if (!forceRefresh && blockedWordsCache.data && (now - blockedWordsCache.ts < blockedWordsCache.ttl)) {
     return blockedWordsCache.data;
@@ -38,8 +39,7 @@ export async function getBlockedWords(env, forceRefresh = false) {
       }
     }
   } catch (e) {
-    // 解析失败按空词库处理；调用方可通过 Logger 感知
-    kvWords = [];
+    logger?.warn?.('blocked_words_kv_parse_error', { error: e.message });
   }
 
   // 合并去重（硬编码优先，KV 补充）

@@ -13,6 +13,11 @@ flowchart TB
     WORKER --> CONV[src/conversation-service.js]
     WORKER --> ADMIN[src/admin-service.js]
     WORKER --> ADMCMD[src/admin-commands.js]
+    WORKER --> ACTIONS[src/admin-actions.js]
+    WORKER --> VERIFY[src/verification.js]
+    WORKER --> MEDIA[src/media-group.js]
+    WORKER --> BWORDS[src/blocked-words.js]
+    WORKER --> DSTATS[src/daily-stats.js]
     WORKER --> ADMFMT[src/admin-ui-format.js]
     WORKER --> ACT[src/activity-summary.js]
     WORKER --> POLICY[src/message-policy.js]
@@ -25,15 +30,14 @@ flowchart TB
     ADMCMD --> D1
     CONV --> D1[src/storage/d1-storage.js]
     ADMIN --> D1
+    ACTIONS --> D1
     POLICY --> D1
     WORKER --> KV[src/storage/kv-ephemeral-store.js]
-    WORKER --> LEGACYKV[src/storage/kv-storage.js]
 
     APP --> MAINT[src/maintenance-service.js]
     MAINT --> D1
     D1 --> DB[(Cloudflare D1)]
     KV --> CACHE[(Cloudflare KV)]
-    LEGACYKV --> CACHE
     CLIENT --> TG
 ```
 
@@ -41,12 +45,17 @@ flowchart TB
 
 | 模块 | 职责 |
 |------|------|
-| `worker.js` | Telegram 业务编排、验证与会话转发、用户状态命令、媒体组；通过 `createAdminCommandHandlers` 接入管理看板 |
+| `worker.js` | Telegram 业务编排、验证与会话转发、用户状态命令、媒体组；装配 `createAdminActions` / `createVerificationModule` / `createMediaGroupModule` / `createAdminCommandHandlers` 子模块 |
 | `src/app.js` | 健康检查、HTTP 请求限制、Webhook Secret 校验、D1 migrations、Scheduled 入口 |
 | `src/update-router.js` | Telegram Update ID 提取、幂等声明、完成和可重试失败状态 |
-| `src/conversation-service.js` | `createConversationService()`：用户初始化、Topic 创建锁、双向消息、消息映射和资料卡同步 |
+| `src/conversation-service.js` | `createConversationService()`：编辑消息映射查询与修改通知；新消息转发与话题创建由 worker.js 编排 |
 | `src/admin-service.js` | `createAdminService()`：角色授权、私聊管理员入口、资料卡 Callback（`v1:*`）、规则写入和审计 |
 | `src/admin-commands.js` | `createAdminCommandHandlers()`：群内 `/menu` `/sysinfo` `/stats` `/rank` `/find` `/notes` 与 `adm:*` 回调编排 |
+| `src/admin-actions.js` | `createAdminActions()`：用户状态操作、词库管理与批量清理等管理动作 |
+| `src/verification.js` | `createVerificationModule()`：本地题库 + Turnstile 人机验证编排与待发消息回放 |
+| `src/media-group.js` | `createMediaGroupModule()`：媒体组合并延迟转发与过期清理 |
+| `src/blocked-words.js` | `getBlockedWords()`：硬编码 + KV 动态屏蔽词库共享读取 |
+| `src/daily-stats.js` | CST 日历日统计 KV 读写共享 |
 | `src/admin-ui-format.js` | 管理键盘、排行/热力/空状态等展示纯函数（无 IO） |
 | `src/activity-summary.js` | CST 日切、小时热力、7 日 sparkline、峰值日等统计纯函数 |
 | `src/verify-copy.js` | 人机验证用户侧文案常量（Turnstile / 题库 / 过期 / 答错 / 成功） |
@@ -57,7 +66,6 @@ flowchart TB
 | `src/maintenance-service.js` | `runRetentionCleanup()`：D1 保留期清理 |
 | `src/storage/d1-storage.js` | `createD1Storage()`：用户、Topic、消息映射、规则、管理员、审计和幂等记录 |
 | `src/storage/kv-ephemeral-store.js` | `createEphemeralStore()`：验证、管理员输入状态、Topic 健康和管理员缓存等短期状态 |
-| `src/storage/kv-storage.js` | KV 用户记录兼容读取和短期辅助写入 |
 | `src/storage/migrations.js` | D1 Schema 和索引的幂等创建 |
 
 ### 管理 UI 双轨
