@@ -997,71 +997,59 @@ async function handleAdminUiCallback(query, env, ctx) {
         return;
       }
 
-      // 危险操作二次确认
-      if (action === 'banask') {
+      // 危险操作二次确认：统一「确认卡片」与「取消」两种回执模式
+      const confirmAsk = async (confirmText, keyboard) => {
         await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id });
         await tgCall(env, 'sendMessage', {
           chat_id: env.SUPERGROUP_ID,
           message_thread_id: tid,
-          text: `⚠️ <b>确认封禁用户</b> <code>${escapeHtml(userId)}</code>？\n对方将收到通知且无法继续发消息。`,
+          text: confirmText,
           parse_mode: 'HTML',
-          reply_markup: buildBanConfirmKeyboard(userId),
+          reply_markup: keyboard,
         });
+      };
+      const confirmCancel = async (cancelText) => {
+        await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id, text: '已取消' });
+        if (chatId && messageId) {
+          await tgCall(env, 'editMessageText', {
+            chat_id: chatId,
+            message_id: messageId,
+            text: cancelText,
+          });
+        }
+      };
+
+      if (action === 'banask') {
+        await confirmAsk(
+          `⚠️ <b>确认封禁用户</b> <code>${escapeHtml(userId)}</code>？\n对方将收到通知且无法继续发消息。`,
+          buildBanConfirmKeyboard(userId),
+        );
         return;
       }
       if (action === 'bancancel') {
-        await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id, text: '已取消' });
-        if (chatId && messageId) {
-          await tgCall(env, 'editMessageText', {
-            chat_id: chatId,
-            message_id: messageId,
-            text: '已取消封禁。',
-          });
-        }
+        await confirmCancel('已取消封禁。');
         return;
       }
       if (action === 'closeask') {
-        await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id });
-        await tgCall(env, 'sendMessage', {
-          chat_id: env.SUPERGROUP_ID,
-          message_thread_id: tid,
-          text: `⚠️ <b>确认关闭对话</b> <code>${escapeHtml(userId)}</code>？\n将关闭 Forum Topic，用户消息不再接入（可用打开恢复）。`,
-          parse_mode: 'HTML',
-          reply_markup: buildCloseConfirmKeyboard(userId),
-        });
+        await confirmAsk(
+          `⚠️ <b>确认关闭对话</b> <code>${escapeHtml(userId)}</code>？\n将关闭 Forum Topic，用户消息不再接入（可用打开恢复）。`,
+          buildCloseConfirmKeyboard(userId),
+        );
         return;
       }
       if (action === 'closecancel') {
-        await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id, text: '已取消' });
-        if (chatId && messageId) {
-          await tgCall(env, 'editMessageText', {
-            chat_id: chatId,
-            message_id: messageId,
-            text: '已取消关闭对话。',
-          });
-        }
+        await confirmCancel('已取消关闭对话。');
         return;
       }
       if (action === 'resetask') {
-        await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id });
-        await tgCall(env, 'sendMessage', {
-          chat_id: env.SUPERGROUP_ID,
-          message_thread_id: tid,
-          text: `⚠️ <b>确认重置验证</b> <code>${escapeHtml(userId)}</code>？\n将取消永久信任，用户下次需重新验证。`,
-          parse_mode: 'HTML',
-          reply_markup: buildResetConfirmKeyboard(userId),
-        });
+        await confirmAsk(
+          `⚠️ <b>确认重置验证</b> <code>${escapeHtml(userId)}</code>？\n将取消永久信任，用户下次需重新验证。`,
+          buildResetConfirmKeyboard(userId),
+        );
         return;
       }
       if (action === 'resetcancel') {
-        await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id, text: '已取消' });
-        if (chatId && messageId) {
-          await tgCall(env, 'editMessageText', {
-            chat_id: chatId,
-            message_id: messageId,
-            text: '已取消重置验证。',
-          });
-        }
+        await confirmCancel('已取消重置验证。');
         return;
       }
       if (action === 'shownote') {

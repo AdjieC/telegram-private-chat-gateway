@@ -43,121 +43,22 @@ import {
 import { createAdminCommandHandlers } from './src/admin-commands.js';
 import { VERIFY_COPY } from './src/verify-copy.js';
 import { USER_COPY, ADMIN_COPY } from './src/user-copy.js';
+import {
+  containsLink,
+  buildSpamCheckText,
+  detectSpamKeywords,
+  computeMessageHash,
+  normalizeTgDescription,
+  isTopicMissingOrDeleted,
+  isTestMessageInvalid,
+  withMessageThreadId,
+  parseSpamKeywords,
+  generateVerifyCode,
+  cleanProfileText,
+} from './src/utils.js';
 
 // Telegram Private Chat Gateway — Cloudflare Workers 私聊安全接入与双向会话网关
-
-// --- 纯函数工具（内联自 src/utils.js，便于单文件部署到 Cloudflare Workers） ---
-
-/**
- * 检测消息文本中是否包含 URL/链接
- */
-function containsLink(text) {
-  if (!text) return false;
-  const patterns = [
-    /https?:\/\/\S+/i,
-    /[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}(\/\S*)?/,
-    /t\.me\/\S+/i,
-    /telegram\.me\/\S+/i,
-  ];
-  return patterns.some(p => p.test(text));
-}
-
-/**
- * 构建反垃圾检测文本：消息正文 + 发送者资料
- */
-function buildSpamCheckText(msg) {
-  if (!msg || typeof msg !== 'object') return '';
-  const from = msg.from || {};
-  return [
-    msg.text,
-    msg.caption,
-    from.first_name,
-    from.last_name,
-    from.username,
-  ]
-    .filter(v => typeof v === 'string' && v.trim().length > 0)
-    .join(' ');
-}
-
-/**
- * 检测消息是否包含垃圾关键词
- */
-function detectSpamKeywords(text, keywords) {
-  if (!text || keywords.length === 0) return { isSpam: false, matchedWord: null };
-  const lower = text.toLowerCase();
-  for (const word of keywords) {
-    if (lower.includes(word)) return { isSpam: true, matchedWord: word };
-  }
-  return { isSpam: false, matchedWord: null };
-}
-
-/**
- * 计算消息内容的简单哈希（用于重复检测）
- */
-function computeMessageHash(msg) {
-  const text = (msg.text || msg.caption || '').trim().toLowerCase();
-  if (!text) return null;
-  const fingerprint = `${text.length}|${text.substring(0, 100)}|${text.substring(Math.max(0, text.length - 20))}`;
-  return fingerprint;
-}
-
-/**
- * 标准化 Telegram API 描述字符串
- */
-function normalizeTgDescription(description) {
-  return (description || "").toString().toLowerCase();
-}
-
-/**
- * 判断话题是否不存在或已被删除
- */
-function isTopicMissingOrDeleted(description) {
-  const desc = normalizeTgDescription(description);
-  return desc.includes("thread not found") ||
-    desc.includes("topic not found") ||
-    desc.includes("message thread not found") ||
-    desc.includes("topic deleted") ||
-    desc.includes("thread deleted") ||
-    desc.includes("forum topic not found") ||
-    desc.includes("topic closed permanently");
-}
-
-/**
- * 判断探测消息是否因内容为空而失败
- */
-function isTestMessageInvalid(description) {
-  const desc = normalizeTgDescription(description);
-  return desc.includes("message text is empty") ||
-    desc.includes("bad request: message text is empty");
-}
-
-/**
- * 为请求 body 添加 message_thread_id 字段
- */
-function withMessageThreadId(body, threadId) {
-  if (threadId === undefined || threadId === null) return body;
-  return { ...body, message_thread_id: threadId };
-}
-
-/**
- * 将 SPAM_KEYWORDS 环境变量解析为关键词数组
- */
-function parseSpamKeywords(raw) {
-  if (!raw) return [];
-  return raw.toString().trim()
-    .split(/[,;，；\n]+/g)
-    .map(s => s.trim().toLowerCase())
-    .filter(s => s.length > 0);
-}
-
-/**
- * 生成安全的验证 code（16 字节十六进制）
- */
-function generateVerifyCode() {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-}
+// 纯函数工具统一来自 src/utils.js（单文件部署由 esbuild bundle 完成，勿在本文件内重复定义）
 
 // --- 配置常量 ---
 const CONFIG = {
@@ -282,6 +183,22 @@ async function getBlockedWords(env, forceRefresh = false) {
   return merged;
 }
 
+/**
+ * 读取 KV 动态屏蔽词（解析失败或非数组时回退为空数组）
+ * 供 /addword、/delword、/listwords 共用，避免三处重复读解析逻辑
+ * @param {object} env - Worker 环境
+ * @returns {Promise<string[]>}
+ */
+async function readKvBlockedWords(env) {
+  let kvWords = [];
+  try {
+    const raw = await env.TOPIC_MAP.get("blocked_words_kv");
+    if (raw) kvWords = JSON.parse(raw);
+  } catch { /* 忽略解析错误，从空数组开始 */ }
+  if (!Array.isArray(kvWords)) kvWords = [];
+  return kvWords;
+}
+
 
 // --- 辅助工具函数 ---
 
@@ -397,16 +314,36 @@ function createLegacyConversationService(env) {
   });
 }
 
+// ID 白名单解析缓存：环境变量在实例生命周期内不变，避免每次权限判断重复 split
+const idAllowlistParseCache = new Map();
+const ID_ALLOWLIST_CACHE_MAX = 64;
+
+/** 解析逗号/空白分隔的 Telegram 用户 ID 列表为 Set（带缓存） */
+function parseIdAllowlistSet(raw) {
+  const key = String(raw || '');
+  let set = idAllowlistParseCache.get(key);
+  if (!set) {
+    set = new Set(
+      key
+        .split(/[,;\s]+/g)
+        .map(value => value.trim())
+        .filter(value => /^\d{1,20}$/.test(value)),
+    );
+    if (idAllowlistParseCache.size >= ID_ALLOWLIST_CACHE_MAX) {
+      idAllowlistParseCache.delete(idAllowlistParseCache.keys().next().value);
+    }
+    idAllowlistParseCache.set(key, set);
+  }
+  return set;
+}
+
 /** 解析逗号/空白分隔的 Telegram 用户 ID 列表为字符串数组 */
 function parseIdAllowlist(raw) {
-  return String(raw || '')
-    .split(/[,;\s]+/g)
-    .map(value => value.trim())
-    .filter(value => /^\d{1,20}$/.test(value));
+  return [...parseIdAllowlistSet(raw)];
 }
 
 function idAllowlistHas(raw, userId) {
-  return parseIdAllowlist(raw).includes(String(userId));
+  return parseIdAllowlistSet(raw).has(String(userId));
 }
 
 function createLegacyAdminService(env) {
@@ -745,7 +682,7 @@ async function resetUserVerificationAndRequireReverify(env, { userId, userKey, o
 }
 
 function parseAdminIdAllowlist(env) {
-  const set = new Set(parseIdAllowlist(env.ADMIN_IDS));
+  const set = parseIdAllowlistSet(env.ADMIN_IDS);
   return set.size > 0 ? set : null;
 }
 
@@ -1325,31 +1262,12 @@ const legacyApp = {
             const pendingIds = JSON.parse(pendingIdsStr);
             if (Array.isArray(pendingIds) && pendingIds.length > 0) {
               pendingCount = Math.min(pendingIds.length, CONFIG.PENDING_MAX_MESSAGES);
+              const limited = pendingIds.slice(-CONFIG.PENDING_MAX_MESSAGES);
               ctx.waitUntil((async () => {
-                let forwardedCount = 0;
-                const limited = pendingIds.slice(0, CONFIG.PENDING_MAX_MESSAGES);
-                // 补全 from：验证页回调没有 Telegram 用户资料，勿用仅含 id 的 from 建话题（会变成 "User"）
-                const topicFrom = await resolveUserFromForTopic(normalizedEnv, userId, null);
-                for (const pendingId of limited) {
-                  if (!pendingId) continue;
-                  const fakeMsg = {
-                    message_id: pendingId,
-                    chat: { id: Number(userId), type: "private" },
-                    from: topicFrom,
-                  };
-                  try {
-                    await forwardToTopic(fakeMsg, userId, `user:${userId}`, normalizedEnv, ctx);
-                    forwardedCount++;
-                  } catch (e) {
-                    Logger.error('pending_turnstile_forward_failed', e, { userId, messageId: pendingId });
-                  }
-                }
-                if (forwardedCount > 0) {
-                  await tgCall(normalizedEnv, "sendMessage", {
-                    chat_id: Number(userId),
-                    text: USER_COPY.pendingDelivered(forwardedCount),
-                    parse_mode: 'HTML',
-                  });
+                try {
+                  await forwardPendingMessageIds(userId, limited, normalizedEnv, ctx, { from: null });
+                } catch (e) {
+                  Logger.error('pending_turnstile_forward_failed', e, { userId });
                 }
                 await env.TOPIC_MAP.delete(pendingKey);
               })());
@@ -2116,12 +2034,7 @@ async function handleAddWordCommand(env, threadId, text, senderId) {
     });
     return;
   }
-  let kvWords = [];
-  try {
-    const raw = await env.TOPIC_MAP.get("blocked_words_kv");
-    if (raw) kvWords = JSON.parse(raw);
-  } catch { /* 忽略解析错误，从空数组开始 */ }
-  if (!Array.isArray(kvWords)) kvWords = [];
+  let kvWords = await readKvBlockedWords(env);
 
   // 检查是否已存在（合并硬编码一起判断）
   const allWords = [...new Set([...BLOCKED_WORDS, ...kvWords])];
@@ -2170,12 +2083,7 @@ async function handleDelWordCommand(env, threadId, text, senderId) {
     return;
   }
 
-  let kvWords = [];
-  try {
-    const raw = await env.TOPIC_MAP.get("blocked_words_kv");
-    if (raw) kvWords = JSON.parse(raw);
-  } catch { /* 忽略 */ }
-  if (!Array.isArray(kvWords)) kvWords = [];
+  let kvWords = await readKvBlockedWords(env);
 
   const before = kvWords.length;
   kvWords = kvWords.filter(w => w.toLowerCase() !== word.toLowerCase());
@@ -2203,12 +2111,7 @@ async function handleDelWordCommand(env, threadId, text, senderId) {
 
 async function handleListWordsCommand(env, threadId) {
   const allWords = await getBlockedWords(env, true); // 强制刷新
-  let kvWords = [];
-  try {
-    const raw = await env.TOPIC_MAP.get("blocked_words_kv");
-    if (raw) kvWords = JSON.parse(raw);
-  } catch { /* 忽略 */ }
-  if (!Array.isArray(kvWords)) kvWords = [];
+  const kvWords = await readKvBlockedWords(env);
 
   const hardcoded = BLOCKED_WORDS;
   const dynamic = kvWords.filter(w => !BLOCKED_WORDS.map(h => h.toLowerCase()).includes(w.toLowerCase()));
@@ -3003,7 +2906,69 @@ async function handleCallbackQuery(query, env, ctx) {
 }
 
 /**
- * 验证通过后转发待处理消息 — 并行转发 + 去重 + 通知用户
+ * 并行转发待处理消息 — 去重 + 并发限制 3 + 通知用户
+ * 供验证通过后的本地题库回放与 Turnstile 回调共用，避免两套转发逻辑漂移。
+ * @param {number|string} userId - 用户 ID
+ * @param {Array<number|string>} pendingIds - 待转发消息 ID 列表
+ * @param {object} env - 环境变量
+ * @param {object} ctx - Worker context
+ * @param {object} [opts]
+ * @param {object|null} [opts.from] - 优先使用的用户资料（缺失时自动回退快照/D1/getChat）
+ * @returns {Promise<{forwardedCount: number, skippedCount: number}>}
+ */
+async function forwardPendingMessageIds(userId, pendingIds, env, ctx, { from = null } = {}) {
+  // 限制一次性转发量，避免用户恶意堆积导致执行超时（保留最新 N 条）
+  const limited = (Array.isArray(pendingIds) ? pendingIds : [])
+    .filter(Boolean)
+    .slice(-CONFIG.PENDING_MAX_MESSAGES);
+
+  // 并行转发待处理消息（并发限制为 3，平衡速度与 API 限流）
+  const CONCURRENT_FORWARDS = 3;
+  let forwardedCount = 0;
+  let skippedCount = 0;
+  for (let i = 0; i < limited.length; i += CONCURRENT_FORWARDS) {
+    const batch = limited.slice(i, i + CONCURRENT_FORWARDS);
+    const results = await Promise.allSettled(batch.map(async (pendingId) => {
+      const forwardedKey = `forwarded:${userId}:${pendingId}`;
+      const alreadyForwarded = await env.TOPIC_MAP.get(forwardedKey);
+      if (alreadyForwarded) {
+        Logger.info('message_forward_duplicate_skipped', { userId, messageId: pendingId });
+        return { forwarded: false, reason: 'already_forwarded' };
+      }
+      // 补全 from：验证回调没有 Telegram 用户资料，勿用仅含 id 的 from 建话题（会变成 "User"）
+      const topicFrom = await resolveUserFromForTopic(env, userId, from);
+      const fakeMsg = {
+        message_id: pendingId,
+        chat: { id: Number(userId), type: "private" },
+        from: topicFrom,
+      };
+      await forwardToTopic(fakeMsg, userId, `user:${userId}`, env, ctx);
+      await env.TOPIC_MAP.put(forwardedKey, "1", { expirationTtl: 3600 });
+      return { forwarded: true };
+    }));
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value?.forwarded) {
+        forwardedCount++;
+      } else if (r.status === 'fulfilled') {
+        skippedCount++;
+      } else if (r.status === 'rejected') {
+        Logger.warn('pending_forward_item_failed', { userId, error: r.reason?.message });
+      }
+    }
+  }
+
+  if (forwardedCount > 0) {
+    await tgCall(env, "sendMessage", {
+      chat_id: Number(userId),
+      text: USER_COPY.pendingDelivered(forwardedCount),
+      parse_mode: 'HTML',
+    });
+  }
+  return { forwardedCount, skippedCount };
+}
+
+/**
+ * 验证通过后转发待处理消息（本地题库路径）
  * @param {object} state - 验证挑战状态（含 pending_ids）
  * @param {number} userId - 用户 ID
  * @param {object} query - Telegram callback query 对象
@@ -3018,54 +2983,7 @@ async function forwardPendingMessages(state, userId, query, env, ctx) {
     } else if (state.pending) {
       pendingIds = [state.pending];
     }
-
-    // 限制一次性转发量，避免用户恶意堆积导致执行超时
-    if (pendingIds.length > CONFIG.PENDING_MAX_MESSAGES) {
-      pendingIds = pendingIds.slice(pendingIds.length - CONFIG.PENDING_MAX_MESSAGES);
-    }
-
-    // 并行转发待处理消息（并发限制为 3，平衡速度与 API 限流）
-    const CONCURRENT_FORWARDS = 3;
-    let forwardedCount = 0;
-    let skippedCount = 0;
-    for (let i = 0; i < pendingIds.length; i += CONCURRENT_FORWARDS) {
-      const batch = pendingIds.slice(i, i + CONCURRENT_FORWARDS);
-      const results = await Promise.allSettled(batch.map(async (pendingId) => {
-        if (!pendingId) return { forwarded: false, reason: 'empty_id' };
-        const forwardedKey = `forwarded:${userId}:${pendingId}`;
-        const alreadyForwarded = await env.TOPIC_MAP.get(forwardedKey);
-        if (alreadyForwarded) {
-          Logger.info('message_forward_duplicate_skipped', { userId, messageId: pendingId });
-          return { forwarded: false, reason: 'already_forwarded' };
-        }
-        const topicFrom = await resolveUserFromForTopic(env, userId, query?.from);
-        const fakeMsg = {
-          message_id: pendingId,
-          chat: { id: userId, type: "private" },
-          from: topicFrom,
-        };
-        await forwardToTopic(fakeMsg, userId, `user:${userId}`, env, ctx);
-        await env.TOPIC_MAP.put(forwardedKey, "1", { expirationTtl: 3600 });
-        return { forwarded: true };
-      }));
-      for (const r of results) {
-        if (r.status === 'fulfilled' && r.value?.forwarded) {
-          forwardedCount++;
-        } else if (r.status === 'fulfilled' && !r.value?.forwarded) {
-          skippedCount++;
-        } else if (r.status === 'rejected') {
-          Logger.warn('pending_forward_item_failed', { userId, error: r.reason?.message });
-        }
-      }
-    }
-
-    if (forwardedCount > 0) {
-      await tgCall(env, "sendMessage", {
-        chat_id: userId,
-        text: USER_COPY.pendingDelivered(forwardedCount),
-        parse_mode: 'HTML',
-      });
-    }
+    await forwardPendingMessageIds(userId, pendingIds, env, ctx, { from: query?.from });
   } catch (e) {
     Logger.error('pending_message_forward_failed', e, { userId });
     await tgCall(env, "sendMessage", {
@@ -3320,11 +3238,8 @@ function buildTopicTitle(from) {
       .substring(0, 20);
   }
 
-  // 移除控制字符和换行符
-  const cleanName = (firstName + " " + lastName)
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  // 移除控制字符和换行符（与 src/utils.js cleanProfileText 同一规则）
+  const cleanName = cleanProfileText(firstName + " " + lastName);
 
   const name = cleanName || "User";
   const usernameStr = username ? ` @${username}` : "";
@@ -3335,14 +3250,29 @@ function buildTopicTitle(from) {
   return title;
 }
 
+// Telegram 客户端实例缓存：同一 botToken/apiBase 下复用，避免每条消息重建对象
+const telegramClientCache = new Map();
+
+function getTelegramClient(env, timeout = CONFIG.API_TIMEOUT_MS) {
+  const key = `${env.BOT_TOKEN}|${env.API_BASE || ''}|${timeout}`;
+  let client = telegramClientCache.get(key);
+  if (!client) {
+    client = createTelegramClient({
+      botToken: env.BOT_TOKEN,
+      apiBase: env.API_BASE,
+      timeoutMs: timeout,
+      // 动态解析全局 fetch：测试通过 stubGlobal 替换时也能生效
+      fetchImpl: (...args) => fetch(...args),
+      logger: Logger,
+    });
+    telegramClientCache.set(key, client);
+  }
+  return client;
+}
+
 // 改进的 Telegram API 调用（添加超时和 HTTPS 强制）
 async function tgCall(env, method, body, timeout = CONFIG.API_TIMEOUT_MS) {
-  const client = createTelegramClient({
-    botToken: env.BOT_TOKEN,
-    apiBase: env.API_BASE,
-    timeoutMs: timeout,
-    logger: Logger,
-  });
+  const client = getTelegramClient(env, timeout);
   try {
     return await client.call(method, body);
   } catch (error) {
@@ -3444,7 +3374,8 @@ async function flushExpiredMediaGroups(env, now) {
 
     for (const { name } of allKeys) {
       const rec = await safeGetJSON(env, name, null);
-      if (rec && rec.last_ts && (now - rec.last_ts > 300000)) { // 超过 5 分钟
+      // 清理阈值与 KV 记录 TTL 保持一致（超过 MEDIA_GROUP_EXPIRE_SECONDS 视为过期残留）
+      if (rec && rec.last_ts && (now - rec.last_ts > CONFIG.MEDIA_GROUP_EXPIRE_SECONDS * 1000)) {
         await env.TOPIC_MAP.delete(name);
         deletedCount++;
       }

@@ -4,6 +4,20 @@
  */
 
 /**
+ * 清理资料文本：移除控制字符、合并连续空白、去除首尾空白。
+ * 供话题标题与资料卡展示共用，保证各处清理规则一致。
+ * @param {*} value - 原始值（非字符串会被转为字符串）
+ * @returns {string}
+ */
+export function cleanProfileText(value) {
+  return String(value ?? '')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+
+/**
  * 检查文本是否包含屏蔽词
  * @param {string} text - 待检查文本
  * @param {string[]} words - 屏蔽词列表

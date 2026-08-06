@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 工程优化
+
+- 消除 `worker.js` 与 `src/utils.js` 重复的 10 个纯函数定义，统一 import（单文件部署仍由 esbuild bundle 完成）。
+- `tgCall` 缓存 Telegram 客户端实例，避免每条消息重复创建（并发复用同一 botToken/apiBase 的 client）。
+- 提取 `forwardPendingMessageIds` 公共函数，统一本地题库与 Turnstile 回调的待处理消息转发（去重 + 并发 3 + 送达通知）。
+- 管理确认回调抽离 `confirmAsk` / `confirmCancel`，消除封禁/关闭/重置 6 处重复块。
+- 提取 `readKvBlockedWords`，`/addword` `/delword` `/listwords` 共用 KV 词库读取。
+- 媒体组清理阈值改为与 `MEDIA_GROUP_EXPIRE_SECONDS` 常量对齐（原硬编码 5 分钟与 60 秒 TTL 不一致）。
+- `cleanProfileText` 上提至 `src/utils.js`，统一话题标题与资料卡文本清理规则。
+- ID 白名单解析带实例级缓存，避免每次权限判断重复 split。
+- 删除零引用的 `StorageError` 死代码（`src/storage/storage.js`）。
+
 ### 管理体验
 
 - 管理 UI 展示与命令编排拆至 `src/admin-ui-format.js`、`src/admin-commands.js`（行为不变，便于后续迭代与单测）。

@@ -1073,9 +1073,75 @@ function createApp({ handleFetch = notFoundHandler } = {}) {
 var defaultApp = createApp();
 
 // src/utils.js
+function cleanProfileText(value) {
+  return String(value ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();
+}
 function extractMessageText(message) {
   if (!message || typeof message !== "object") return "";
   return [message.text, message.caption].filter((value) => typeof value === "string" && value.trim().length > 0).join(" ").trim();
+}
+function containsLink(text) {
+  if (!text) return false;
+  const patterns = [
+    /https?:\/\/\S+/i,
+    /[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}(\/\S*)?/,
+    /t\.me\/\S+/i,
+    /telegram\.me\/\S+/i
+  ];
+  return patterns.some((p) => p.test(text));
+}
+function buildSpamCheckText(msg) {
+  if (!msg || typeof msg !== "object") return "";
+  const from = msg.from || {};
+  return [
+    msg.text,
+    msg.caption,
+    from.first_name,
+    from.last_name,
+    from.username
+  ].filter((v) => typeof v === "string" && v.trim().length > 0).join(" ");
+}
+function detectSpamKeywords(text, keywords) {
+  if (!text || keywords.length === 0) {
+    return { isSpam: false, matchedWord: null };
+  }
+  const lower = text.toLowerCase();
+  for (const word of keywords) {
+    if (lower.includes(word)) {
+      return { isSpam: true, matchedWord: word };
+    }
+  }
+  return { isSpam: false, matchedWord: null };
+}
+function computeMessageHash(msg) {
+  const text = (msg.text || msg.caption || "").trim().toLowerCase();
+  if (!text) return null;
+  const fingerprint = `${text.length}|${text.substring(0, 100)}|${text.substring(Math.max(0, text.length - 20))}`;
+  return fingerprint;
+}
+function normalizeTgDescription(description) {
+  return (description || "").toString().toLowerCase();
+}
+function isTopicMissingOrDeleted(description) {
+  const desc = normalizeTgDescription(description);
+  return desc.includes("thread not found") || desc.includes("topic not found") || desc.includes("message thread not found") || desc.includes("topic deleted") || desc.includes("thread deleted") || desc.includes("forum topic not found") || desc.includes("topic closed permanently");
+}
+function isTestMessageInvalid(description) {
+  const desc = normalizeTgDescription(description);
+  return desc.includes("message text is empty") || desc.includes("bad request: message text is empty");
+}
+function withMessageThreadId(body, threadId) {
+  if (threadId === void 0 || threadId === null) return body;
+  return { ...body, message_thread_id: threadId };
+}
+function parseSpamKeywords(raw) {
+  if (!raw) return [];
+  return raw.toString().trim().split(/[,;，；\n]+/g).map((s) => s.trim().toLowerCase()).filter((s) => s.length > 0);
+}
+function generateVerifyCode() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // src/message-policy.js
@@ -1424,9 +1490,6 @@ var SNAPSHOT_LIMIT = 5e3;
 var TOPIC_LOCK_TTL_MS = 3e4;
 var TOPIC_TITLE_LIMIT = 128;
 var TOPIC_UPDATE_INTERVAL_MS = 60 * 60 * 1e3;
-function cleanProfileText(value) {
-  return String(value ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();
-}
 function buildTopicTitle(user) {
   const userId = cleanProfileText(user.userId) || "unknown";
   const username = cleanProfileText(user.username).replace(/[^\w]/g, "");
@@ -3356,73 +3419,60 @@ function createAdminCommandHandlers(deps) {
           });
           return;
         }
-        if (action === "banask") {
+        const confirmAsk = async (confirmText, keyboard) => {
           await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id });
           await tgCall2(env, "sendMessage", {
             chat_id: env.SUPERGROUP_ID,
             message_thread_id: tid,
-            text: `\u26A0\uFE0F <b>\u786E\u8BA4\u5C01\u7981\u7528\u6237</b> <code>${escapeHtml(userId)}</code>\uFF1F
-\u5BF9\u65B9\u5C06\u6536\u5230\u901A\u77E5\u4E14\u65E0\u6CD5\u7EE7\u7EED\u53D1\u6D88\u606F\u3002`,
+            text: confirmText,
             parse_mode: "HTML",
-            reply_markup: buildBanConfirmKeyboard(userId)
+            reply_markup: keyboard
           });
+        };
+        const confirmCancel = async (cancelText) => {
+          await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u53D6\u6D88" });
+          if (chatId && messageId) {
+            await tgCall2(env, "editMessageText", {
+              chat_id: chatId,
+              message_id: messageId,
+              text: cancelText
+            });
+          }
+        };
+        if (action === "banask") {
+          await confirmAsk(
+            `\u26A0\uFE0F <b>\u786E\u8BA4\u5C01\u7981\u7528\u6237</b> <code>${escapeHtml(userId)}</code>\uFF1F
+\u5BF9\u65B9\u5C06\u6536\u5230\u901A\u77E5\u4E14\u65E0\u6CD5\u7EE7\u7EED\u53D1\u6D88\u606F\u3002`,
+            buildBanConfirmKeyboard(userId)
+          );
           return;
         }
         if (action === "bancancel") {
-          await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u53D6\u6D88" });
-          if (chatId && messageId) {
-            await tgCall2(env, "editMessageText", {
-              chat_id: chatId,
-              message_id: messageId,
-              text: "\u5DF2\u53D6\u6D88\u5C01\u7981\u3002"
-            });
-          }
+          await confirmCancel("\u5DF2\u53D6\u6D88\u5C01\u7981\u3002");
           return;
         }
         if (action === "closeask") {
-          await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id });
-          await tgCall2(env, "sendMessage", {
-            chat_id: env.SUPERGROUP_ID,
-            message_thread_id: tid,
-            text: `\u26A0\uFE0F <b>\u786E\u8BA4\u5173\u95ED\u5BF9\u8BDD</b> <code>${escapeHtml(userId)}</code>\uFF1F
+          await confirmAsk(
+            `\u26A0\uFE0F <b>\u786E\u8BA4\u5173\u95ED\u5BF9\u8BDD</b> <code>${escapeHtml(userId)}</code>\uFF1F
 \u5C06\u5173\u95ED Forum Topic\uFF0C\u7528\u6237\u6D88\u606F\u4E0D\u518D\u63A5\u5165\uFF08\u53EF\u7528\u6253\u5F00\u6062\u590D\uFF09\u3002`,
-            parse_mode: "HTML",
-            reply_markup: buildCloseConfirmKeyboard(userId)
-          });
+            buildCloseConfirmKeyboard(userId)
+          );
           return;
         }
         if (action === "closecancel") {
-          await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u53D6\u6D88" });
-          if (chatId && messageId) {
-            await tgCall2(env, "editMessageText", {
-              chat_id: chatId,
-              message_id: messageId,
-              text: "\u5DF2\u53D6\u6D88\u5173\u95ED\u5BF9\u8BDD\u3002"
-            });
-          }
+          await confirmCancel("\u5DF2\u53D6\u6D88\u5173\u95ED\u5BF9\u8BDD\u3002");
           return;
         }
         if (action === "resetask") {
-          await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id });
-          await tgCall2(env, "sendMessage", {
-            chat_id: env.SUPERGROUP_ID,
-            message_thread_id: tid,
-            text: `\u26A0\uFE0F <b>\u786E\u8BA4\u91CD\u7F6E\u9A8C\u8BC1</b> <code>${escapeHtml(userId)}</code>\uFF1F
+          await confirmAsk(
+            `\u26A0\uFE0F <b>\u786E\u8BA4\u91CD\u7F6E\u9A8C\u8BC1</b> <code>${escapeHtml(userId)}</code>\uFF1F
 \u5C06\u53D6\u6D88\u6C38\u4E45\u4FE1\u4EFB\uFF0C\u7528\u6237\u4E0B\u6B21\u9700\u91CD\u65B0\u9A8C\u8BC1\u3002`,
-            parse_mode: "HTML",
-            reply_markup: buildResetConfirmKeyboard(userId)
-          });
+            buildResetConfirmKeyboard(userId)
+          );
           return;
         }
         if (action === "resetcancel") {
-          await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u53D6\u6D88" });
-          if (chatId && messageId) {
-            await tgCall2(env, "editMessageText", {
-              chat_id: chatId,
-              message_id: messageId,
-              text: "\u5DF2\u53D6\u6D88\u91CD\u7F6E\u9A8C\u8BC1\u3002"
-            });
-          }
+          await confirmCancel("\u5DF2\u53D6\u6D88\u91CD\u7F6E\u9A8C\u8BC1\u3002");
           return;
         }
         if (action === "shownote") {
@@ -3603,65 +3653,6 @@ var ADMIN_COPY = {
 };
 
 // worker.js
-function containsLink(text) {
-  if (!text) return false;
-  const patterns = [
-    /https?:\/\/\S+/i,
-    /[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}(\/\S*)?/,
-    /t\.me\/\S+/i,
-    /telegram\.me\/\S+/i
-  ];
-  return patterns.some((p) => p.test(text));
-}
-function buildSpamCheckText(msg) {
-  if (!msg || typeof msg !== "object") return "";
-  const from = msg.from || {};
-  return [
-    msg.text,
-    msg.caption,
-    from.first_name,
-    from.last_name,
-    from.username
-  ].filter((v) => typeof v === "string" && v.trim().length > 0).join(" ");
-}
-function detectSpamKeywords(text, keywords) {
-  if (!text || keywords.length === 0) return { isSpam: false, matchedWord: null };
-  const lower = text.toLowerCase();
-  for (const word of keywords) {
-    if (lower.includes(word)) return { isSpam: true, matchedWord: word };
-  }
-  return { isSpam: false, matchedWord: null };
-}
-function computeMessageHash(msg) {
-  const text = (msg.text || msg.caption || "").trim().toLowerCase();
-  if (!text) return null;
-  const fingerprint = `${text.length}|${text.substring(0, 100)}|${text.substring(Math.max(0, text.length - 20))}`;
-  return fingerprint;
-}
-function normalizeTgDescription(description) {
-  return (description || "").toString().toLowerCase();
-}
-function isTopicMissingOrDeleted(description) {
-  const desc = normalizeTgDescription(description);
-  return desc.includes("thread not found") || desc.includes("topic not found") || desc.includes("message thread not found") || desc.includes("topic deleted") || desc.includes("thread deleted") || desc.includes("forum topic not found") || desc.includes("topic closed permanently");
-}
-function isTestMessageInvalid(description) {
-  const desc = normalizeTgDescription(description);
-  return desc.includes("message text is empty") || desc.includes("bad request: message text is empty");
-}
-function withMessageThreadId(body, threadId) {
-  if (threadId === void 0 || threadId === null) return body;
-  return { ...body, message_thread_id: threadId };
-}
-function parseSpamKeywords(raw) {
-  if (!raw) return [];
-  return raw.toString().trim().split(/[,;，；\n]+/g).map((s) => s.trim().toLowerCase()).filter((s) => s.length > 0);
-}
-function generateVerifyCode() {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 var CONFIG = {
   VERIFY_ID_LENGTH: 12,
   VERIFY_EXPIRE_SECONDS: 300,
@@ -3769,6 +3760,16 @@ async function getBlockedWords(env, forceRefresh = false) {
   blockedWordsCache.ts = now;
   return merged;
 }
+async function readKvBlockedWords(env) {
+  let kvWords = [];
+  try {
+    const raw = await env.TOPIC_MAP.get("blocked_words_kv");
+    if (raw) kvWords = JSON.parse(raw);
+  } catch {
+  }
+  if (!Array.isArray(kvWords)) kvWords = [];
+  return kvWords;
+}
 var Logger = createLogger();
 var RECENT_SYSTEM_ERRORS_MAX = 12;
 var recentSystemErrors = [];
@@ -3868,11 +3869,27 @@ function createLegacyConversationService(env) {
     supergroupId: env.SUPERGROUP_ID
   });
 }
+var idAllowlistParseCache = /* @__PURE__ */ new Map();
+var ID_ALLOWLIST_CACHE_MAX = 64;
+function parseIdAllowlistSet(raw) {
+  const key = String(raw || "");
+  let set = idAllowlistParseCache.get(key);
+  if (!set) {
+    set = new Set(
+      key.split(/[,;\s]+/g).map((value) => value.trim()).filter((value) => /^\d{1,20}$/.test(value))
+    );
+    if (idAllowlistParseCache.size >= ID_ALLOWLIST_CACHE_MAX) {
+      idAllowlistParseCache.delete(idAllowlistParseCache.keys().next().value);
+    }
+    idAllowlistParseCache.set(key, set);
+  }
+  return set;
+}
 function parseIdAllowlist(raw) {
-  return String(raw || "").split(/[,;\s]+/g).map((value) => value.trim()).filter((value) => /^\d{1,20}$/.test(value));
+  return [...parseIdAllowlistSet(raw)];
 }
 function idAllowlistHas(raw, userId) {
-  return parseIdAllowlist(raw).includes(String(userId));
+  return parseIdAllowlistSet(raw).has(String(userId));
 }
 function createLegacyAdminService(env) {
   return createAdminService({
@@ -4155,7 +4172,7 @@ async function resetUserVerificationAndRequireReverify(env, { userId, userKey, o
   await sendVerificationChallenge(userId, env, pendingMsgId || null);
 }
 function parseAdminIdAllowlist(env) {
-  const set = new Set(parseIdAllowlist(env.ADMIN_IDS));
+  const set = parseIdAllowlistSet(env.ADMIN_IDS);
   return set.size > 0 ? set : null;
 }
 async function isAdminUser(env, userId) {
@@ -4590,30 +4607,12 @@ var legacyApp = {
             const pendingIds = JSON.parse(pendingIdsStr);
             if (Array.isArray(pendingIds) && pendingIds.length > 0) {
               pendingCount = Math.min(pendingIds.length, CONFIG.PENDING_MAX_MESSAGES);
+              const limited = pendingIds.slice(-CONFIG.PENDING_MAX_MESSAGES);
               ctx.waitUntil((async () => {
-                let forwardedCount = 0;
-                const limited = pendingIds.slice(0, CONFIG.PENDING_MAX_MESSAGES);
-                const topicFrom = await resolveUserFromForTopic(normalizedEnv, userId, null);
-                for (const pendingId of limited) {
-                  if (!pendingId) continue;
-                  const fakeMsg = {
-                    message_id: pendingId,
-                    chat: { id: Number(userId), type: "private" },
-                    from: topicFrom
-                  };
-                  try {
-                    await forwardToTopic(fakeMsg, userId, `user:${userId}`, normalizedEnv, ctx);
-                    forwardedCount++;
-                  } catch (e) {
-                    Logger.error("pending_turnstile_forward_failed", e, { userId, messageId: pendingId });
-                  }
-                }
-                if (forwardedCount > 0) {
-                  await tgCall(normalizedEnv, "sendMessage", {
-                    chat_id: Number(userId),
-                    text: USER_COPY.pendingDelivered(forwardedCount),
-                    parse_mode: "HTML"
-                  });
+                try {
+                  await forwardPendingMessageIds(userId, limited, normalizedEnv, ctx, { from: null });
+                } catch (e) {
+                  Logger.error("pending_turnstile_forward_failed", e, { userId });
                 }
                 await env.TOPIC_MAP.delete(pendingKey);
               })());
@@ -5263,13 +5262,7 @@ async function handleAddWordCommand(env, threadId, text, senderId) {
     });
     return;
   }
-  let kvWords = [];
-  try {
-    const raw = await env.TOPIC_MAP.get("blocked_words_kv");
-    if (raw) kvWords = JSON.parse(raw);
-  } catch {
-  }
-  if (!Array.isArray(kvWords)) kvWords = [];
+  let kvWords = await readKvBlockedWords(env);
   const allWords = [.../* @__PURE__ */ new Set([...BLOCKED_WORDS, ...kvWords])];
   if (allWords.map((w) => w.toLowerCase()).includes(word.toLowerCase())) {
     await tgCall(env, "sendMessage", {
@@ -5311,13 +5304,7 @@ async function handleDelWordCommand(env, threadId, text, senderId) {
     });
     return;
   }
-  let kvWords = [];
-  try {
-    const raw = await env.TOPIC_MAP.get("blocked_words_kv");
-    if (raw) kvWords = JSON.parse(raw);
-  } catch {
-  }
-  if (!Array.isArray(kvWords)) kvWords = [];
+  let kvWords = await readKvBlockedWords(env);
   const before = kvWords.length;
   kvWords = kvWords.filter((w) => w.toLowerCase() !== word.toLowerCase());
   if (kvWords.length === before) {
@@ -5341,13 +5328,7 @@ async function handleDelWordCommand(env, threadId, text, senderId) {
 }
 async function handleListWordsCommand(env, threadId) {
   const allWords = await getBlockedWords(env, true);
-  let kvWords = [];
-  try {
-    const raw = await env.TOPIC_MAP.get("blocked_words_kv");
-    if (raw) kvWords = JSON.parse(raw);
-  } catch {
-  }
-  if (!Array.isArray(kvWords)) kvWords = [];
+  const kvWords = await readKvBlockedWords(env);
   const hardcoded = BLOCKED_WORDS;
   const dynamic = kvWords.filter((w) => !BLOCKED_WORDS.map((h) => h.toLowerCase()).includes(w.toLowerCase()));
   const spamKeywords = parseSpamKeywords((env.SPAM_KEYWORDS || "").toString());
@@ -6045,6 +6026,49 @@ async function handleCallbackQuery(query, env, ctx) {
     });
   }
 }
+async function forwardPendingMessageIds(userId, pendingIds, env, ctx, { from = null } = {}) {
+  const limited = (Array.isArray(pendingIds) ? pendingIds : []).filter(Boolean).slice(-CONFIG.PENDING_MAX_MESSAGES);
+  const CONCURRENT_FORWARDS = 3;
+  let forwardedCount = 0;
+  let skippedCount = 0;
+  for (let i = 0; i < limited.length; i += CONCURRENT_FORWARDS) {
+    const batch = limited.slice(i, i + CONCURRENT_FORWARDS);
+    const results = await Promise.allSettled(batch.map(async (pendingId) => {
+      const forwardedKey = `forwarded:${userId}:${pendingId}`;
+      const alreadyForwarded = await env.TOPIC_MAP.get(forwardedKey);
+      if (alreadyForwarded) {
+        Logger.info("message_forward_duplicate_skipped", { userId, messageId: pendingId });
+        return { forwarded: false, reason: "already_forwarded" };
+      }
+      const topicFrom = await resolveUserFromForTopic(env, userId, from);
+      const fakeMsg = {
+        message_id: pendingId,
+        chat: { id: Number(userId), type: "private" },
+        from: topicFrom
+      };
+      await forwardToTopic(fakeMsg, userId, `user:${userId}`, env, ctx);
+      await env.TOPIC_MAP.put(forwardedKey, "1", { expirationTtl: 3600 });
+      return { forwarded: true };
+    }));
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value?.forwarded) {
+        forwardedCount++;
+      } else if (r.status === "fulfilled") {
+        skippedCount++;
+      } else if (r.status === "rejected") {
+        Logger.warn("pending_forward_item_failed", { userId, error: r.reason?.message });
+      }
+    }
+  }
+  if (forwardedCount > 0) {
+    await tgCall(env, "sendMessage", {
+      chat_id: Number(userId),
+      text: USER_COPY.pendingDelivered(forwardedCount),
+      parse_mode: "HTML"
+    });
+  }
+  return { forwardedCount, skippedCount };
+}
 async function forwardPendingMessages(state, userId, query, env, ctx) {
   try {
     let pendingIds = [];
@@ -6053,49 +6077,7 @@ async function forwardPendingMessages(state, userId, query, env, ctx) {
     } else if (state.pending) {
       pendingIds = [state.pending];
     }
-    if (pendingIds.length > CONFIG.PENDING_MAX_MESSAGES) {
-      pendingIds = pendingIds.slice(pendingIds.length - CONFIG.PENDING_MAX_MESSAGES);
-    }
-    const CONCURRENT_FORWARDS = 3;
-    let forwardedCount = 0;
-    let skippedCount = 0;
-    for (let i = 0; i < pendingIds.length; i += CONCURRENT_FORWARDS) {
-      const batch = pendingIds.slice(i, i + CONCURRENT_FORWARDS);
-      const results = await Promise.allSettled(batch.map(async (pendingId) => {
-        if (!pendingId) return { forwarded: false, reason: "empty_id" };
-        const forwardedKey = `forwarded:${userId}:${pendingId}`;
-        const alreadyForwarded = await env.TOPIC_MAP.get(forwardedKey);
-        if (alreadyForwarded) {
-          Logger.info("message_forward_duplicate_skipped", { userId, messageId: pendingId });
-          return { forwarded: false, reason: "already_forwarded" };
-        }
-        const topicFrom = await resolveUserFromForTopic(env, userId, query?.from);
-        const fakeMsg = {
-          message_id: pendingId,
-          chat: { id: userId, type: "private" },
-          from: topicFrom
-        };
-        await forwardToTopic(fakeMsg, userId, `user:${userId}`, env, ctx);
-        await env.TOPIC_MAP.put(forwardedKey, "1", { expirationTtl: 3600 });
-        return { forwarded: true };
-      }));
-      for (const r of results) {
-        if (r.status === "fulfilled" && r.value?.forwarded) {
-          forwardedCount++;
-        } else if (r.status === "fulfilled" && !r.value?.forwarded) {
-          skippedCount++;
-        } else if (r.status === "rejected") {
-          Logger.warn("pending_forward_item_failed", { userId, error: r.reason?.message });
-        }
-      }
-    }
-    if (forwardedCount > 0) {
-      await tgCall(env, "sendMessage", {
-        chat_id: userId,
-        text: USER_COPY.pendingDelivered(forwardedCount),
-        parse_mode: "HTML"
-      });
-    }
+    await forwardPendingMessageIds(userId, pendingIds, env, ctx, { from: query?.from });
   } catch (e) {
     Logger.error("pending_message_forward_failed", e, { userId });
     await tgCall(env, "sendMessage", {
@@ -6296,19 +6278,31 @@ function buildTopicTitle2(from) {
   if (rawUsername) {
     username = String(rawUsername).replace(/[^\w]/g, "").substring(0, 20);
   }
-  const cleanName = (firstName + " " + lastName).replace(/[\u0000-\u001f\u007f-\u009f]/g, "").replace(/\s+/g, " ").trim();
+  const cleanName = cleanProfileText(firstName + " " + lastName);
   const name = cleanName || "User";
   const usernameStr = username ? ` @${username}` : "";
   const title = (name + usernameStr).substring(0, CONFIG.MAX_TITLE_LENGTH);
   return title;
 }
+var telegramClientCache = /* @__PURE__ */ new Map();
+function getTelegramClient(env, timeout = CONFIG.API_TIMEOUT_MS) {
+  const key = `${env.BOT_TOKEN}|${env.API_BASE || ""}|${timeout}`;
+  let client = telegramClientCache.get(key);
+  if (!client) {
+    client = createTelegramClient({
+      botToken: env.BOT_TOKEN,
+      apiBase: env.API_BASE,
+      timeoutMs: timeout,
+      // 动态解析全局 fetch：测试通过 stubGlobal 替换时也能生效
+      fetchImpl: (...args) => fetch(...args),
+      logger: Logger
+    });
+    telegramClientCache.set(key, client);
+  }
+  return client;
+}
 async function tgCall(env, method, body, timeout = CONFIG.API_TIMEOUT_MS) {
-  const client = createTelegramClient({
-    botToken: env.BOT_TOKEN,
-    apiBase: env.API_BASE,
-    timeoutMs: timeout,
-    logger: Logger
-  });
+  const client = getTelegramClient(env, timeout);
   try {
     return await client.call(method, body);
   } catch (error) {
@@ -6393,7 +6387,7 @@ async function flushExpiredMediaGroups(env, now) {
     let deletedCount = 0;
     for (const { name } of allKeys) {
       const rec = await safeGetJSON(env, name, null);
-      if (rec && rec.last_ts && now - rec.last_ts > 3e5) {
+      if (rec && rec.last_ts && now - rec.last_ts > CONFIG.MEDIA_GROUP_EXPIRE_SECONDS * 1e3) {
         await env.TOPIC_MAP.delete(name);
         deletedCount++;
       }

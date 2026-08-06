@@ -126,129 +126,124 @@ npm run sync-docs
 
 ## 关键函数索引（自动生成）
 
-> 由 `scripts/sync-claude-md.js` 自动生成，最后同步：2026-07-11。
+> 由 `scripts/sync-claude-md.js` 自动生成，最后同步：2026-08-06。
 
 ### worker.js 主函数
 
 | 函数 | 行号 | 职责 |
 |------|------|------|
-| `containsLink` | L54 | 检测消息文本中是否包含 URL/链接 |
-| `buildSpamCheckText` | L68 | 构建反垃圾检测文本：消息正文 + 发送者资料 |
-| `detectSpamKeywords` | L85 | 检测消息是否包含垃圾关键词 |
-| `computeMessageHash` | L97 | 计算消息内容的简单哈希（用于重复检测） |
-| `normalizeTgDescription` | L107 | 标准化 Telegram API 描述字符串 |
-| `isTopicMissingOrDeleted` | L114 | 判断话题是否不存在或已被删除 |
-| `isTestMessageInvalid` | L128 | 判断探测消息是否因内容为空而失败 |
-| `withMessageThreadId` | L137 | 为请求 body 添加 message_thread_id 字段 |
-| `parseSpamKeywords` | L145 | 将 SPAM_KEYWORDS 环境变量解析为关键词数组 |
-| `generateVerifyCode` | L156 | 生成安全的验证 code（16 字节十六进制） |
-| `setBoundedCache` | L215 | — |
-| `getBlockedWords` | L258 | 获取完整屏蔽词列表 = 硬编码 + KV 动态词库（合并去重） |
-| `recordSystemError` | L295 | — |
-| `ephemeralStore` | L334 | — |
-| `getVerificationState` | L338 | — |
-| `getStoredRules` | L354 | — |
-| `evaluateLegacyPolicy` | L364 | — |
-| `createLegacyConversationService` | L390 | — |
-| `parseIdAllowlist` | L401 | — |
-| `idAllowlistHas` | L408 | — |
-| `createLegacyAdminService` | L412 | — |
-| `setPersistentTrust` | L422 | — |
-| `saveLegacyMessageLink` | L432 | — |
-| `secureRandomInt` | L451 | 加密安全的随机数生成 |
-| `secureRandomId` | L458 | — |
-| `safeGetJSON` | L466 | 安全的 JSON 获取 |
-| `isSparseTelegramFrom` | L486 | 判断 Telegram from 是否缺少可用于话题标题的资料字段。 |
-| `saveUserProfileSnapshot` | L496 | 缓存用户资料，供 Turnstile 验证回放等缺少 from 的路径建话题时使用。 |
-| `resolveUserFromForTopic` | L514 | 修复 Turnstile 验证通过后 fakeMsg 仅含 id 导致标题变成「User」的问题。 |
-| `getOrCreateUserTopicRec` | L578 | — |
-| `probeForumThread` | L665 | — |
-| `resetUserVerificationAndRequireReverify` | L721 | — |
-| `parseAdminIdAllowlist` | L747 | — |
-| `isAdminUser` | L752 | — |
-| `getAllKeys` | L791 | 获取所有 KV keys（处理分页） |
-| `shuffleArray` | L805 | Fisher-Yates 洗牌算法 |
-| `checkRateLimit` | L815 | 速率限制检查 |
-| `verifyTurnstileToken` | L828 | 调用 Cloudflare Turnstile API 验证 token |
-| `getSpamKeywords` | L857 | 加载/解析垃圾关键词列表 |
-| `detectRepeatMessage` | L875 | 检测用户是否在短时间内重复发送相同内容 |
-| `pruneMessageHashCache` | L901 | 定期清理过期的 messageHashCache 条目（防止内存无限增长） |
-| `spamCheck` | L917 | 综合垃圾检测（关键词 + 链接 + 重复） |
-| `notifyAdmin` | L969 | 用于关键异常（转发失败、KV 异常等）向管理员发送即时通知 |
-| `updateSpamStats` | L991 | 异步更新 spam 统计计数（在 waitUntil 中调用，不阻塞主响应） |
-| `handleSpamMessage` | L1014 | 处理垃圾消息（通知管理员或静默丢弃） |
-| `showStatus` | L1092 | — |
-| `onTurnstileSuccess` | L1097 | — |
-| `onTurnstileError` | L1142 | — |
-| `handlePrivateMessage` | L1496 | ---------------- 核心业务逻辑 ---------------- |
-| `forwardToTopic` | L1616 | 职责：前置检查 → 获取/创建话题 → 健康检查 → 执行转发 |
-| `checkThreadHealth` | L1712 | 话题健康检查 — 双层缓存（内存 + KV）+ 探测 |
-| `executeMessageForward` | L1771 | 执行消息转发 — forwardMessage → copyMessage 降级 + 重定向检测 |
-| `handleForwardRedirect` | L1815 | 处理转发重定向 — 删除误投消息 + 触发重建 |
-| `handleForwardFailure` | L1843 | 处理转发失败 — 话题丢失检测 + copyMessage 降级 + 通知管理员 |
-| `removeCommandBotSuffix` | L1896 | 例如：/listwords@callcosr_bot -> /listwords |
-| `handleAdminReply` | L1902 | — |
-| `isOwnerUser` | L1915 | --- 管理员命令处理函数 --- |
-| `getAdminHandlers` | L1922 | — |
-| `bumpDailyStat` | L1953 | — |
-| `handleHelpCommand` | L1956 | — |
-| `handleMenuCommand` | L1959 | — |
-| `handleSysinfoCommand` | L1962 | — |
-| `handleStatsCommand` | L1965 | — |
-| `handleRankCommand` | L1968 | — |
-| `handleNotesCommand` | L1971 | — |
-| `handleWhoamiCommand` | L1974 | — |
-| `handleFindCommand` | L1977 | — |
-| `handleSyncCommandsCommand` | L1980 | — |
-| `handleAdminUiCallback` | L1983 | — |
-| `resolveThreadIdForUser` | L1988 | — |
-| `handlePanelCommand` | L2000 | — |
-| `handleMuteCommand` | L2041 | — |
-| `handleUnmuteCommand` | L2058 | — |
-| `handleNoteCommand` | L2076 | — |
-| `handleAddWordCommand` | L2108 | — |
-| `handleDelWordCommand` | L2150 | — |
-| `handleListWordsCommand` | L2204 | — |
-| `handleCloseCommand` | L2246 | — |
-| `handleOpenCommand` | L2275 | — |
-| `handleResetCommand` | L2304 | — |
-| `handleTrustCommand` | L2314 | — |
-| `handleBanCommand` | L2325 | — |
-| `handleUnbanCommand` | L2362 | — |
-| `handleInfoCommand` | L2390 | — |
-| `_handleAdminReplyInner` | L2479 | 职责：权限检查 → 全局命令路由 → 用户反查 → 话题内指令路由 → 消息转发 |
-| `sendVerificationChallenge` | L2680 | ---------------- 验证模块 (纯本地) ---------------- |
-| `_sendVerificationChallengeInner` | L2696 | — |
-| `sendTurnstileChallenge` | L2754 | Turnstile 验证路径 — 发送验证按钮链接 |
-| `sendLocalQuizChallenge` | L2814 | 本地题库验证路径 — 发送选择题 |
-| `handleCallbackQuery` | L2868 | — |
-| `forwardPendingMessages` | L3013 | 验证通过后转发待处理消息 — 并行转发 + 去重 + 通知用户 |
-| `handleCleanupCommand` | L3096 | - 需要批量重置这些用户的状态 |
-| `createTopic` | L3256 | 为话题建立 thread->user 映射，避免管理员命令时全量 KV 反查 |
-| `updateThreadStatus` | L3270 | 更新话题状态 |
-| `buildTopicTitle` | L3309 | 资料缺失时勿在调用方传入仅 { id } 的 from（会退化为 "User"）；应先 resolveUserFromForTopic。 |
-| `tgCall` | L3339 | 改进的 Telegram API 调用（添加超时和 HTTPS 强制） |
-| `handleMediaGroup` | L3366 | — |
-| `extractMedia` | L3387 | 改进的媒体提取（支持更多类型，不修改原数组） |
-| `flushExpiredMediaGroups` | L3439 | 实现媒体组清理 |
-| `delaySend` | L3462 | 改进媒体组延迟发送 |
+| `setBoundedCache` | L116 | — |
+| `getBlockedWords` | L159 | 获取完整屏蔽词列表 = 硬编码 + KV 动态词库（合并去重） |
+| `readKvBlockedWords` | L192 | 供 /addword、/delword、/listwords 共用，避免三处重复读解析逻辑 |
+| `recordSystemError` | L212 | — |
+| `ephemeralStore` | L251 | — |
+| `getVerificationState` | L255 | — |
+| `getStoredRules` | L271 | — |
+| `evaluateLegacyPolicy` | L281 | — |
+| `createLegacyConversationService` | L307 | — |
+| `parseIdAllowlistSet` | L322 | — |
+| `parseIdAllowlist` | L341 | — |
+| `idAllowlistHas` | L345 | — |
+| `createLegacyAdminService` | L349 | — |
+| `setPersistentTrust` | L359 | — |
+| `saveLegacyMessageLink` | L369 | — |
+| `secureRandomInt` | L388 | 加密安全的随机数生成 |
+| `secureRandomId` | L395 | — |
+| `safeGetJSON` | L403 | 安全的 JSON 获取 |
+| `isSparseTelegramFrom` | L423 | 判断 Telegram from 是否缺少可用于话题标题的资料字段。 |
+| `saveUserProfileSnapshot` | L433 | 缓存用户资料，供 Turnstile 验证回放等缺少 from 的路径建话题时使用。 |
+| `resolveUserFromForTopic` | L451 | 修复 Turnstile 验证通过后 fakeMsg 仅含 id 导致标题变成「User」的问题。 |
+| `getOrCreateUserTopicRec` | L515 | — |
+| `probeForumThread` | L602 | — |
+| `resetUserVerificationAndRequireReverify` | L658 | — |
+| `parseAdminIdAllowlist` | L684 | — |
+| `isAdminUser` | L689 | — |
+| `getAllKeys` | L728 | 获取所有 KV keys（处理分页） |
+| `shuffleArray` | L742 | Fisher-Yates 洗牌算法 |
+| `checkRateLimit` | L752 | 速率限制检查 |
+| `verifyTurnstileToken` | L765 | 调用 Cloudflare Turnstile API 验证 token |
+| `getSpamKeywords` | L794 | 加载/解析垃圾关键词列表 |
+| `detectRepeatMessage` | L812 | 检测用户是否在短时间内重复发送相同内容 |
+| `pruneMessageHashCache` | L838 | 定期清理过期的 messageHashCache 条目（防止内存无限增长） |
+| `spamCheck` | L854 | 综合垃圾检测（关键词 + 链接 + 重复） |
+| `notifyAdmin` | L906 | 用于关键异常（转发失败、KV 异常等）向管理员发送即时通知 |
+| `updateSpamStats` | L928 | 异步更新 spam 统计计数（在 waitUntil 中调用，不阻塞主响应） |
+| `handleSpamMessage` | L951 | 处理垃圾消息（通知管理员或静默丢弃） |
+| `showStatus` | L1029 | — |
+| `onTurnstileSuccess` | L1034 | — |
+| `onTurnstileError` | L1079 | — |
+| `handlePrivateMessage` | L1414 | ---------------- 核心业务逻辑 ---------------- |
+| `forwardToTopic` | L1534 | 职责：前置检查 → 获取/创建话题 → 健康检查 → 执行转发 |
+| `checkThreadHealth` | L1630 | 话题健康检查 — 双层缓存（内存 + KV）+ 探测 |
+| `executeMessageForward` | L1689 | 执行消息转发 — forwardMessage → copyMessage 降级 + 重定向检测 |
+| `handleForwardRedirect` | L1733 | 处理转发重定向 — 删除误投消息 + 触发重建 |
+| `handleForwardFailure` | L1761 | 处理转发失败 — 话题丢失检测 + copyMessage 降级 + 通知管理员 |
+| `removeCommandBotSuffix` | L1814 | 例如：/listwords@callcosr_bot -> /listwords |
+| `handleAdminReply` | L1820 | — |
+| `isOwnerUser` | L1833 | --- 管理员命令处理函数 --- |
+| `getAdminHandlers` | L1840 | — |
+| `bumpDailyStat` | L1871 | — |
+| `handleHelpCommand` | L1874 | — |
+| `handleMenuCommand` | L1877 | — |
+| `handleSysinfoCommand` | L1880 | — |
+| `handleStatsCommand` | L1883 | — |
+| `handleRankCommand` | L1886 | — |
+| `handleNotesCommand` | L1889 | — |
+| `handleWhoamiCommand` | L1892 | — |
+| `handleFindCommand` | L1895 | — |
+| `handleSyncCommandsCommand` | L1898 | — |
+| `handleAdminUiCallback` | L1901 | — |
+| `resolveThreadIdForUser` | L1906 | — |
+| `handlePanelCommand` | L1918 | — |
+| `handleMuteCommand` | L1959 | — |
+| `handleUnmuteCommand` | L1976 | — |
+| `handleNoteCommand` | L1994 | — |
+| `handleAddWordCommand` | L2026 | — |
+| `handleDelWordCommand` | L2063 | — |
+| `handleListWordsCommand` | L2112 | — |
+| `handleCloseCommand` | L2149 | — |
+| `handleOpenCommand` | L2178 | — |
+| `handleResetCommand` | L2207 | — |
+| `handleTrustCommand` | L2217 | — |
+| `handleBanCommand` | L2228 | — |
+| `handleUnbanCommand` | L2265 | — |
+| `handleInfoCommand` | L2293 | — |
+| `_handleAdminReplyInner` | L2382 | 职责：权限检查 → 全局命令路由 → 用户反查 → 话题内指令路由 → 消息转发 |
+| `sendVerificationChallenge` | L2583 | ---------------- 验证模块 (纯本地) ---------------- |
+| `_sendVerificationChallengeInner` | L2599 | — |
+| `sendTurnstileChallenge` | L2657 | Turnstile 验证路径 — 发送验证按钮链接 |
+| `sendLocalQuizChallenge` | L2717 | 本地题库验证路径 — 发送选择题 |
+| `handleCallbackQuery` | L2771 | — |
+| `forwardPendingMessageIds` | L2919 | 供验证通过后的本地题库回放与 Turnstile 回调共用，避免两套转发逻辑漂移。 |
+| `forwardPendingMessages` | L2978 | 验证通过后转发待处理消息（本地题库路径） |
+| `handleCleanupCommand` | L3014 | - 需要批量重置这些用户的状态 |
+| `createTopic` | L3174 | 为话题建立 thread->user 映射，避免管理员命令时全量 KV 反查 |
+| `updateThreadStatus` | L3188 | 更新话题状态 |
+| `buildTopicTitle` | L3227 | 资料缺失时勿在调用方传入仅 { id } 的 from（会退化为 "User"）；应先 resolveUserFromForTopic。 |
+| `getTelegramClient` | L3256 | — |
+| `tgCall` | L3274 | 改进的 Telegram API 调用（添加超时和 HTTPS 强制） |
+| `handleMediaGroup` | L3296 | — |
+| `extractMedia` | L3317 | 改进的媒体提取（支持更多类型，不修改原数组） |
+| `flushExpiredMediaGroups` | L3369 | 实现媒体组清理 |
+| `delaySend` | L3393 | 改进媒体组延迟发送 |
 
 ### src/utils.js 纯函数
 
 | 函数 | 行号 | 职责 |
 |------|------|------|
-| `containsBlockedWord` | L12 | 检查文本是否包含屏蔽词 |
-| `extractMessageText` | L26 | 提取消息正文与媒体说明，供新消息和编辑消息共享策略。 |
-| `containsLink` | L39 | 检测消息文本中是否包含 URL/链接 |
-| `buildSpamCheckText` | L55 | 构建反垃圾检测文本：消息正文 + 发送者资料 |
-| `detectSpamKeywords` | L75 | 检测消息是否包含垃圾关键词 |
-| `computeMessageHash` | L93 | 计算消息内容的简单哈希（用于重复检测） |
-| `normalizeTgDescription` | L107 | 标准化 Telegram API 描述字符串 |
-| `isTopicMissingOrDeleted` | L116 | 判断话题是否不存在或已被删除 |
-| `isTestMessageInvalid` | L132 | 判断探测消息是否因内容为空而失败 |
-| `withMessageThreadId` | L144 | 为请求 body 添加 message_thread_id 字段 |
-| `parseSpamKeywords` | L154 | 将 SPAM_KEYWORDS 环境变量解析为关键词数组 |
-| `generateVerifyCode` | L166 | 生成安全的验证 code（16 字节十六进制） |
+| `cleanProfileText` | L12 | 供话题标题与资料卡展示共用，保证各处清理规则一致。 |
+| `containsBlockedWord` | L26 | 检查文本是否包含屏蔽词 |
+| `extractMessageText` | L40 | 提取消息正文与媒体说明，供新消息和编辑消息共享策略。 |
+| `containsLink` | L53 | 检测消息文本中是否包含 URL/链接 |
+| `buildSpamCheckText` | L69 | 构建反垃圾检测文本：消息正文 + 发送者资料 |
+| `detectSpamKeywords` | L89 | 检测消息是否包含垃圾关键词 |
+| `computeMessageHash` | L107 | 计算消息内容的简单哈希（用于重复检测） |
+| `normalizeTgDescription` | L121 | 标准化 Telegram API 描述字符串 |
+| `isTopicMissingOrDeleted` | L130 | 判断话题是否不存在或已被删除 |
+| `isTestMessageInvalid` | L146 | 判断探测消息是否因内容为空而失败 |
+| `withMessageThreadId` | L158 | 为请求 body 添加 message_thread_id 字段 |
+| `parseSpamKeywords` | L168 | 将 SPAM_KEYWORDS 环境变量解析为关键词数组 |
+| `generateVerifyCode` | L180 | 生成安全的验证 code（16 字节十六进制） |
 
 <!-- AUTO-GENERATED END: functions -->
 

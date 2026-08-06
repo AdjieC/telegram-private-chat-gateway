@@ -1,16 +1,9 @@
-import { extractMessageText } from './utils.js';
+import { extractMessageText, cleanProfileText } from './utils.js';
 
 const SNAPSHOT_LIMIT = 5000;
 const TOPIC_LOCK_TTL_MS = 30000;
 const TOPIC_TITLE_LIMIT = 128;
 const TOPIC_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
-
-function cleanProfileText(value) {
-  return String(value ?? '')
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 export function buildTopicTitle(user) {
   const userId = cleanProfileText(user.userId) || 'unknown';
