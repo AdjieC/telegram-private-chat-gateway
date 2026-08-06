@@ -1336,6 +1336,139 @@ function evaluateMessagePolicy({
   return createResult();
 }
 
+// src/user-copy.js
+var USER_COPY = {
+  rateLimited: "\u26A0\uFE0F \u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+  systemBusy: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+  bannedHourly: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
+  mutedHourly: "\u{1F507} \u60A8\u5F53\u524D\u5904\u4E8E\u9759\u97F3\u72B6\u6001\uFF0C\u6D88\u606F\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u53D6\u6D88\u9759\u97F3\u3002",
+  blockedWord: "\u{1F6AB} \u60A8\u7684\u6D88\u606F\u5305\u542B\u8FDD\u89C4\u5185\u5BB9\uFF0C\u5DF2\u88AB\u62E6\u622A\u3002\u8BF7\u4FEE\u6539\u540E\u91CD\u65B0\u53D1\u9001\u3002",
+  conversationClosed: "\u{1F6AB} \u5F53\u524D\u5BF9\u8BDD\u5DF2\u88AB\u7BA1\u7406\u5458\u5173\u95ED\u3002\u5982\u9700\u7EE7\u7EED\uFF0C\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u91CD\u65B0\u6253\u5F00\u3002",
+  pendingDelivered(count) {
+    return `\u{1F4E9} \u521A\u624D\u7684 <b>${count}</b> \u6761\u6D88\u606F\u5DF2\u5E2E\u60A8\u9001\u8FBE\u7BA1\u7406\u5458\u3002`;
+  },
+  muteUserNotify: "\u{1F507} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u9759\u97F3\uFF0C\u6D88\u606F\u6682\u65F6\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002",
+  unmuteUserNotify: "\u{1F50A} \u60A8\u7684\u9759\u97F3\u5DF2\u53D6\u6D88\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
+  banUserNotify: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
+  unbanUserNotify: "\u2705 \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u89E3\u5C01\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u4E86\u3002",
+  /** 管理员修改回复后发给用户的编辑通知（纯文本，内容来自消息快照） */
+  adminEditedReply(original, updated) {
+    return `\u270F\uFE0F \u7BA1\u7406\u5458\u4FEE\u6539\u4E86\u56DE\u590D
+\u539F\u5185\u5BB9\uFF1A${original}
+\u65B0\u5185\u5BB9\uFF1A${updated}`;
+  }
+};
+var ADMIN_COPY = {
+  spamIntercepted(userId, reasonText) {
+    return [
+      "\u26A0\uFE0F <b>\u68C0\u6D4B\u5230\u7591\u4F3C\u9A9A\u6270\u6D88\u606F</b>",
+      "",
+      `\u{1F464} \u7528\u6237: <code>${userId}</code>`,
+      reasonText,
+      "",
+      "\u{1F4DD} \u6D88\u606F\u5DF2\u62E6\u622A\u3002\u53EF\u5728\u7528\u6237\u8BDD\u9898\u5185\u4F7F\u7528\u9762\u677F <b>\u5C01\u7981</b>\u3002"
+    ].join("\n");
+  },
+  forwardTotalFail(userId, threadId, fwdDesc, copyDesc) {
+    return [
+      "\u26A0\uFE0F <b>\u6D88\u606F\u8F6C\u53D1\u5B8C\u5168\u5931\u8D25</b>",
+      "",
+      `\u{1F464} \u7528\u6237: <code>${userId}</code>`,
+      `\u{1F4DD} \u8BDD\u9898: <code>${threadId}</code>`,
+      `\u274C forwardMessage: <code>${fwdDesc || "unknown"}</code>`,
+      `\u274C copyMessage: <code>${copyDesc || "unknown"}</code>`
+    ].join("\n");
+  },
+  wordUsageAdd: "\u26A0\uFE0F \u7528\u6CD5: <code>/addword \u5C4F\u853D\u8BCD</code>",
+  wordUsageDel: "\u26A0\uFE0F \u7528\u6CD5: <code>/delword \u5C4F\u853D\u8BCD</code>",
+  wordExists(word) {
+    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u5DF2\u5B58\u5728\u3002`;
+  },
+  wordAdded(word, count) {
+    return `\u2705 \u5DF2\u6DFB\u52A0\u5C4F\u853D\u8BCD\u300C${word}\u300D
+\u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 <b>${count}</b> \u4E2A\u8BCD`;
+  },
+  wordHardcoded(word) {
+    return `\u26A0\uFE0F\u300C${word}\u300D\u662F\u786C\u7F16\u7801\u5C4F\u853D\u8BCD\uFF0C\u65E0\u6CD5\u901A\u8FC7\u547D\u4EE4\u5220\u9664\uFF0C\u8BF7\u76F4\u63A5\u4FEE\u6539\u4EE3\u7801\u4E2D\u7684 BLOCKED_WORDS\u3002`;
+  },
+  wordMissing(word) {
+    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u4E0D\u5B58\u5728\u4E8E\u52A8\u6001\u8BCD\u5E93\u4E2D\u3002`;
+  },
+  wordDeleted(word, count) {
+    return `\u2705 \u5DF2\u5220\u9664\u5C4F\u853D\u8BCD\u300C${word}\u300D
+\u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 <b>${count}</b> \u4E2A\u8BCD`;
+  },
+  /** 用户编辑消息被策略拦截后发给管理员的提示（纯文本，reason 为策略原因标识） */
+  userEditBlocked(reason) {
+    return `\u{1F6AB} \u7528\u6237\u7F16\u8F91\u5DF2\u62E6\u622A\uFF1A${reason || "unknown"}`;
+  },
+  /** 用户编辑消息后发给管理员的变更通知（纯文本，内容来自消息快照） */
+  userEditedMessage(original, updated) {
+    return `\u270F\uFE0F \u7528\u6237\u4FEE\u6539\u4E86\u6D88\u606F
+\u539F\u5185\u5BB9\uFF1A${original}
+\u65B0\u5185\u5BB9\uFF1A${updated}`;
+  },
+  /** 群内状态操作反馈（HTML） */
+  mutedInGroup: "\u{1F507} <b>\u5DF2\u9759\u97F3</b>\uFF1A\u7528\u6237\u6D88\u606F\u4E0D\u518D\u8F6C\u53D1\u5230\u672C\u7FA4",
+  unmutedInGroup: "\u{1F50A} <b>\u5DF2\u53D6\u6D88\u9759\u97F3</b>",
+  noteEmpty: "\u{1F4DD} \u6682\u65E0\u5907\u6CE8\u3002\u7528\u6CD5: <code>/note \u5185\u5BB9</code>",
+  noteCleared: "\u2705 \u5907\u6CE8\u5DF2\u6E05\u9664",
+  noteSaved(content) {
+    return `\u2705 \u5907\u6CE8\u5DF2\u4FDD\u5B58\uFF1A
+${content}`;
+  },
+  noteView(existing) {
+    return `\u{1F4DD} <b>\u5F53\u524D\u5907\u6CE8</b>
+${existing}
+
+\u7528\u6CD5: <code>/note \u65B0\u5907\u6CE8</code>\uFF08\u53D1 <code>/note clear</code> \u6E05\u7A7A\uFF09`;
+  },
+  conversationClosedInGroup: "\u{1F6AB} <b>\u5BF9\u8BDD\u5DF2\u5F3A\u5236\u5173\u95ED</b>",
+  conversationOpenedInGroup: "\u2705 <b>\u5BF9\u8BDD\u5DF2\u6062\u590D</b>",
+  verificationReset: "\u{1F504} <b>\u9A8C\u8BC1\u91CD\u7F6E</b>\uFF08\u5DF2\u53D6\u6D88\u6C38\u4E45\u4FE1\u4EFB\uFF0C\u4E0B\u6B21\u9700\u91CD\u65B0\u9A8C\u8BC1\uFF09",
+  trusted: "\u{1F31F} <b>\u5DF2\u8BBE\u7F6E\u6C38\u4E45\u4FE1\u4EFB</b>",
+  bannedInGroup: "\u{1F6AB} <b>\u7528\u6237\u5DF2\u5C01\u7981</b>\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
+  unbannedInGroup: "\u2705 <b>\u7528\u6237\u5DF2\u89E3\u5C01</b>\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
+  banNotifyFailed(desc) {
+    return `\u26A0\uFE0F \u5DF2\u5C01\u7981\uFF0C\u4F46\u901A\u77E5\u7528\u6237\u5931\u8D25\uFF08\u53EF\u80FD\u5BF9\u65B9\u672A\u79C1\u804A\u8FC7\u673A\u5668\u4EBA\u6216\u5DF2\u62C9\u9ED1\uFF09\uFF1A${desc}`;
+  },
+  /** 批量清理流程提示（HTML） */
+  cleanupBusy: "\u23F3 <b>\u5DF2\u6709\u6E05\u7406\u4EFB\u52A1\u6B63\u5728\u8FD0\u884C\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002</b>",
+  cleanupScanning: "\u{1F504} <b>\u6B63\u5728\u626B\u63CF\u9700\u8981\u6E05\u7406\u7684\u7528\u6237...</b>",
+  cleanupFailed(msg) {
+    return `\u274C <b>\u6E05\u7406\u8FC7\u7A0B\u51FA\u9519</b>
+
+\u9519\u8BEF\u4FE1\u606F: <code>${msg}</code>`;
+  },
+  /** 管理 UI 回调 toast 与通用错误提示 */
+  cbNoPermission: "\u65E0\u6743\u9650",
+  cbUpdated: "\u5DF2\u66F4\u65B0",
+  cbCleanupStarted: "\u5F00\u59CB\u6E05\u7406",
+  cbCancelled: "\u5DF2\u53D6\u6D88",
+  cleanupCancelled: "\u5DF2\u53D6\u6D88\u6E05\u7406\u3002",
+  cbUnknownNav: "\u672A\u77E5\u5BFC\u822A",
+  cbInvalidUserId: "\u65E0\u6548\u7528\u6237 ID",
+  cbNoUserTopic: "\u627E\u4E0D\u5230\u7528\u6237\u8BDD\u9898",
+  cbUnknownAction: "\u672A\u77E5\u64CD\u4F5C",
+  cbUnknownCallback: "\u672A\u77E5\u56DE\u8C03",
+  cbOperationFailed: "\u64CD\u4F5C\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5",
+  kvNotBoundNotes: "\u274C KV \u672A\u7ED1\u5B9A\uFF0C\u65E0\u6CD5\u641C\u7D22\u5907\u6CE8",
+  d1NotBoundFind: "\u274C D1 \u672A\u7ED1\u5B9A\uFF0C\u65E0\u6CD5\u641C\u7D22",
+  notesSearchFailed(msg) {
+    return `\u274C \u5907\u6CE8\u641C\u7D22\u5931\u8D25: ${msg}`;
+  },
+  searchFailed(msg) {
+    return `\u274C \u641C\u7D22\u5931\u8D25: ${msg}`;
+  },
+  /** v1:* 资料卡回调与后台菜单文案 */
+  adminMenuTitle: "\u7BA1\u7406\u540E\u53F0",
+  cbInvalidOperation: "\u65E0\u6548\u64CD\u4F5C",
+  userNotFound: "\u7528\u6237\u4E0D\u5B58\u5728",
+  processed: "\u5DF2\u5904\u7406",
+  backendConnected: "\u540E\u53F0\u8FDE\u63A5\u6B63\u5E38",
+  permissionExpired: "\u6743\u9650\u5DF2\u5931\u6548"
+};
+
 // src/admin-service.js
 var ROLE_PERMISSIONS = {
   owner: /* @__PURE__ */ new Set(["*"]),
@@ -1394,7 +1527,7 @@ function createAdminService({
     if (text !== "/start") return { status: "ignored" };
     await telegram.call("sendMessage", {
       chat_id: message.chat.id,
-      text: "\u7BA1\u7406\u540E\u53F0",
+      text: ADMIN_COPY.adminMenuTitle,
       reply_markup: buildAdminMenu()
     });
     return { status: "menu" };
@@ -1413,7 +1546,7 @@ function createAdminService({
     if (!permission) {
       await telegram.call("answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "\u65E0\u6548\u64CD\u4F5C",
+        text: ADMIN_COPY.cbInvalidOperation,
         show_alert: true
       });
       return { status: "invalid" };
@@ -1424,7 +1557,7 @@ function createAdminService({
       if (!before) {
         await telegram.call("answerCallbackQuery", {
           callback_query_id: query.id,
-          text: "\u7528\u6237\u4E0D\u5B58\u5728",
+          text: ADMIN_COPY.userNotFound,
           show_alert: true
         });
         return { status: "missing_user" };
@@ -1443,10 +1576,10 @@ function createAdminService({
         createdAt: now()
       });
     }
-    const responseText = resourceId ? "\u5DF2\u5904\u7406" : "\u540E\u53F0\u8FDE\u63A5\u6B63\u5E38";
+    const responseText = resourceId ? ADMIN_COPY.processed : ADMIN_COPY.backendConnected;
     await telegram.call("answerCallbackQuery", {
       callback_query_id: query.id,
-      text: allowed ? responseText : "\u6743\u9650\u5DF2\u5931\u6548",
+      text: allowed ? responseText : ADMIN_COPY.permissionExpired,
       show_alert: !allowed
     });
     return { status: allowed ? "handled" : "unauthorized" };
@@ -1541,7 +1674,7 @@ function createConversationService({
       await telegram.call("sendMessage", {
         chat_id: link.targetChatId,
         message_thread_id: link.topicId,
-        text: `\u{1F6AB} \u7528\u6237\u7F16\u8F91\u5DF2\u62E6\u622A\uFF1A${policyResult.reason || policyResult.action}`
+        text: ADMIN_COPY.userEditBlocked(policyResult.reason || policyResult.action)
       });
       return { status: "blocked", reason: policyResult.reason };
     }
@@ -1550,9 +1683,7 @@ function createConversationService({
     await telegram.call("sendMessage", {
       chat_id: link.targetChatId,
       message_thread_id: link.topicId,
-      text: `\u270F\uFE0F \u7528\u6237\u4FEE\u6539\u4E86\u6D88\u606F
-\u539F\u5185\u5BB9\uFF1A${link.contentSnapshot || "(\u7A7A)"}
-\u65B0\u5185\u5BB9\uFF1A${contentSnapshot || "(\u7A7A)"}`
+      text: ADMIN_COPY.userEditedMessage(link.contentSnapshot || "(\u7A7A)", contentSnapshot || "(\u7A7A)")
     });
     await updateLinkSnapshot(link, message, contentSnapshot);
     return { status: "notified" };
@@ -1568,9 +1699,7 @@ function createConversationService({
     if (hashContent(contentSnapshot) === link.contentHash) return { status: "unchanged" };
     await telegram.call("sendMessage", {
       chat_id: link.userId,
-      text: `\u270F\uFE0F \u7BA1\u7406\u5458\u4FEE\u6539\u4E86\u56DE\u590D
-\u539F\u5185\u5BB9\uFF1A${link.contentSnapshot || "(\u7A7A)"}
-\u65B0\u5185\u5BB9\uFF1A${contentSnapshot || "(\u7A7A)"}`
+      text: USER_COPY.adminEditedReply(link.contentSnapshot || "(\u7A7A)", contentSnapshot || "(\u7A7A)")
     });
     await updateLinkSnapshot(link, message, contentSnapshot);
     return { status: "notified" };
@@ -1924,64 +2053,6 @@ function invalidateBlockedWordsCache() {
   blockedWordsCache.data = null;
 }
 
-// src/user-copy.js
-var USER_COPY = {
-  rateLimited: "\u26A0\uFE0F \u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
-  systemBusy: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
-  bannedHourly: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
-  mutedHourly: "\u{1F507} \u60A8\u5F53\u524D\u5904\u4E8E\u9759\u97F3\u72B6\u6001\uFF0C\u6D88\u606F\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u53D6\u6D88\u9759\u97F3\u3002",
-  blockedWord: "\u{1F6AB} \u60A8\u7684\u6D88\u606F\u5305\u542B\u8FDD\u89C4\u5185\u5BB9\uFF0C\u5DF2\u88AB\u62E6\u622A\u3002\u8BF7\u4FEE\u6539\u540E\u91CD\u65B0\u53D1\u9001\u3002",
-  conversationClosed: "\u{1F6AB} \u5F53\u524D\u5BF9\u8BDD\u5DF2\u88AB\u7BA1\u7406\u5458\u5173\u95ED\u3002\u5982\u9700\u7EE7\u7EED\uFF0C\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u91CD\u65B0\u6253\u5F00\u3002",
-  pendingDelivered(count) {
-    return `\u{1F4E9} \u521A\u624D\u7684 <b>${count}</b> \u6761\u6D88\u606F\u5DF2\u5E2E\u60A8\u9001\u8FBE\u7BA1\u7406\u5458\u3002`;
-  },
-  muteUserNotify: "\u{1F507} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u9759\u97F3\uFF0C\u6D88\u606F\u6682\u65F6\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002",
-  unmuteUserNotify: "\u{1F50A} \u60A8\u7684\u9759\u97F3\u5DF2\u53D6\u6D88\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
-  banUserNotify: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
-  unbanUserNotify: "\u2705 \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u89E3\u5C01\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u4E86\u3002"
-};
-var ADMIN_COPY = {
-  spamIntercepted(userId, reasonText) {
-    return [
-      "\u26A0\uFE0F <b>\u68C0\u6D4B\u5230\u7591\u4F3C\u9A9A\u6270\u6D88\u606F</b>",
-      "",
-      `\u{1F464} \u7528\u6237: <code>${userId}</code>`,
-      reasonText,
-      "",
-      "\u{1F4DD} \u6D88\u606F\u5DF2\u62E6\u622A\u3002\u53EF\u5728\u7528\u6237\u8BDD\u9898\u5185\u4F7F\u7528\u9762\u677F <b>\u5C01\u7981</b>\u3002"
-    ].join("\n");
-  },
-  forwardTotalFail(userId, threadId, fwdDesc, copyDesc) {
-    return [
-      "\u26A0\uFE0F <b>\u6D88\u606F\u8F6C\u53D1\u5B8C\u5168\u5931\u8D25</b>",
-      "",
-      `\u{1F464} \u7528\u6237: <code>${userId}</code>`,
-      `\u{1F4DD} \u8BDD\u9898: <code>${threadId}</code>`,
-      `\u274C forwardMessage: <code>${fwdDesc || "unknown"}</code>`,
-      `\u274C copyMessage: <code>${copyDesc || "unknown"}</code>`
-    ].join("\n");
-  },
-  wordUsageAdd: "\u26A0\uFE0F \u7528\u6CD5: <code>/addword \u5C4F\u853D\u8BCD</code>",
-  wordUsageDel: "\u26A0\uFE0F \u7528\u6CD5: <code>/delword \u5C4F\u853D\u8BCD</code>",
-  wordExists(word) {
-    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u5DF2\u5B58\u5728\u3002`;
-  },
-  wordAdded(word, count) {
-    return `\u2705 \u5DF2\u6DFB\u52A0\u5C4F\u853D\u8BCD\u300C${word}\u300D
-\u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 <b>${count}</b> \u4E2A\u8BCD`;
-  },
-  wordHardcoded(word) {
-    return `\u26A0\uFE0F\u300C${word}\u300D\u662F\u786C\u7F16\u7801\u5C4F\u853D\u8BCD\uFF0C\u65E0\u6CD5\u901A\u8FC7\u547D\u4EE4\u5220\u9664\uFF0C\u8BF7\u76F4\u63A5\u4FEE\u6539\u4EE3\u7801\u4E2D\u7684 BLOCKED_WORDS\u3002`;
-  },
-  wordMissing(word) {
-    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u4E0D\u5B58\u5728\u4E8E\u52A8\u6001\u8BCD\u5E93\u4E2D\u3002`;
-  },
-  wordDeleted(word, count) {
-    return `\u2705 \u5DF2\u5220\u9664\u5C4F\u853D\u8BCD\u300C${word}\u300D
-\u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 <b>${count}</b> \u4E2A\u8BCD`;
-  }
-};
-
 // src/admin-actions.js
 function createAdminActions(deps) {
   const {
@@ -2050,7 +2121,7 @@ function createAdminActions(deps) {
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: "\u{1F507} <b>\u5DF2\u9759\u97F3</b>\uFF1A\u7528\u6237\u6D88\u606F\u4E0D\u518D\u8F6C\u53D1\u5230\u672C\u7FA4",
+      text: ADMIN_COPY.mutedInGroup,
       parse_mode: "HTML"
     });
     await tgCall2(env, "sendMessage", {
@@ -2070,7 +2141,7 @@ function createAdminActions(deps) {
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: "\u{1F50A} <b>\u5DF2\u53D6\u6D88\u9759\u97F3</b>",
+      text: ADMIN_COPY.unmutedInGroup,
       parse_mode: "HTML"
     });
     await tgCall2(env, "sendMessage", {
@@ -2085,10 +2156,7 @@ function createAdminActions(deps) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: existing ? `\u{1F4DD} <b>\u5F53\u524D\u5907\u6CE8</b>
-${escapeHtml2(existing)}
-
-\u7528\u6CD5: <code>/note \u65B0\u5907\u6CE8</code>\uFF08\u53D1 <code>/note clear</code> \u6E05\u7A7A\uFF09` : "\u{1F4DD} \u6682\u65E0\u5907\u6CE8\u3002\u7528\u6CD5: <code>/note \u5185\u5BB9</code>",
+        text: existing ? ADMIN_COPY.noteView(escapeHtml2(existing)) : ADMIN_COPY.noteEmpty,
         parse_mode: "HTML"
       });
       return;
@@ -2098,7 +2166,7 @@ ${escapeHtml2(existing)}
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: "\u2705 \u5907\u6CE8\u5DF2\u6E05\u9664"
+        text: ADMIN_COPY.noteCleared
       });
       return;
     }
@@ -2106,8 +2174,7 @@ ${escapeHtml2(existing)}
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: `\u2705 \u5907\u6CE8\u5DF2\u4FDD\u5B58\uFF1A
-${escapeHtml2(content.slice(0, 500))}`,
+      text: ADMIN_COPY.noteSaved(escapeHtml2(content.slice(0, 500))),
       parse_mode: "HTML"
     });
   }
@@ -2240,7 +2307,7 @@ ${escapeHtml2(content.slice(0, 500))}`,
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: "\u{1F6AB} <b>\u5BF9\u8BDD\u5DF2\u5F3A\u5236\u5173\u95ED</b>",
+      text: ADMIN_COPY.conversationClosedInGroup,
       parse_mode: "HTML"
     });
   }
@@ -2268,7 +2335,7 @@ ${escapeHtml2(content.slice(0, 500))}`,
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: "\u2705 <b>\u5BF9\u8BDD\u5DF2\u6062\u590D</b>",
+      text: ADMIN_COPY.conversationOpenedInGroup,
       parse_mode: "HTML"
     });
   }
@@ -2277,7 +2344,7 @@ ${escapeHtml2(content.slice(0, 500))}`,
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: "\u{1F504} <b>\u9A8C\u8BC1\u91CD\u7F6E</b>\uFF08\u5DF2\u53D6\u6D88\u6C38\u4E45\u4FE1\u4EFB\uFF0C\u4E0B\u6B21\u9700\u91CD\u65B0\u9A8C\u8BC1\uFF09",
+      text: ADMIN_COPY.verificationReset,
       parse_mode: "HTML"
     });
   }
@@ -2287,7 +2354,7 @@ ${escapeHtml2(content.slice(0, 500))}`,
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: "\u{1F31F} <b>\u5DF2\u8BBE\u7F6E\u6C38\u4E45\u4FE1\u4EFB</b>",
+      text: ADMIN_COPY.trusted,
       parse_mode: "HTML"
     });
   }
@@ -2304,7 +2371,7 @@ ${escapeHtml2(content.slice(0, 500))}`,
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: "\u{1F6AB} <b>\u7528\u6237\u5DF2\u5C01\u7981</b>\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
+      text: ADMIN_COPY.bannedInGroup,
       parse_mode: "HTML"
     });
     const notify = await tgCall2(env, "sendMessage", {
@@ -2319,7 +2386,7 @@ ${escapeHtml2(content.slice(0, 500))}`,
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: `\u26A0\uFE0F \u5DF2\u5C01\u7981\uFF0C\u4F46\u901A\u77E5\u7528\u6237\u5931\u8D25\uFF08\u53EF\u80FD\u5BF9\u65B9\u672A\u79C1\u804A\u8FC7\u673A\u5668\u4EBA\u6216\u5DF2\u62C9\u9ED1\uFF09\uFF1A${escapeHtml2(notify?.description || "unknown")}`,
+        text: ADMIN_COPY.banNotifyFailed(escapeHtml2(notify?.description || "unknown")),
         parse_mode: "HTML"
       });
     } else {
@@ -2339,7 +2406,7 @@ ${escapeHtml2(content.slice(0, 500))}`,
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: "\u2705 <b>\u7528\u6237\u5DF2\u89E3\u5C01</b>\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
+      text: ADMIN_COPY.unbannedInGroup,
       parse_mode: "HTML"
     });
     const notify = await tgCall2(env, "sendMessage", {
@@ -2425,16 +2492,16 @@ ${escapeHtml2(content.slice(0, 500))}`,
     if (locked) {
       await tgCall2(env, "sendMessage", withMessageThreadId({
         chat_id: env.SUPERGROUP_ID,
-        text: "\u23F3 **\u5DF2\u6709\u6E05\u7406\u4EFB\u52A1\u6B63\u5728\u8FD0\u884C\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002**",
-        parse_mode: "Markdown"
+        text: ADMIN_COPY.cleanupBusy,
+        parse_mode: "HTML"
       }, threadId));
       return;
     }
     await env.TOPIC_MAP.put(lockKey, "1", { expirationTtl: config.CLEANUP_LOCK_TTL_SECONDS });
     await tgCall2(env, "sendMessage", withMessageThreadId({
       chat_id: env.SUPERGROUP_ID,
-      text: "\u{1F504} **\u6B63\u5728\u626B\u63CF\u9700\u8981\u6E05\u7406\u7684\u7528\u6237...**",
-      parse_mode: "Markdown"
+      text: ADMIN_COPY.cleanupScanning,
+      parse_mode: "HTML"
     }, threadId));
     let cleanedCount = 0;
     let errorCount = 0;
@@ -2551,10 +2618,8 @@ ${escapeHtml2(content.slice(0, 500))}`,
       logger.error("cleanup_failed", e, { threadId });
       await tgCall2(env, "sendMessage", withMessageThreadId({
         chat_id: env.SUPERGROUP_ID,
-        text: `\u274C **\u6E05\u7406\u8FC7\u7A0B\u51FA\u9519**
-
-\u9519\u8BEF\u4FE1\u606F: \`${e.message}\``,
-        parse_mode: "Markdown"
+        text: ADMIN_COPY.cleanupFailed(escapeHtml2(e?.message || String(e))),
+        parse_mode: "HTML"
       }, threadId));
     } finally {
       await env.TOPIC_MAP.delete(lockKey);
@@ -2592,6 +2657,10 @@ ${question}
 \u8BF7\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u4F5C\u7B54\uFF1B\u7B54\u5BF9\u540E\u6D88\u606F\u4F1A\u81EA\u52A8\u9001\u8FBE\u3002`;
   },
   buttonTurnstile: "\u{1F510} \u70B9\u51FB\u9A8C\u8BC1",
+  /** 验证请求触发速率限制（minutes 由调用方按窗口秒数换算，保持口径一致） */
+  verifyRateLimited(minutes) {
+    return `\u26A0\uFE0F \u9A8C\u8BC1\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7${minutes}\u5206\u949F\u540E\u518D\u8BD5\u3002`;
+  },
   /** callback toast / alert */
   expired: "\u274C \u9A8C\u8BC1\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u53D1\u4E00\u6761\u6D88\u606F",
   dataError: "\u274C \u9A8C\u8BC1\u6570\u636E\u5F02\u5E38\uFF0C\u8BF7\u91CD\u65B0\u53D1\u6D88\u606F",
@@ -2600,6 +2669,8 @@ ${question}
   wrongAnswer: "\u274C \u56DE\u7B54\u9519\u8BEF\uFF0C\u8BF7\u518D\u8BD5\u4E00\u6B21",
   successToast: "\u2705 \u9A8C\u8BC1\u901A\u8FC7",
   systemError: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5",
+  /** 验证通过后自动送达失败（用户需重发） */
+  pendingSendFailed: "\u26A0\uFE0F \u81EA\u52A8\u9001\u8FBE\u5931\u8D25\uFF0C\u8BF7\u91CD\u65B0\u53D1\u9001\u60A8\u7684\u6D88\u606F\u3002",
   /** 编辑/私聊成功正文 */
   successBody: "\u2705 <b>\u9A8C\u8BC1\u6210\u529F</b>\n\n\u60A8\u73B0\u5728\u53EF\u4EE5\u6B63\u5E38\u5BF9\u8BDD\u4E86\u3002\u76F4\u63A5\u53D1\u6D88\u606F\u5373\u53EF\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
   successBodyWithPending: "\u2705 <b>\u9A8C\u8BC1\u6210\u529F</b>\n\n\u6B63\u5728\u4E3A\u60A8\u9001\u8FBE\u521A\u624D\u7684\u6D88\u606F\uFF0C\u8BF7\u7A0D\u5019\u2026",
@@ -2949,6 +3020,7 @@ function formatEmptyActivityHints() {
 }
 
 // src/verification.js
+var VERIFY_RATE_WINDOW_SECONDS = 300;
 var LOCAL_QUESTIONS = [
   { "question": "\u51B0\u878D\u5316\u540E\u4F1A\u53D8\u6210\u4EC0\u4E48\uFF1F", "correct_answer": "\u6C34", "incorrect_answers": ["\u77F3\u5934", "\u6728\u5934", "\u706B"] },
   { "question": "\u6B63\u5E38\u4EBA\u6709\u51E0\u53EA\u773C\u775B\uFF1F", "correct_answer": "2", "incorrect_answers": ["1", "3", "4"] },
@@ -3047,11 +3119,11 @@ function createVerificationModule(deps) {
         return;
       }
     }
-    const verifyLimit = await checkRateLimit2(userId, env, "verify", config.RATE_LIMIT_VERIFY, 300);
+    const verifyLimit = await checkRateLimit2(userId, env, "verify", config.RATE_LIMIT_VERIFY, VERIFY_RATE_WINDOW_SECONDS);
     if (!verifyLimit.allowed) {
       await tgCall2(env, "sendMessage", {
         chat_id: userId,
-        text: "\u26A0\uFE0F \u9A8C\u8BC1\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF75\u5206\u949F\u540E\u518D\u8BD5\u3002"
+        text: VERIFY_COPY.verifyRateLimited(VERIFY_RATE_WINDOW_SECONDS / 60)
       });
       return;
     }
@@ -3128,7 +3200,6 @@ function createVerificationModule(deps) {
     logger.info("verification_sent", {
       userId,
       verifyId,
-      question: q.question,
       pendingCount: state.pending_ids.length
     });
     const buttons = challenge.options.map((opt, idx) => ({
@@ -3236,7 +3307,8 @@ function createVerificationModule(deps) {
         });
         try {
           const prev = String(query.message?.text || "");
-          if (prev && !prev.includes("\u56DE\u7B54\u4E0D\u6B63\u786E") && query.message?.message_id) {
+          const hint = VERIFY_COPY.wrongAnswerHint.trim();
+          if (prev && !prev.includes(hint) && query.message?.message_id) {
             const buttons = (state.options || []).map((opt, idx) => ({
               text: opt,
               callback_data: `verify:${verifyId}:${idx}`
@@ -3324,7 +3396,7 @@ function createVerificationModule(deps) {
       logger.error("pending_message_forward_failed", e, { userId });
       await tgCall2(env, "sendMessage", {
         chat_id: userId,
-        text: "\u26A0\uFE0F \u81EA\u52A8\u9001\u8FBE\u5931\u8D25\uFF0C\u8BF7\u91CD\u65B0\u53D1\u9001\u60A8\u7684\u6D88\u606F\u3002"
+        text: VERIFY_COPY.pendingSendFailed
       });
     }
   }
@@ -4021,7 +4093,7 @@ function createAdminCommandHandlers(deps) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: "\u274C KV \u672A\u7ED1\u5B9A\uFF0C\u65E0\u6CD5\u641C\u7D22\u5907\u6CE8"
+        text: ADMIN_COPY.kvNotBoundNotes
       });
       return;
     }
@@ -4055,7 +4127,7 @@ function createAdminCommandHandlers(deps) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: `\u274C \u5907\u6CE8\u641C\u7D22\u5931\u8D25: ${escapeHtml(e?.message || String(e))}`,
+        text: ADMIN_COPY.notesSearchFailed(escapeHtml(e?.message || String(e))),
         parse_mode: "HTML"
       });
       return;
@@ -4157,7 +4229,7 @@ function createAdminCommandHandlers(deps) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: "\u274C D1 \u672A\u7ED1\u5B9A\uFF0C\u65E0\u6CD5\u641C\u7D22"
+        text: ADMIN_COPY.d1NotBoundFind
       });
       return;
     }
@@ -4201,7 +4273,7 @@ function createAdminCommandHandlers(deps) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: `\u274C \u641C\u7D22\u5931\u8D25: ${escapeHtml(e?.message || String(e))}`,
+        text: ADMIN_COPY.searchFailed(escapeHtml(e?.message || String(e))),
         parse_mode: "HTML"
       });
     }
@@ -4256,7 +4328,7 @@ function createAdminCommandHandlers(deps) {
       if (!senderId || !await isAdminUser2(env, senderId)) {
         await tgCall2(env, "answerCallbackQuery", {
           callback_query_id: query.id,
-          text: "\u65E0\u6743\u9650",
+          text: ADMIN_COPY.cbNoPermission,
           show_alert: true
         });
         return;
@@ -4267,7 +4339,7 @@ function createAdminCommandHandlers(deps) {
       const parts = data.split(":");
       if (parts[0] === "adm" && parts[1] === "sys") {
         const page = parts[2] || "overview";
-        await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u66F4\u65B0" });
+        await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: ADMIN_COPY.cbUpdated });
         await handleSysinfoCommand(env, threadId, {
           page: ["overview", "storage", "errors", "stats", "activity"].includes(page) ? page : "overview",
           edit: chatId && messageId ? { chatId, messageId } : null
@@ -4288,7 +4360,7 @@ function createAdminCommandHandlers(deps) {
           return;
         }
         if (nav === "cleanup_ok") {
-          await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5F00\u59CB\u6E05\u7406" });
+          await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: ADMIN_COPY.cbCleanupStarted });
           if (handleCleanupCommand) {
             if (ctx?.waitUntil) ctx.waitUntil(handleCleanupCommand(threadId, env));
             else await handleCleanupCommand(threadId, env);
@@ -4296,12 +4368,12 @@ function createAdminCommandHandlers(deps) {
           return;
         }
         if (nav === "cleanup_cancel") {
-          await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u53D6\u6D88" });
+          await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: ADMIN_COPY.cbCancelled });
           if (chatId && messageId) {
             await tgCall2(env, "editMessageText", {
               chat_id: chatId,
               message_id: messageId,
-              text: "\u5DF2\u53D6\u6D88\u6E05\u7406\u3002"
+              text: ADMIN_COPY.cleanupCancelled
             });
           }
           return;
@@ -4352,7 +4424,7 @@ function createAdminCommandHandlers(deps) {
         if (!navFn) {
           await tgCall2(env, "answerCallbackQuery", {
             callback_query_id: query.id,
-            text: "\u672A\u77E5\u5BFC\u822A",
+            text: ADMIN_COPY.cbUnknownNav,
             show_alert: true
           });
           return;
@@ -4367,7 +4439,7 @@ function createAdminCommandHandlers(deps) {
         if (!/^\d{1,20}$/.test(String(userId))) {
           await tgCall2(env, "answerCallbackQuery", {
             callback_query_id: query.id,
-            text: "\u65E0\u6548\u7528\u6237 ID",
+            text: ADMIN_COPY.cbInvalidUserId,
             show_alert: true
           });
           return;
@@ -4376,7 +4448,7 @@ function createAdminCommandHandlers(deps) {
         if (!tid) {
           await tgCall2(env, "answerCallbackQuery", {
             callback_query_id: query.id,
-            text: "\u627E\u4E0D\u5230\u7528\u6237\u8BDD\u9898",
+            text: ADMIN_COPY.cbNoUserTopic,
             show_alert: true
           });
           return;
@@ -4392,7 +4464,7 @@ function createAdminCommandHandlers(deps) {
           });
         };
         const confirmCancel = async (cancelText) => {
-          await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u53D6\u6D88" });
+          await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: ADMIN_COPY.cbCancelled });
           if (chatId && messageId) {
             await tgCall2(env, "editMessageText", {
               chat_id: chatId,
@@ -4461,7 +4533,7 @@ function createAdminCommandHandlers(deps) {
         if (!fn) {
           await tgCall2(env, "answerCallbackQuery", {
             callback_query_id: query.id,
-            text: "\u672A\u77E5\u64CD\u4F5C",
+            text: ADMIN_COPY.cbUnknownAction,
             show_alert: true
           });
           return;
@@ -4495,7 +4567,7 @@ function createAdminCommandHandlers(deps) {
       }
       await tgCall2(env, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "\u672A\u77E5\u56DE\u8C03",
+        text: ADMIN_COPY.cbUnknownCallback,
         show_alert: true
       });
     } catch (e) {
@@ -4503,7 +4575,7 @@ function createAdminCommandHandlers(deps) {
       try {
         await tgCall2(env, "answerCallbackQuery", {
           callback_query_id: query.id,
-          text: "\u64CD\u4F5C\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5",
+          text: ADMIN_COPY.cbOperationFailed,
           show_alert: true
         });
       } catch {

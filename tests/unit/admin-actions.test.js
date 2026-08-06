@@ -164,4 +164,23 @@ describe('admin-actions 管理动作', () => {
     expect(await env.TOPIC_MAP.get('thread:88')).toBe(null);
     expect(await env.TOPIC_MAP.get('cleanup:lock')).toBe(null);
   });
+
+  it('cleanup 过程消息统一 HTML，无 Markdown 星号/反引号残留', async () => {
+    const { actions, calls, env } = createActions();
+    await env.TOPIC_MAP.put('user:42', JSON.stringify({ thread_id: 88, title: '失效' }));
+    await env.TOPIC_MAP.put('thread:88', '42');
+
+    await actions.cleanup(1, env);
+
+    const cleanupMsgs = calls.filter(c => c.method === 'sendMessage');
+    expect(cleanupMsgs.length).toBeGreaterThanOrEqual(2);
+    for (const m of cleanupMsgs) {
+      expect(m.body.parse_mode).toBe('HTML');
+      expect(String(m.body.text)).not.toMatch(/\*\*|`/);
+    }
+    // 报告包含统计行
+    const report = cleanupMsgs.map(m => m.body.text).join('\n');
+    expect(report).toContain('清理完成');
+    expect(report).toContain('已清理');
+  });
 });

@@ -14,6 +14,11 @@ export const VERIFY_COPY = {
 
   buttonTurnstile: '🔐 点击验证',
 
+  /** 验证请求触发速率限制（minutes 由调用方按窗口秒数换算，保持口径一致） */
+  verifyRateLimited(minutes) {
+    return `⚠️ 验证请求过于频繁，请${minutes}分钟后再试。`;
+  },
+
   /** callback toast / alert */
   expired: '❌ 验证已过期，请重新发一条消息',
   dataError: '❌ 验证数据异常，请重新发消息',
@@ -22,6 +27,8 @@ export const VERIFY_COPY = {
   wrongAnswer: '❌ 回答错误，请再试一次',
   successToast: '✅ 验证通过',
   systemError: '⚠️ 系统繁忙，请稍后重试',
+  /** 验证通过后自动送达失败（用户需重发） */
+  pendingSendFailed: '⚠️ 自动送达失败，请重新发送您的消息。',
 
   /** 编辑/私聊成功正文 */
   successBody:

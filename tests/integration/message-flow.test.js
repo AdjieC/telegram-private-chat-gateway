@@ -184,6 +184,50 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     expect(telegram.calls.some(c => c.method === 'forwardMessage' && c.body.message_id === 102)).toBe(true);
   });
 
+  it('答题错误时提示只追加一次（幂等）', async () => {
+    const telegram = createTelegramMock();
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    const userId = 333;
+
+    await send(messageUpdate(privateMessage(userId, 301, { text: '验证我' }), 8300), env, telegram);
+    const quiz = telegram.calls.find(c => c.method === 'sendMessage' && c.body.reply_markup);
+    const button = quiz.body.reply_markup.inline_keyboard.flat().find(b => b.callback_data?.startsWith('verify:'));
+    const [, verifyId] = button.callback_data.split(':');
+    const chalRaw = await env.TOPIC_MAP.get(`chal:${verifyId}`);
+    const correctIdx = JSON.parse(chalRaw).answerIndex;
+    const wrongIdx = correctIdx === 0 ? 1 : 0;
+
+    // 第一次答错 → toast 提示 + 题目消息追加 hint
+    await send({
+      update_id: 8301,
+      callback_query: {
+        id: 'cb-w1',
+        from: { id: userId, first_name: '用户333' },
+        data: `verify:${verifyId}:${wrongIdx}`,
+        message: { message_id: 301, chat: { id: userId }, text: quiz.body.text },
+      },
+    }, env, telegram);
+
+    const edited = telegram.calls.filter(c => c.method === 'editMessageText');
+    expect(edited).toHaveLength(1);
+    expect(edited[0].body.text).toContain('回答不正确');
+
+    // 第二次答错 → message.text 已含 hint，不应再次追加
+    telegram.calls.length = 0;
+    await send({
+      update_id: 8302,
+      callback_query: {
+        id: 'cb-w2',
+        from: { id: userId, first_name: '用户333' },
+        data: `verify:${verifyId}:${correctIdx === 0 ? 1 : 0}`,
+        message: { message_id: 301, chat: { id: userId }, text: edited[0].body.text },
+      },
+    }, env, telegram);
+
+    expect(telegram.calls.filter(c => c.method === 'editMessageText')).toHaveLength(0);
+  });
+
   it('媒体组消息延迟合并后以 sendMediaGroup 转发到话题', async () => {
     vi.useFakeTimers();
     const telegram = createTelegramMock();

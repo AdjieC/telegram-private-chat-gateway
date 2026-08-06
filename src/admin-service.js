@@ -1,4 +1,5 @@
 import { validateRuleInput } from './message-policy.js';
+import { ADMIN_COPY } from './user-copy.js';
 
 const ROLE_PERMISSIONS = {
   owner: new Set(['*']),
@@ -61,7 +62,7 @@ export function createAdminService({
     if (text !== '/start') return { status: 'ignored' };
     await telegram.call('sendMessage', {
       chat_id: message.chat.id,
-      text: '管理后台',
+      text: ADMIN_COPY.adminMenuTitle,
       reply_markup: buildAdminMenu(),
     });
     return { status: 'menu' };
@@ -87,7 +88,7 @@ export function createAdminService({
     if (!permission) {
       await telegram.call('answerCallbackQuery', {
         callback_query_id: query.id,
-        text: '无效操作',
+        text: ADMIN_COPY.cbInvalidOperation,
         show_alert: true,
       });
       return { status: 'invalid' };
@@ -99,7 +100,7 @@ export function createAdminService({
       if (!before) {
         await telegram.call('answerCallbackQuery', {
           callback_query_id: query.id,
-          text: '用户不存在',
+          text: ADMIN_COPY.userNotFound,
           show_alert: true,
         });
         return { status: 'missing_user' };
@@ -124,10 +125,10 @@ export function createAdminService({
         createdAt: now(),
       });
     }
-    const responseText = resourceId ? '已处理' : '后台连接正常';
+    const responseText = resourceId ? ADMIN_COPY.processed : ADMIN_COPY.backendConnected;
     await telegram.call('answerCallbackQuery', {
       callback_query_id: query.id,
-      text: allowed ? responseText : '权限已失效',
+      text: allowed ? responseText : ADMIN_COPY.permissionExpired,
       show_alert: !allowed,
     });
     return { status: allowed ? 'handled' : 'unauthorized' };

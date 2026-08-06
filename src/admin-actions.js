@@ -82,7 +82,7 @@ export function createAdminActions(deps) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: '🔇 <b>已静音</b>：用户消息不再转发到本群',
+      text: ADMIN_COPY.mutedInGroup,
       parse_mode: 'HTML',
     });
     await tgCall(env, 'sendMessage', {
@@ -100,7 +100,7 @@ export function createAdminActions(deps) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: '🔊 <b>已取消静音</b>',
+      text: ADMIN_COPY.unmutedInGroup,
       parse_mode: 'HTML',
     });
     await tgCall(env, 'sendMessage', {
@@ -117,8 +117,8 @@ export function createAdminActions(deps) {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
         text: existing
-          ? `📝 <b>当前备注</b>\n${escapeHtml(existing)}\n\n用法: <code>/note 新备注</code>（发 <code>/note clear</code> 清空）`
-          : '📝 暂无备注。用法: <code>/note 内容</code>',
+          ? ADMIN_COPY.noteView(escapeHtml(existing))
+          : ADMIN_COPY.noteEmpty,
         parse_mode: 'HTML',
       });
       return;
@@ -128,7 +128,7 @@ export function createAdminActions(deps) {
       await tgCall(env, 'sendMessage', {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: '✅ 备注已清除',
+        text: ADMIN_COPY.noteCleared,
       });
       return;
     }
@@ -136,7 +136,7 @@ export function createAdminActions(deps) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: `✅ 备注已保存：\n${escapeHtml(content.slice(0, 500))}`,
+      text: ADMIN_COPY.noteSaved(escapeHtml(content.slice(0, 500))),
       parse_mode: 'HTML',
     });
   }
@@ -288,7 +288,7 @@ export function createAdminActions(deps) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: '🚫 <b>对话已强制关闭</b>',
+      text: ADMIN_COPY.conversationClosedInGroup,
       parse_mode: 'HTML',
     });
   }
@@ -317,7 +317,7 @@ export function createAdminActions(deps) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: '✅ <b>对话已恢复</b>',
+      text: ADMIN_COPY.conversationOpenedInGroup,
       parse_mode: 'HTML',
     });
   }
@@ -327,7 +327,7 @@ export function createAdminActions(deps) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: '🔄 <b>验证重置</b>（已取消永久信任，下次需重新验证）',
+      text: ADMIN_COPY.verificationReset,
       parse_mode: 'HTML',
     });
   }
@@ -338,7 +338,7 @@ export function createAdminActions(deps) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: '🌟 <b>已设置永久信任</b>',
+      text: ADMIN_COPY.trusted,
       parse_mode: 'HTML',
     });
   }
@@ -356,7 +356,7 @@ export function createAdminActions(deps) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: '🚫 <b>用户已封禁</b>（已尝试通知对方）',
+      text: ADMIN_COPY.bannedInGroup,
       parse_mode: 'HTML',
     });
     // 主动告知用户已被封禁，避免对方不知情仍持续发消息
@@ -372,7 +372,7 @@ export function createAdminActions(deps) {
       await tgCall(env, 'sendMessage', {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: `⚠️ 已封禁，但通知用户失败（可能对方未私聊过机器人或已拉黑）：${escapeHtml(notify?.description || 'unknown')}`,
+        text: ADMIN_COPY.banNotifyFailed(escapeHtml(notify?.description || 'unknown')),
         parse_mode: 'HTML',
       });
     } else {
@@ -393,7 +393,7 @@ export function createAdminActions(deps) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: '✅ <b>用户已解封</b>（已尝试通知对方）',
+      text: ADMIN_COPY.unbannedInGroup,
       parse_mode: 'HTML',
     });
     const notify = await tgCall(env, 'sendMessage', {
@@ -515,8 +515,8 @@ export function createAdminActions(deps) {
     if (locked) {
       await tgCall(env, "sendMessage", withMessageThreadId({
         chat_id: env.SUPERGROUP_ID,
-        text: "⏳ **已有清理任务正在运行，请稍后再试。**",
-        parse_mode: "Markdown"
+        text: ADMIN_COPY.cleanupBusy,
+        parse_mode: "HTML"
       }, threadId));
       return;
     }
@@ -526,8 +526,8 @@ export function createAdminActions(deps) {
     // 发送处理中的消息
     await tgCall(env, "sendMessage", withMessageThreadId({
       chat_id: env.SUPERGROUP_ID,
-      text: "🔄 **正在扫描需要清理的用户...**",
-      parse_mode: "Markdown"
+      text: ADMIN_COPY.cleanupScanning,
+      parse_mode: "HTML"
     }, threadId));
 
     let cleanedCount = 0;
@@ -658,8 +658,8 @@ export function createAdminActions(deps) {
       logger.error('cleanup_failed', e, { threadId });
       await tgCall(env, "sendMessage", withMessageThreadId({
         chat_id: env.SUPERGROUP_ID,
-        text: `❌ **清理过程出错**\n\n错误信息: \`${e.message}\``,
-        parse_mode: "Markdown"
+        text: ADMIN_COPY.cleanupFailed(escapeHtml(e?.message || String(e))),
+        parse_mode: "HTML"
       }, threadId));
     } finally {
       await env.TOPIC_MAP.delete(lockKey);

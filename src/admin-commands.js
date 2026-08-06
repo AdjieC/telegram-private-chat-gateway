@@ -32,6 +32,7 @@ import {
   formatEmptyActivityHints,
 } from './admin-ui-format.js';
 import { bumpDailyStat, getDailyStats, getRecentDailySeries } from './daily-stats.js';
+import { ADMIN_COPY } from './user-copy.js';
 
 /**
  * @param {object} deps
@@ -574,7 +575,7 @@ async function handleNotesCommand(env, threadId, queryText = '') {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: '❌ KV 未绑定，无法搜索备注',
+      text: ADMIN_COPY.kvNotBoundNotes,
     });
     return;
   }
@@ -609,7 +610,7 @@ async function handleNotesCommand(env, threadId, queryText = '') {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: `❌ 备注搜索失败: ${escapeHtml(e?.message || String(e))}`,
+      text: ADMIN_COPY.notesSearchFailed(escapeHtml(e?.message || String(e))),
       parse_mode: 'HTML',
     });
     return;
@@ -715,7 +716,7 @@ async function handleFindCommand(env, threadId, queryText) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: '❌ D1 未绑定，无法搜索',
+      text: ADMIN_COPY.d1NotBoundFind,
     });
     return;
   }
@@ -758,7 +759,7 @@ async function handleFindCommand(env, threadId, queryText) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: `❌ 搜索失败: ${escapeHtml(e?.message || String(e))}`,
+      text: ADMIN_COPY.searchFailed(escapeHtml(e?.message || String(e))),
       parse_mode: 'HTML',
     });
   }
@@ -817,7 +818,7 @@ async function handleAdminUiCallback(query, env, ctx) {
     if (!senderId || !(await isAdminUser(env, senderId))) {
       await tgCall(env, 'answerCallbackQuery', {
         callback_query_id: query.id,
-        text: '无权限',
+        text: ADMIN_COPY.cbNoPermission,
         show_alert: true,
       });
       return;
@@ -831,7 +832,7 @@ async function handleAdminUiCallback(query, env, ctx) {
     // adm:sys:overview | storage | errors | stats | activity
     if (parts[0] === 'adm' && parts[1] === 'sys') {
       const page = parts[2] || 'overview';
-      await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id, text: '已更新' });
+      await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id, text: ADMIN_COPY.cbUpdated });
       await handleSysinfoCommand(env, threadId, {
         page: ['overview', 'storage', 'errors', 'stats', 'activity'].includes(page) ? page : 'overview',
         edit: chatId && messageId ? { chatId, messageId } : null,
@@ -854,7 +855,7 @@ async function handleAdminUiCallback(query, env, ctx) {
         return;
       }
       if (nav === 'cleanup_ok') {
-        await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id, text: '开始清理' });
+        await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id, text: ADMIN_COPY.cbCleanupStarted });
         if (handleCleanupCommand) {
           if (ctx?.waitUntil) ctx.waitUntil(handleCleanupCommand(threadId, env));
           else await handleCleanupCommand(threadId, env);
@@ -862,12 +863,12 @@ async function handleAdminUiCallback(query, env, ctx) {
         return;
       }
       if (nav === 'cleanup_cancel') {
-        await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id, text: '已取消' });
+        await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id, text: ADMIN_COPY.cbCancelled });
         if (chatId && messageId) {
           await tgCall(env, 'editMessageText', {
             chat_id: chatId,
             message_id: messageId,
-            text: '已取消清理。',
+            text: ADMIN_COPY.cleanupCancelled,
           });
         }
         return;
@@ -919,7 +920,7 @@ async function handleAdminUiCallback(query, env, ctx) {
       if (!navFn) {
         await tgCall(env, 'answerCallbackQuery', {
           callback_query_id: query.id,
-          text: '未知导航',
+          text: ADMIN_COPY.cbUnknownNav,
           show_alert: true,
         });
         return;
@@ -936,7 +937,7 @@ async function handleAdminUiCallback(query, env, ctx) {
       if (!/^\d{1,20}$/.test(String(userId))) {
         await tgCall(env, 'answerCallbackQuery', {
           callback_query_id: query.id,
-          text: '无效用户 ID',
+          text: ADMIN_COPY.cbInvalidUserId,
           show_alert: true,
         });
         return;
@@ -945,7 +946,7 @@ async function handleAdminUiCallback(query, env, ctx) {
       if (!tid) {
         await tgCall(env, 'answerCallbackQuery', {
           callback_query_id: query.id,
-          text: '找不到用户话题',
+          text: ADMIN_COPY.cbNoUserTopic,
           show_alert: true,
         });
         return;
@@ -963,7 +964,7 @@ async function handleAdminUiCallback(query, env, ctx) {
         });
       };
       const confirmCancel = async (cancelText) => {
-        await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id, text: '已取消' });
+        await tgCall(env, 'answerCallbackQuery', { callback_query_id: query.id, text: ADMIN_COPY.cbCancelled });
         if (chatId && messageId) {
           await tgCall(env, 'editMessageText', {
             chat_id: chatId,
@@ -1031,7 +1032,7 @@ async function handleAdminUiCallback(query, env, ctx) {
       if (!fn) {
         await tgCall(env, 'answerCallbackQuery', {
           callback_query_id: query.id,
-          text: '未知操作',
+          text: ADMIN_COPY.cbUnknownAction,
           show_alert: true,
         });
         return;
@@ -1063,7 +1064,7 @@ async function handleAdminUiCallback(query, env, ctx) {
 
     await tgCall(env, 'answerCallbackQuery', {
       callback_query_id: query.id,
-      text: '未知回调',
+      text: ADMIN_COPY.cbUnknownCallback,
       show_alert: true,
     });
   } catch (e) {
@@ -1071,7 +1072,7 @@ async function handleAdminUiCallback(query, env, ctx) {
     try {
       await tgCall(env, 'answerCallbackQuery', {
         callback_query_id: query.id,
-        text: '操作失败，请重试',
+        text: ADMIN_COPY.cbOperationFailed,
         show_alert: true,
       });
     } catch { /* 可能已 answer */ }

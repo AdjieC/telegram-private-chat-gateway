@@ -1,4 +1,5 @@
 import { extractMessageText } from './utils.js';
+import { USER_COPY, ADMIN_COPY } from './user-copy.js';
 
 const SNAPSHOT_LIMIT = 5000;
 
@@ -58,7 +59,7 @@ export function createConversationService({
       await telegram.call('sendMessage', {
         chat_id: link.targetChatId,
         message_thread_id: link.topicId,
-        text: `🚫 用户编辑已拦截：${policyResult.reason || policyResult.action}`,
+        text: ADMIN_COPY.userEditBlocked(policyResult.reason || policyResult.action),
       });
       return { status: 'blocked', reason: policyResult.reason };
     }
@@ -68,7 +69,7 @@ export function createConversationService({
     await telegram.call('sendMessage', {
       chat_id: link.targetChatId,
       message_thread_id: link.topicId,
-      text: `✏️ 用户修改了消息\n原内容：${link.contentSnapshot || '(空)'}\n新内容：${contentSnapshot || '(空)'}`,
+      text: ADMIN_COPY.userEditedMessage(link.contentSnapshot || '(空)', contentSnapshot || '(空)'),
     });
     await updateLinkSnapshot(link, message, contentSnapshot);
     return { status: 'notified' };
@@ -86,7 +87,7 @@ export function createConversationService({
 
     await telegram.call('sendMessage', {
       chat_id: link.userId,
-      text: `✏️ 管理员修改了回复\n原内容：${link.contentSnapshot || '(空)'}\n新内容：${contentSnapshot || '(空)'}`,
+      text: USER_COPY.adminEditedReply(link.contentSnapshot || '(空)', contentSnapshot || '(空)'),
     });
     await updateLinkSnapshot(link, message, contentSnapshot);
     return { status: 'notified' };

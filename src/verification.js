@@ -7,6 +7,9 @@ import { USER_COPY } from './user-copy.js';
 import { escapeHtml } from './admin-ui-format.js';
 import { generateVerifyCode } from './utils.js';
 
+// 验证请求速率限制窗口（秒）。文案中的「分钟数」由本常量换算，避免与提示语漂移。
+const VERIFY_RATE_WINDOW_SECONDS = 300;
+
 // --- 本地题库 (15条) ---
 export const LOCAL_QUESTIONS = [
   {"question": "冰融化后会变成什么？", "correct_answer": "水", "incorrect_answers": ["石头", "木头", "火"]},
@@ -123,11 +126,11 @@ export function createVerificationModule(deps) {
     }
 
     // 验证请求速率限制：仅在需要创建新挑战时检查
-    const verifyLimit = await checkRateLimit(userId, env, 'verify', config.RATE_LIMIT_VERIFY, 300);
+    const verifyLimit = await checkRateLimit(userId, env, 'verify', config.RATE_LIMIT_VERIFY, VERIFY_RATE_WINDOW_SECONDS);
     if (!verifyLimit.allowed) {
       await tgCall(env, "sendMessage", {
         chat_id: userId,
-        text: "⚠️ 验证请求过于频繁，请5分钟后再试。"
+        text: VERIFY_COPY.verifyRateLimited(VERIFY_RATE_WINDOW_SECONDS / 60)
       });
       return;
     }
@@ -231,7 +234,6 @@ export function createVerificationModule(deps) {
     logger.info('verification_sent', {
       userId,
       verifyId,
-      question: q.question,
       pendingCount: state.pending_ids.length
     });
 
@@ -362,9 +364,11 @@ export function createVerificationModule(deps) {
           show_alert: true
         });
         // 在题目消息上追加提示，避免用户不知道还能继续选
+        // 幂等判断：以提示常量本身为唯一来源，避免文案改动后重复追加
         try {
           const prev = String(query.message?.text || '');
-          if (prev && !prev.includes('回答不正确') && query.message?.message_id) {
+          const hint = VERIFY_COPY.wrongAnswerHint.trim();
+          if (prev && !prev.includes(hint) && query.message?.message_id) {
             const buttons = (state.options || []).map((opt, idx) => ({
               text: opt,
               callback_data: `verify:${verifyId}:${idx}`
@@ -479,7 +483,7 @@ export function createVerificationModule(deps) {
       logger.error('pending_message_forward_failed', e, { userId });
       await tgCall(env, "sendMessage", {
         chat_id: userId,
-        text: '⚠️ 自动送达失败，请重新发送您的消息。',
+        text: VERIFY_COPY.pendingSendFailed,
       });
     }
   }
