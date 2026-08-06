@@ -1050,7 +1050,8 @@ function createApp({ handleFetch = notFoundHandler } = {}) {
           try {
             return await routeUpdate(update, {
               storage: createD1Storage(normalizedEnv.TG_BOT_DB),
-              handleUpdate: () => handleFetch(request, normalizedEnv, ctx)
+              // 已解析的 update 直传业务层，避免 handleFetch 二次读取/解析请求体
+              handleUpdate: (parsedUpdate) => handleFetch(request, normalizedEnv, ctx, parsedUpdate)
             });
           } catch (error) {
             return new Response(
@@ -4191,7 +4192,15 @@ setTimeout(function() {
 </body>
 </html>`;
 var legacyApp = {
-  async fetch(request, env, ctx) {
+  /**
+   * 业务层 HTTP 入口。
+   * @param {Request} request
+   * @param {object} env - 已由 app.js normalize 的 env
+   * @param {object} ctx
+   * @param {object|null} [parsedUpdate] - POST / 的 webhook update 由 app.js 解析后透传，
+   *   避免此处二次读取请求体（GET /verify 与 POST /verify-callback 仍自行处理）
+   */
+  async fetch(request, env, ctx, parsedUpdate = null) {
     if (!env.TOPIC_MAP) return new Response("Error: KV 'TOPIC_MAP' not bound.");
     if (!env.BOT_TOKEN) return new Response("Error: BOT_TOKEN not set.");
     if (!env.SUPERGROUP_ID) return new Response("Error: SUPERGROUP_ID not set.");
@@ -4331,21 +4340,12 @@ var legacyApp = {
         });
       }
     }
-    const contentType = request.headers.get("content-type") || "";
-    if (!contentType.includes("application/json")) {
-      Logger.warn("invalid_content_type", { contentType });
-      return new Response("OK");
-    }
-    let update;
-    try {
-      update = await request.json();
-      if (!update || typeof update !== "object") {
-        Logger.warn("invalid_json_structure", { update: typeof update });
-        return new Response("OK");
-      }
-    } catch (e) {
-      Logger.error("json_parse_failed", e);
-      return new Response("OK");
+    let update = parsedUpdate;
+    if (update === null || update === void 0 || typeof update !== "object") {
+      Logger.warn("invalid_update_payload", {
+        hasUpdate: update !== null && update !== void 0
+      });
+      return new Response("Bad Request", { status: 400 });
     }
     if (update.edited_message) {
       const handleUpdate = createUpdateHandler({

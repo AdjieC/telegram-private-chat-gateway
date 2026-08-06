@@ -1106,7 +1106,15 @@ setTimeout(function() {
 </html>`;
 
 const legacyApp = {
-  async fetch(request, env, ctx) {
+  /**
+   * 业务层 HTTP 入口。
+   * @param {Request} request
+   * @param {object} env - 已由 app.js normalize 的 env
+   * @param {object} ctx
+   * @param {object|null} [parsedUpdate] - POST / 的 webhook update 由 app.js 解析后透传，
+   *   避免此处二次读取请求体（GET /verify 与 POST /verify-callback 仍自行处理）
+   */
+  async fetch(request, env, ctx, parsedUpdate = null) {
     // 环境自检
     if (!env.TOPIC_MAP) return new Response("Error: KV 'TOPIC_MAP' not bound.");
     if (!env.BOT_TOKEN) return new Response("Error: BOT_TOKEN not set.");
@@ -1291,25 +1299,13 @@ const legacyApp = {
       }
     }
 
-    // 验证 Content-Type
-    const contentType = request.headers.get("content-type") || "";
-    if (!contentType.includes("application/json")) {
-      Logger.warn('invalid_content_type', { contentType });
-      return new Response("OK");
-    }
-
-    let update;
-    try {
-      update = await request.json();
-
-      // 验证基本结构
-      if (!update || typeof update !== 'object') {
-        Logger.warn('invalid_json_structure', { update: typeof update });
-        return new Response("OK");
-      }
-    } catch (e) {
-      Logger.error('json_parse_failed', e);
-      return new Response("OK");
+    // Webhook 消息体由 app.js 校验并解析后透传（parsedUpdate），此处不再重复读取
+    let update = parsedUpdate;
+    if (update === null || update === undefined || typeof update !== 'object') {
+      Logger.warn('invalid_update_payload', {
+        hasUpdate: update !== null && update !== undefined,
+      });
+      return new Response("Bad Request", { status: 400 });
     }
 
     if (update.edited_message) {
@@ -1377,6 +1373,9 @@ const legacyApp = {
         }
         await handlePrivateMessage(msg, normalizedEnv, ctx);
       } catch (e) {
+        // 私聊路径失败返回 200 且不抛错是刻意设计：Telegram 对 5xx 重试会导致
+        // 同一条用户消息被重复转发（转发无幂等）。可重试标记机制仅用于
+        // 回调等可安全重放的路径（edited_message / v1 回调）。
         // 不向用户泄露技术细节
         await tgCall(normalizedEnv, "sendMessage", {
           chat_id: msg.chat.id,

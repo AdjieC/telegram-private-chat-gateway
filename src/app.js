@@ -195,7 +195,8 @@ export function createApp({ handleFetch = notFoundHandler } = {}) {
           try {
             return await routeUpdate(update, {
               storage: createD1Storage(normalizedEnv.TG_BOT_DB),
-              handleUpdate: () => handleFetch(request, normalizedEnv, ctx),
+              // 已解析的 update 直传业务层，避免 handleFetch 二次读取/解析请求体
+              handleUpdate: (parsedUpdate) => handleFetch(request, normalizedEnv, ctx, parsedUpdate),
             });
           } catch (error) {
             return new Response(
