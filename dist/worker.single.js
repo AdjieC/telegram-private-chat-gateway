@@ -1399,7 +1399,7 @@ function createAdminService({
     });
     return { status: "menu" };
   }
-  async function handleCallbackQuery2(query) {
+  async function handleCallbackQuery(query) {
     const adminId = query.from?.id;
     const parts = String(query.data || "").split(":");
     let permission = null;
@@ -1485,7 +1485,7 @@ function createAdminService({
   return {
     authorize,
     handlePrivateAdminMessage,
-    handleCallbackQuery: handleCallbackQuery2,
+    handleCallbackQuery,
     createRule,
     listRules,
     deleteRule,
@@ -1880,6 +1880,735 @@ function createEphemeralStore(kv) {
   };
 }
 
+// src/blocked-words.js
+var BLOCKED_WORDS = [
+  "\u8D4C\u535A",
+  "\u8272\u60C5",
+  "\u4EE3\u5F00\u53D1",
+  "\u52A0\u5FAE\u4FE1"
+  // ↑ 在此添加更多屏蔽词，每行一个，用引号包裹、逗号结尾
+];
+var blockedWordsCache = { data: null, ts: 0, ttl: 6e4 };
+async function getBlockedWords(env, forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && blockedWordsCache.data && now - blockedWordsCache.ts < blockedWordsCache.ttl) {
+    return blockedWordsCache.data;
+  }
+  let kvWords = [];
+  try {
+    const raw = await env.TOPIC_MAP.get("blocked_words_kv");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        kvWords = parsed.filter((w) => typeof w === "string" && w.trim().length > 0);
+      }
+    }
+  } catch (e) {
+    kvWords = [];
+  }
+  const merged = [.../* @__PURE__ */ new Set([...BLOCKED_WORDS, ...kvWords])];
+  blockedWordsCache.data = merged;
+  blockedWordsCache.ts = now;
+  return merged;
+}
+async function readKvBlockedWords(env) {
+  let kvWords = [];
+  try {
+    const raw = await env.TOPIC_MAP.get("blocked_words_kv");
+    if (raw) kvWords = JSON.parse(raw);
+  } catch {
+  }
+  if (!Array.isArray(kvWords)) kvWords = [];
+  return kvWords;
+}
+function invalidateBlockedWordsCache() {
+  blockedWordsCache.data = null;
+}
+
+// src/user-copy.js
+var USER_COPY = {
+  rateLimited: "\u26A0\uFE0F \u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+  systemBusy: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+  bannedHourly: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
+  mutedHourly: "\u{1F507} \u60A8\u5F53\u524D\u5904\u4E8E\u9759\u97F3\u72B6\u6001\uFF0C\u6D88\u606F\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u53D6\u6D88\u9759\u97F3\u3002",
+  blockedWord: "\u{1F6AB} \u60A8\u7684\u6D88\u606F\u5305\u542B\u8FDD\u89C4\u5185\u5BB9\uFF0C\u5DF2\u88AB\u62E6\u622A\u3002\u8BF7\u4FEE\u6539\u540E\u91CD\u65B0\u53D1\u9001\u3002",
+  conversationClosed: "\u{1F6AB} \u5F53\u524D\u5BF9\u8BDD\u5DF2\u88AB\u7BA1\u7406\u5458\u5173\u95ED\u3002\u5982\u9700\u7EE7\u7EED\uFF0C\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u91CD\u65B0\u6253\u5F00\u3002",
+  pendingDelivered(count) {
+    return `\u{1F4E9} \u521A\u624D\u7684 <b>${count}</b> \u6761\u6D88\u606F\u5DF2\u5E2E\u60A8\u9001\u8FBE\u7BA1\u7406\u5458\u3002`;
+  },
+  muteUserNotify: "\u{1F507} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u9759\u97F3\uFF0C\u6D88\u606F\u6682\u65F6\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002",
+  unmuteUserNotify: "\u{1F50A} \u60A8\u7684\u9759\u97F3\u5DF2\u53D6\u6D88\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
+  banUserNotify: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
+  unbanUserNotify: "\u2705 \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u89E3\u5C01\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u4E86\u3002"
+};
+var ADMIN_COPY = {
+  spamIntercepted(userId, reasonText) {
+    return [
+      "\u26A0\uFE0F <b>\u68C0\u6D4B\u5230\u7591\u4F3C\u9A9A\u6270\u6D88\u606F</b>",
+      "",
+      `\u{1F464} \u7528\u6237: <code>${userId}</code>`,
+      reasonText,
+      "",
+      "\u{1F4DD} \u6D88\u606F\u5DF2\u62E6\u622A\u3002\u53EF\u5728\u7528\u6237\u8BDD\u9898\u5185\u4F7F\u7528\u9762\u677F <b>\u5C01\u7981</b>\u3002"
+    ].join("\n");
+  },
+  forwardTotalFail(userId, threadId, fwdDesc, copyDesc) {
+    return [
+      "\u26A0\uFE0F <b>\u6D88\u606F\u8F6C\u53D1\u5B8C\u5168\u5931\u8D25</b>",
+      "",
+      `\u{1F464} \u7528\u6237: <code>${userId}</code>`,
+      `\u{1F4DD} \u8BDD\u9898: <code>${threadId}</code>`,
+      `\u274C forwardMessage: <code>${fwdDesc || "unknown"}</code>`,
+      `\u274C copyMessage: <code>${copyDesc || "unknown"}</code>`
+    ].join("\n");
+  },
+  wordUsageAdd: "\u26A0\uFE0F \u7528\u6CD5: <code>/addword \u5C4F\u853D\u8BCD</code>",
+  wordUsageDel: "\u26A0\uFE0F \u7528\u6CD5: <code>/delword \u5C4F\u853D\u8BCD</code>",
+  wordExists(word) {
+    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u5DF2\u5B58\u5728\u3002`;
+  },
+  wordAdded(word, count) {
+    return `\u2705 \u5DF2\u6DFB\u52A0\u5C4F\u853D\u8BCD\u300C${word}\u300D
+\u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 <b>${count}</b> \u4E2A\u8BCD`;
+  },
+  wordHardcoded(word) {
+    return `\u26A0\uFE0F\u300C${word}\u300D\u662F\u786C\u7F16\u7801\u5C4F\u853D\u8BCD\uFF0C\u65E0\u6CD5\u901A\u8FC7\u547D\u4EE4\u5220\u9664\uFF0C\u8BF7\u76F4\u63A5\u4FEE\u6539\u4EE3\u7801\u4E2D\u7684 BLOCKED_WORDS\u3002`;
+  },
+  wordMissing(word) {
+    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u4E0D\u5B58\u5728\u4E8E\u52A8\u6001\u8BCD\u5E93\u4E2D\u3002`;
+  },
+  wordDeleted(word, count) {
+    return `\u2705 \u5DF2\u5220\u9664\u5C4F\u853D\u8BCD\u300C${word}\u300D
+\u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 <b>${count}</b> \u4E2A\u8BCD`;
+  }
+};
+
+// src/admin-actions.js
+function createAdminActions(deps) {
+  const {
+    tgCall: tgCall2,
+    safeGetJSON: safeGetJSON2,
+    escapeHtml: escapeHtml2,
+    formatTimeBoth: formatTimeBoth2,
+    buildUserActionKeyboard: buildUserActionKeyboard2,
+    createD1Storage: createD1Storage2,
+    setPersistentTrust: setPersistentTrust2,
+    getVerificationState: getVerificationState2,
+    resolveUserFromForTopic: resolveUserFromForTopic2,
+    buildTopicTitle: buildTopicTitle2,
+    bumpDailyStat: bumpDailyStat2,
+    probeForumThread: probeForumThread2,
+    config,
+    logger,
+    recordSystemError: recordSystemError2
+  } = deps;
+  async function panel(env, threadId, userId) {
+    const from = await resolveUserFromForTopic2(env, userId, null);
+    const name = escapeHtml2([from.first_name, from.last_name].filter(Boolean).join(" ").trim() || "\u672A\u77E5");
+    const un = from.username ? `@${escapeHtml2(from.username)}` : "\u65E0\u7528\u6237\u540D";
+    const ban2 = await env.TOPIC_MAP.get(`banned:${userId}`);
+    const muted = await env.TOPIC_MAP.get(`muted:${userId}`);
+    const rec = await safeGetJSON2(env, `user:${userId}`, null);
+    const note2 = await env.TOPIC_MAP.get(`note:${userId}`);
+    let lastMsgLine = "\u6700\u8FD1\u6D88\u606F: \u65E0";
+    let d1Status = null;
+    if (env.TG_BOT_DB) {
+      try {
+        const u = await createD1Storage2(env.TG_BOT_DB).getUser(userId);
+        if (u?.lastMessageAt) lastMsgLine = `\u6700\u8FD1\u6D88\u606F: ${formatTimeBoth2(u.lastMessageAt)}`;
+        d1Status = u?.status || null;
+      } catch {
+      }
+    }
+    const text = [
+      "\u{1F39B} <b>\u7528\u6237\u9762\u677F</b>",
+      "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+      `\u{1F464} ${name} \xB7 ${un}`,
+      `UID <code>${userId}</code>`,
+      `\u72B6\u6001  \u5C01\u7981:${ban2 ? "\u{1F6AB} \u662F" : "\u5426"} \xB7 \u9759\u97F3:${muted ? "\u{1F507} \u662F" : "\u5426"} \xB7 \u5173\u95ED:${rec?.closed ? "\u{1F512} \u662F" : "\u5426"}`,
+      d1Status ? `D1: <code>${escapeHtml2(d1Status)}</code>` : "",
+      lastMsgLine,
+      note2 ? `\u{1F4DD} ${escapeHtml2(String(note2).slice(0, 80))}${String(note2).length > 80 ? "\u2026" : ""}` : "\u{1F4DD} \u65E0\u5907\u6CE8 \xB7 <code>/note \u5185\u5BB9</code> \u6DFB\u52A0",
+      "",
+      "\u{1F447} \u70B9\u6309\u94AE\u64CD\u4F5C",
+      "<i>\u5C01\u7981 / \u5173\u95ED / \u91CD\u7F6E\u9700\u4E8C\u6B21\u786E\u8BA4</i>"
+    ].filter(Boolean).join("\n");
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text,
+      parse_mode: "HTML",
+      reply_markup: buildUserActionKeyboard2(userId)
+    });
+  }
+  async function mute(env, threadId, userId) {
+    await env.TOPIC_MAP.put(`muted:${userId}`, "1");
+    if (env.TG_BOT_DB) {
+      try {
+        await createD1Storage2(env.TG_BOT_DB).updateUserState(userId, { isMuted: true });
+      } catch {
+      }
+    }
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: "\u{1F507} <b>\u5DF2\u9759\u97F3</b>\uFF1A\u7528\u6237\u6D88\u606F\u4E0D\u518D\u8F6C\u53D1\u5230\u672C\u7FA4",
+      parse_mode: "HTML"
+    });
+    await tgCall2(env, "sendMessage", {
+      chat_id: userId,
+      text: USER_COPY.muteUserNotify
+    });
+  }
+  async function unmute(env, threadId, userId) {
+    await env.TOPIC_MAP.delete(`muted:${userId}`);
+    await env.TOPIC_MAP.delete(`mute_notice:${userId}`);
+    if (env.TG_BOT_DB) {
+      try {
+        await createD1Storage2(env.TG_BOT_DB).updateUserState(userId, { isMuted: false });
+      } catch {
+      }
+    }
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: "\u{1F50A} <b>\u5DF2\u53D6\u6D88\u9759\u97F3</b>",
+      parse_mode: "HTML"
+    });
+    await tgCall2(env, "sendMessage", {
+      chat_id: userId,
+      text: USER_COPY.unmuteUserNotify
+    });
+  }
+  async function note(env, threadId, userId, text) {
+    const content = text.replace(/^\/note(@\w+)?\s*/i, "").trim();
+    if (!content) {
+      const existing = await env.TOPIC_MAP.get(`note:${userId}`);
+      await tgCall2(env, "sendMessage", {
+        chat_id: env.SUPERGROUP_ID,
+        message_thread_id: threadId,
+        text: existing ? `\u{1F4DD} <b>\u5F53\u524D\u5907\u6CE8</b>
+${escapeHtml2(existing)}
+
+\u7528\u6CD5: <code>/note \u65B0\u5907\u6CE8</code>\uFF08\u53D1 <code>/note clear</code> \u6E05\u7A7A\uFF09` : "\u{1F4DD} \u6682\u65E0\u5907\u6CE8\u3002\u7528\u6CD5: <code>/note \u5185\u5BB9</code>",
+        parse_mode: "HTML"
+      });
+      return;
+    }
+    if (content.toLowerCase() === "clear" || content === "-" || content === "\u6E05\u9664") {
+      await env.TOPIC_MAP.delete(`note:${userId}`);
+      await tgCall2(env, "sendMessage", {
+        chat_id: env.SUPERGROUP_ID,
+        message_thread_id: threadId,
+        text: "\u2705 \u5907\u6CE8\u5DF2\u6E05\u9664"
+      });
+      return;
+    }
+    await env.TOPIC_MAP.put(`note:${userId}`, content.slice(0, 500), { expirationTtl: 365 * 86400 });
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: `\u2705 \u5907\u6CE8\u5DF2\u4FDD\u5B58\uFF1A
+${escapeHtml2(content.slice(0, 500))}`,
+      parse_mode: "HTML"
+    });
+  }
+  async function addWord(env, threadId, text, senderId) {
+    const word = text.slice(9).trim();
+    if (!word) {
+      await tgCall2(env, "sendMessage", {
+        chat_id: env.SUPERGROUP_ID,
+        message_thread_id: threadId,
+        text: ADMIN_COPY.wordUsageAdd,
+        parse_mode: "HTML"
+      });
+      return;
+    }
+    let kvWords = await readKvBlockedWords(env);
+    const allWords = [.../* @__PURE__ */ new Set([...BLOCKED_WORDS, ...kvWords])];
+    if (allWords.map((w) => w.toLowerCase()).includes(word.toLowerCase())) {
+      await tgCall2(env, "sendMessage", {
+        chat_id: env.SUPERGROUP_ID,
+        message_thread_id: threadId,
+        text: ADMIN_COPY.wordExists(escapeHtml2(word)),
+        parse_mode: "HTML"
+      });
+      return;
+    }
+    kvWords.push(word);
+    await env.TOPIC_MAP.put("blocked_words_kv", JSON.stringify(kvWords));
+    invalidateBlockedWordsCache();
+    logger.info("blocked_word_added", { word, by: senderId });
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: ADMIN_COPY.wordAdded(escapeHtml2(word), kvWords.length),
+      parse_mode: "HTML"
+    });
+  }
+  async function delWord(env, threadId, text, senderId) {
+    const word = text.slice(9).trim();
+    if (!word) {
+      await tgCall2(env, "sendMessage", {
+        chat_id: env.SUPERGROUP_ID,
+        message_thread_id: threadId,
+        text: ADMIN_COPY.wordUsageDel,
+        parse_mode: "HTML"
+      });
+      return;
+    }
+    if (BLOCKED_WORDS.map((w) => w.toLowerCase()).includes(word.toLowerCase())) {
+      await tgCall2(env, "sendMessage", {
+        chat_id: env.SUPERGROUP_ID,
+        message_thread_id: threadId,
+        text: ADMIN_COPY.wordHardcoded(escapeHtml2(word)),
+        parse_mode: "HTML"
+      });
+      return;
+    }
+    let kvWords = await readKvBlockedWords(env);
+    const before = kvWords.length;
+    kvWords = kvWords.filter((w) => w.toLowerCase() !== word.toLowerCase());
+    if (kvWords.length === before) {
+      await tgCall2(env, "sendMessage", {
+        chat_id: env.SUPERGROUP_ID,
+        message_thread_id: threadId,
+        text: ADMIN_COPY.wordMissing(escapeHtml2(word)),
+        parse_mode: "HTML"
+      });
+      return;
+    }
+    await env.TOPIC_MAP.put("blocked_words_kv", JSON.stringify(kvWords));
+    invalidateBlockedWordsCache();
+    logger.info("blocked_word_removed", { word, by: senderId });
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: ADMIN_COPY.wordDeleted(escapeHtml2(word), kvWords.length),
+      parse_mode: "HTML"
+    });
+  }
+  async function listWords(env, threadId) {
+    const allWords = await getBlockedWords(env, true);
+    const kvWords = await readKvBlockedWords(env);
+    const hardcoded = BLOCKED_WORDS;
+    const dynamic = kvWords.filter((w) => !BLOCKED_WORDS.map((h) => h.toLowerCase()).includes(w.toLowerCase()));
+    const spamKeywords = parseSpamKeywords((env.SPAM_KEYWORDS || "").toString());
+    const blockedTotal = allWords.length;
+    const lines = [
+      "\u{1F4DD} <b>\u5185\u5BB9\u8FC7\u6EE4\u8BCD\u5E93</b>",
+      "",
+      `<b>\u4E00\u3001\u5C4F\u853D\u8BCD</b>\uFF08\u547D\u4E2D\u540E\u62E6\u622A\u5E76\u63D0\u793A\u7528\u6237\uFF0C\u5171 ${blockedTotal} \u4E2A\uFF09`,
+      "",
+      `\u{1F527} <b>\u786C\u7F16\u7801\u8BCD</b> (${hardcoded.length} \u4E2A\uFF0C\u4FEE\u6539\u9700\u6539\u4EE3\u7801):`,
+      hardcoded.length > 0 ? hardcoded.map((w) => `  \u2022 ${escapeHtml2(w)}`).join("\n") : "  (\u65E0)",
+      "",
+      `\u{1F4BE} <b>\u52A8\u6001\u8BCD</b> (${dynamic.length} \u4E2A\uFF0C\u53EF\u7528 /addword /delword):`,
+      dynamic.length > 0 ? dynamic.map((w) => `  \u2022 ${escapeHtml2(w)}`).join("\n") : "  (\u65E0)",
+      "",
+      `<b>\u4E8C\u3001\u5783\u573E\u5173\u952E\u8BCD SPAM_KEYWORDS</b>\uFF08\u73AF\u5883\u53D8\u91CF\uFF0C\u5171 ${spamKeywords.length} \u4E2A\uFF09`,
+      spamKeywords.length > 0 ? spamKeywords.map((w) => `  \u2022 ${escapeHtml2(w)}`).join("\n") : "  (\u672A\u914D\u7F6E\uFF1B\u5728 Cloudflare Variables \u4E2D\u8BBE\u7F6E SPAM_KEYWORDS)",
+      "",
+      "<i>\u8BF4\u660E\uFF1A/addword \u53EA\u5199\u5165\u52A8\u6001\u5C4F\u853D\u8BCD\uFF0C\u4E0D\u4F1A\u6539 SPAM_KEYWORDS\u3002</i>"
+    ];
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: lines.join("\n"),
+      parse_mode: "HTML"
+    });
+  }
+  async function close(env, threadId, userId) {
+    const key = `user:${userId}`;
+    let rec = await safeGetJSON2(env, key, null);
+    if (!rec) {
+      rec = { thread_id: threadId, closed: true };
+    } else {
+      rec.closed = true;
+      if (!rec.thread_id) rec.thread_id = threadId;
+    }
+    await env.TOPIC_MAP.put(key, JSON.stringify(rec));
+    if (env.TG_BOT_DB) {
+      try {
+        await createD1Storage2(env.TG_BOT_DB).updateUserState(userId, { status: "closed" });
+      } catch (e) {
+        logger.warn("close_d1_update_failed", { userId, error: e?.message });
+      }
+    }
+    await tgCall2(env, "closeForumTopic", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId
+    });
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: "\u{1F6AB} <b>\u5BF9\u8BDD\u5DF2\u5F3A\u5236\u5173\u95ED</b>",
+      parse_mode: "HTML"
+    });
+  }
+  async function open(env, threadId, userId) {
+    const key = `user:${userId}`;
+    let rec = await safeGetJSON2(env, key, null);
+    if (!rec) {
+      rec = { thread_id: threadId, closed: false };
+    } else {
+      rec.closed = false;
+      if (!rec.thread_id) rec.thread_id = threadId;
+    }
+    await env.TOPIC_MAP.put(key, JSON.stringify(rec));
+    if (env.TG_BOT_DB) {
+      try {
+        await createD1Storage2(env.TG_BOT_DB).updateUserState(userId, { status: "active" });
+      } catch (e) {
+        logger.warn("open_d1_update_failed", { userId, error: e?.message });
+      }
+    }
+    await tgCall2(env, "reopenForumTopic", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId
+    });
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: "\u2705 <b>\u5BF9\u8BDD\u5DF2\u6062\u590D</b>",
+      parse_mode: "HTML"
+    });
+  }
+  async function reset(env, threadId, userId) {
+    await setPersistentTrust2(env, userId, "normal");
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: "\u{1F504} <b>\u9A8C\u8BC1\u91CD\u7F6E</b>\uFF08\u5DF2\u53D6\u6D88\u6C38\u4E45\u4FE1\u4EFB\uFF0C\u4E0B\u6B21\u9700\u91CD\u65B0\u9A8C\u8BC1\uFF09",
+      parse_mode: "HTML"
+    });
+  }
+  async function trust(env, threadId, userId) {
+    await setPersistentTrust2(env, userId, "trusted");
+    await env.TOPIC_MAP.delete(`needs_verify:${userId}`);
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: "\u{1F31F} <b>\u5DF2\u8BBE\u7F6E\u6C38\u4E45\u4FE1\u4EFB</b>",
+      parse_mode: "HTML"
+    });
+  }
+  async function ban(env, threadId, userId) {
+    await env.TOPIC_MAP.put(`banned:${userId}`, "1");
+    if (env.TG_BOT_DB) {
+      try {
+        await createD1Storage2(env.TG_BOT_DB).updateUserState(userId, { status: "banned" });
+      } catch (e) {
+        logger.warn("ban_d1_update_failed", { userId, error: e?.message });
+      }
+    }
+    await bumpDailyStat2(env, "bans", 1);
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: "\u{1F6AB} <b>\u7528\u6237\u5DF2\u5C01\u7981</b>\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
+      parse_mode: "HTML"
+    });
+    const notify = await tgCall2(env, "sendMessage", {
+      chat_id: userId,
+      text: USER_COPY.banUserNotify
+    });
+    if (!notify?.ok) {
+      logger.warn("ban_user_notify_failed", {
+        userId,
+        description: notify?.description
+      });
+      await tgCall2(env, "sendMessage", {
+        chat_id: env.SUPERGROUP_ID,
+        message_thread_id: threadId,
+        text: `\u26A0\uFE0F \u5DF2\u5C01\u7981\uFF0C\u4F46\u901A\u77E5\u7528\u6237\u5931\u8D25\uFF08\u53EF\u80FD\u5BF9\u65B9\u672A\u79C1\u804A\u8FC7\u673A\u5668\u4EBA\u6216\u5DF2\u62C9\u9ED1\uFF09\uFF1A${escapeHtml2(notify?.description || "unknown")}`,
+        parse_mode: "HTML"
+      });
+    } else {
+      await env.TOPIC_MAP.put(`ban_notice:${userId}`, "1", { expirationTtl: 3600 });
+    }
+  }
+  async function unban(env, threadId, userId) {
+    await env.TOPIC_MAP.delete(`banned:${userId}`);
+    await env.TOPIC_MAP.delete(`ban_notice:${userId}`);
+    if (env.TG_BOT_DB) {
+      try {
+        await createD1Storage2(env.TG_BOT_DB).updateUserState(userId, { status: "active" });
+      } catch (e) {
+        logger.warn("unban_d1_update_failed", { userId, error: e?.message });
+      }
+    }
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: "\u2705 <b>\u7528\u6237\u5DF2\u89E3\u5C01</b>\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
+      parse_mode: "HTML"
+    });
+    const notify = await tgCall2(env, "sendMessage", {
+      chat_id: userId,
+      text: USER_COPY.unbanUserNotify
+    });
+    if (!notify?.ok) {
+      logger.warn("unban_user_notify_failed", {
+        userId,
+        description: notify?.description
+      });
+    }
+  }
+  async function info(env, threadId, userId) {
+    const userKey = `user:${userId}`;
+    let userRec = await safeGetJSON2(env, userKey, null);
+    const verifyStatus = await getVerificationState2(env, userId);
+    const banStatus = await env.TOPIC_MAP.get(`banned:${userId}`);
+    const from = await resolveUserFromForTopic2(env, userId, null);
+    const resolvedTitle = buildTopicTitle2(from);
+    if (userRec?.thread_id && resolvedTitle && resolvedTitle !== "User" && (!userRec.title || userRec.title === "User" || /^User(\s@|$)/i.test(userRec.title))) {
+      try {
+        const edit = await tgCall2(env, "editForumTopic", {
+          chat_id: env.SUPERGROUP_ID,
+          message_thread_id: userRec.thread_id,
+          name: resolvedTitle
+        });
+        if (edit?.ok) {
+          userRec = { ...userRec, title: resolvedTitle };
+          await env.TOPIC_MAP.put(userKey, JSON.stringify(userRec));
+        }
+      } catch (e) {
+        logger.warn("info_topic_title_repair_failed", { userId, error: e?.message });
+      }
+    }
+    const displayName = escapeHtml2(
+      [from.first_name, from.last_name].filter(Boolean).join(" ").trim() || "\u672A\u77E5"
+    );
+    const usernameText = from.username ? `@${escapeHtml2(from.username)}` : "\u65E0";
+    const openLink = from.username ? `<a href="https://t.me/${escapeHtml2(from.username)}">\u6253\u5F00\u4E3B\u9875 @${escapeHtml2(from.username)}</a>` : `<a href="tg://user?id=${userId}">\u6253\u5F00\u7528\u6237\u8D44\u6599</a>`;
+    const topicTitle = escapeHtml2(userRec?.title || resolvedTitle || "\u672A\u77E5");
+    const verifyText = verifyStatus ? verifyStatus.type === "trusted" ? "\u{1F31F} \u6C38\u4E45\u4FE1\u4EFB" : "\u2705 \u5DF2\u9A8C\u8BC1" : "\u274C \u672A\u9A8C\u8BC1";
+    const banText = banStatus ? "\u{1F6AB} \u5DF2\u5C01\u7981" : "\u2705 \u6B63\u5E38";
+    const muted = await env.TOPIC_MAP.get(`muted:${userId}`);
+    const note2 = await env.TOPIC_MAP.get(`note:${userId}`);
+    let lastMsgAt = null;
+    let d1Status = null;
+    if (env.TG_BOT_DB) {
+      try {
+        const u = await createD1Storage2(env.TG_BOT_DB).getUser(userId);
+        lastMsgAt = u?.lastMessageAt ?? null;
+        d1Status = u?.status ?? null;
+      } catch {
+      }
+    }
+    const lines = [
+      "\u{1F464} <b>\u7528\u6237\u4FE1\u606F</b>",
+      `\u59D3\u540D: ${displayName}`,
+      `\u7528\u6237\u540D: ${usernameText}`,
+      `UID: <code>${userId}</code>`,
+      `Topic ID: <code>${threadId}</code>`,
+      `\u8BDD\u9898\u6807\u9898: ${topicTitle}`,
+      `\u9A8C\u8BC1: ${verifyText}`,
+      `\u5C01\u7981: ${banText} \xB7 \u9759\u97F3: ${muted ? "\u{1F507} \u662F" : "\u5426"} \xB7 \u4F1A\u8BDD\u5173\u95ED: ${userRec?.closed ? "\u662F" : "\u5426"}`,
+      d1Status ? `D1 \u72B6\u6001: <code>${escapeHtml2(d1Status)}</code>` : "",
+      `\u6700\u8FD1\u6D88\u606F: ${formatTimeBoth2(lastMsgAt)}`,
+      note2 ? `\u5907\u6CE8: ${escapeHtml2(note2)}` : "\u5907\u6CE8: \u65E0\uFF08/note \u5185\u5BB9\uFF09",
+      `\u94FE\u63A5: ${openLink}`,
+      from.username ? "" : "<i>\u65E0\u516C\u5F00\u7528\u6237\u540D\u65F6\u90E8\u5206\u5BA2\u6237\u7AEF\u65E0\u6CD5\u70B9\u51FB tg \u94FE\u63A5</i>"
+    ].filter(Boolean).join("\n");
+    await tgCall2(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      message_thread_id: threadId,
+      text: lines,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+      reply_markup: buildUserActionKeyboard2(userId)
+    });
+  }
+  async function cleanup(threadId, env) {
+    const lockKey = "cleanup:lock";
+    const locked = await env.TOPIC_MAP.get(lockKey);
+    if (locked) {
+      await tgCall2(env, "sendMessage", withMessageThreadId({
+        chat_id: env.SUPERGROUP_ID,
+        text: "\u23F3 **\u5DF2\u6709\u6E05\u7406\u4EFB\u52A1\u6B63\u5728\u8FD0\u884C\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002**",
+        parse_mode: "Markdown"
+      }, threadId));
+      return;
+    }
+    await env.TOPIC_MAP.put(lockKey, "1", { expirationTtl: config.CLEANUP_LOCK_TTL_SECONDS });
+    await tgCall2(env, "sendMessage", withMessageThreadId({
+      chat_id: env.SUPERGROUP_ID,
+      text: "\u{1F504} **\u6B63\u5728\u626B\u63CF\u9700\u8981\u6E05\u7406\u7684\u7528\u6237...**",
+      parse_mode: "Markdown"
+    }, threadId));
+    let cleanedCount = 0;
+    let errorCount = 0;
+    const cleanedUsers = [];
+    let scannedCount = 0;
+    try {
+      let cursor = void 0;
+      do {
+        const result = await env.TOPIC_MAP.list({ prefix: "user:", cursor });
+        const names = (result.keys || []).map((k) => k.name);
+        scannedCount += names.length;
+        for (let i = 0; i < names.length; i += config.CLEANUP_BATCH_SIZE) {
+          const batch = names.slice(i, i + config.CLEANUP_BATCH_SIZE);
+          const results = await Promise.allSettled(
+            batch.map(async (name) => {
+              const rec = await safeGetJSON2(env, name, null);
+              if (!rec || !rec.thread_id) return null;
+              const userId = name.slice(5);
+              const topicThreadId = rec.thread_id;
+              const probe = await probeForumThread2(env, topicThreadId, {
+                userId,
+                reason: "cleanup_check",
+                doubleCheckOnMissingThreadId: false
+              });
+              if (probe.status === "redirected" || probe.status === "missing") {
+                await env.TOPIC_MAP.delete(name);
+                await setPersistentTrust2(env, userId, "normal");
+                await env.TOPIC_MAP.delete(`thread:${topicThreadId}`);
+                return {
+                  userId,
+                  threadId: topicThreadId,
+                  title: rec.title || "\u672A\u77E5"
+                };
+              } else if (probe.status === "probe_invalid") {
+                logger.warn("cleanup_probe_invalid_message", {
+                  userId,
+                  threadId: topicThreadId,
+                  errorDescription: probe.description
+                });
+              } else if (probe.status === "unknown_error") {
+                logger.warn("cleanup_probe_failed_unknown", {
+                  userId,
+                  threadId: topicThreadId,
+                  errorDescription: probe.description
+                });
+              } else if (probe.status === "missing_thread_id") {
+                logger.warn("cleanup_probe_missing_thread_id", { userId, threadId: topicThreadId });
+              }
+              return null;
+            })
+          );
+          results.forEach((result2) => {
+            if (result2.status === "fulfilled" && result2.value) {
+              cleanedCount++;
+              cleanedUsers.push(result2.value);
+              logger.info("cleanup_user", {
+                userId: result2.value.userId,
+                threadId: result2.value.threadId
+              });
+            } else if (result2.status === "rejected") {
+              errorCount++;
+              logger.error("cleanup_batch_error", result2.reason);
+            }
+          });
+          if (i + config.CLEANUP_BATCH_SIZE < names.length) {
+            await new Promise((r) => setTimeout(r, 600));
+          }
+        }
+        cursor = result.list_complete ? void 0 : result.cursor;
+        if (cursor) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+      } while (cursor);
+      let reportText = `\u2705 <b>\u6E05\u7406\u5B8C\u6210</b>
+
+`;
+      reportText += `\u{1F4CA} <b>\u7EDF\u8BA1</b>
+`;
+      reportText += `\u2022 \u626B\u63CF\u7528\u6237: <b>${scannedCount}</b>
+`;
+      reportText += `\u2022 \u5DF2\u6E05\u7406: <b>${cleanedCount}</b>
+`;
+      reportText += `\u2022 \u9519\u8BEF: ${errorCount}
+
+`;
+      if (cleanedCount > 0) {
+        reportText += `\u{1F5D1} <b>\u5DF2\u6E05\u7406\u7528\u6237</b>\uFF08\u8BDD\u9898\u5DF2\u5220\u9664\uFF09:
+`;
+        for (const user of cleanedUsers.slice(0, config.MAX_CLEANUP_DISPLAY)) {
+          reportText += `\u2022 UID <code>${escapeHtml2(String(user.userId))}</code> \xB7 ${escapeHtml2(user.title || "")}
+`;
+        }
+        if (cleanedUsers.length > config.MAX_CLEANUP_DISPLAY) {
+          reportText += `
+\u2026\u8FD8\u6709 ${cleanedUsers.length - config.MAX_CLEANUP_DISPLAY} \u4E2A
+`;
+        }
+        reportText += `
+\u{1F4A1} \u8FD9\u4E9B\u7528\u6237\u4E0B\u6B21\u53D1\u6D88\u606F\u5C06\u91CD\u65B0\u9A8C\u8BC1\u5E76\u521B\u5EFA\u65B0\u8BDD\u9898\u3002`;
+      } else {
+        reportText += `\u2728 \u6CA1\u6709\u53D1\u73B0\u9700\u8981\u6E05\u7406\u7684\u7528\u6237\u8BB0\u5F55\u3002`;
+      }
+      logger.info("cleanup_completed", {
+        cleanedCount,
+        errorCount,
+        totalUsers: scannedCount
+      });
+      await tgCall2(env, "sendMessage", withMessageThreadId({
+        chat_id: env.SUPERGROUP_ID,
+        text: reportText,
+        parse_mode: "HTML"
+      }, threadId));
+    } catch (e) {
+      logger.error("cleanup_failed", e, { threadId });
+      await tgCall2(env, "sendMessage", withMessageThreadId({
+        chat_id: env.SUPERGROUP_ID,
+        text: `\u274C **\u6E05\u7406\u8FC7\u7A0B\u51FA\u9519**
+
+\u9519\u8BEF\u4FE1\u606F: \`${e.message}\``,
+        parse_mode: "Markdown"
+      }, threadId));
+    } finally {
+      await env.TOPIC_MAP.delete(lockKey);
+    }
+  }
+  return {
+    panel,
+    info,
+    note,
+    mute,
+    unmute,
+    close,
+    open,
+    ban,
+    unban,
+    trust,
+    reset,
+    addWord,
+    delWord,
+    listWords,
+    cleanup
+  };
+}
+
+// src/verify-copy.js
+var VERIFY_COPY = {
+  /** Turnstile 私聊提示 */
+  turnstileChallenge: "\u{1F6E1} <b>\u4EBA\u673A\u9A8C\u8BC1</b>\n\n\u8BF7\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u5B8C\u6210\u9A8C\u8BC1\u3002\n\u901A\u8FC7\u540E\u60A8\u521A\u624D\u7684\u6D88\u606F\u4F1A\u81EA\u52A8\u9001\u8FBE\u7BA1\u7406\u5458\u3002",
+  /** 本地题库提示 */
+  quizChallenge(question) {
+    return `\u{1F6E1} <b>\u4EBA\u673A\u9A8C\u8BC1</b>
+
+${question}
+
+\u8BF7\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u4F5C\u7B54\uFF1B\u7B54\u5BF9\u540E\u6D88\u606F\u4F1A\u81EA\u52A8\u9001\u8FBE\u3002`;
+  },
+  buttonTurnstile: "\u{1F510} \u70B9\u51FB\u9A8C\u8BC1",
+  /** callback toast / alert */
+  expired: "\u274C \u9A8C\u8BC1\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u53D1\u4E00\u6761\u6D88\u606F",
+  dataError: "\u274C \u9A8C\u8BC1\u6570\u636E\u5F02\u5E38\uFF0C\u8BF7\u91CD\u65B0\u53D1\u6D88\u606F",
+  invalidUser: "\u274C \u9A8C\u8BC1\u65E0\u6548\uFF0C\u8BF7\u91CD\u65B0\u53D1\u6D88\u606F",
+  invalidOption: "\u274C \u65E0\u6548\u9009\u9879",
+  wrongAnswer: "\u274C \u56DE\u7B54\u9519\u8BEF\uFF0C\u8BF7\u518D\u8BD5\u4E00\u6B21",
+  successToast: "\u2705 \u9A8C\u8BC1\u901A\u8FC7",
+  systemError: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5",
+  /** 编辑/私聊成功正文 */
+  successBody: "\u2705 <b>\u9A8C\u8BC1\u6210\u529F</b>\n\n\u60A8\u73B0\u5728\u53EF\u4EE5\u6B63\u5E38\u5BF9\u8BDD\u4E86\u3002\u76F4\u63A5\u53D1\u6D88\u606F\u5373\u53EF\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
+  successBodyWithPending: "\u2705 <b>\u9A8C\u8BC1\u6210\u529F</b>\n\n\u6B63\u5728\u4E3A\u60A8\u9001\u8FBE\u521A\u624D\u7684\u6D88\u606F\uFF0C\u8BF7\u7A0D\u5019\u2026",
+  /** 答错时在题目下追加的提示（编辑消息用） */
+  wrongAnswerHint: "\n\n\u26A0\uFE0F \u56DE\u7B54\u4E0D\u6B63\u786E\uFF0C\u8BF7\u518D\u9009\u4E00\u6B21\u3002\u94FE\u63A5\u672A\u8FC7\u671F\u524D\u53EF\u7EE7\u7EED\u5C1D\u8BD5\u3002"
+};
+
 // src/activity-summary.js
 var OPS_TZ_OFFSET_HOURS = 8;
 function opsDayKey(now = Date.now(), offsetHours = OPS_TZ_OFFSET_HOURS) {
@@ -2221,6 +2950,608 @@ function formatEmptyActivityHints() {
   ];
 }
 
+// src/verification.js
+var LOCAL_QUESTIONS = [
+  { "question": "\u51B0\u878D\u5316\u540E\u4F1A\u53D8\u6210\u4EC0\u4E48\uFF1F", "correct_answer": "\u6C34", "incorrect_answers": ["\u77F3\u5934", "\u6728\u5934", "\u706B"] },
+  { "question": "\u6B63\u5E38\u4EBA\u6709\u51E0\u53EA\u773C\u775B\uFF1F", "correct_answer": "2", "incorrect_answers": ["1", "3", "4"] },
+  { "question": "\u4EE5\u4E0B\u54EA\u4E2A\u5C5E\u4E8E\u6C34\u679C\uFF1F", "correct_answer": "\u9999\u8549", "incorrect_answers": ["\u767D\u83DC", "\u732A\u8089", "\u5927\u7C73"] },
+  { "question": "1 \u52A0 2 \u7B49\u4E8E\u51E0\uFF1F", "correct_answer": "3", "incorrect_answers": ["2", "4", "5"] },
+  { "question": "5 \u51CF 2 \u7B49\u4E8E\u51E0\uFF1F", "correct_answer": "3", "incorrect_answers": ["1", "2", "4"] },
+  { "question": "2 \u4E58\u4EE5 3 \u7B49\u4E8E\u51E0\uFF1F", "correct_answer": "6", "incorrect_answers": ["4", "5", "7"] },
+  { "question": "10 \u52A0 5 \u7B49\u4E8E\u51E0\uFF1F", "correct_answer": "15", "incorrect_answers": ["10", "12", "20"] },
+  { "question": "8 \u51CF 4 \u7B49\u4E8E\u51E0\uFF1F", "correct_answer": "4", "incorrect_answers": ["2", "3", "5"] },
+  { "question": "\u5728\u5929\u4E0A\u98DE\u7684\u4EA4\u901A\u5DE5\u5177\u662F\u4EC0\u4E48\uFF1F", "correct_answer": "\u98DE\u673A", "incorrect_answers": ["\u6C7D\u8F66", "\u8F6E\u8239", "\u81EA\u884C\u8F66"] },
+  { "question": "\u661F\u671F\u4E00\u7684\u540E\u9762\u662F\u661F\u671F\u51E0\uFF1F", "correct_answer": "\u661F\u671F\u4E8C", "incorrect_answers": ["\u661F\u671F\u65E5", "\u661F\u671F\u4E94", "\u661F\u671F\u4E09"] },
+  { "question": "\u9C7C\u901A\u5E38\u751F\u6D3B\u5728\u54EA\u91CC\uFF1F", "correct_answer": "\u6C34\u91CC", "incorrect_answers": ["\u6811\u4E0A", "\u571F\u91CC", "\u706B\u91CC"] },
+  { "question": "\u6211\u4EEC\u7528\u4EC0\u4E48\u5668\u5B98\u6765\u542C\u58F0\u97F3\uFF1F", "correct_answer": "\u8033\u6735", "incorrect_answers": ["\u773C\u775B", "\u9F3B\u5B50", "\u5634\u5DF4"] },
+  { "question": "\u6674\u6717\u7684\u5929\u7A7A\u901A\u5E38\u662F\u4EC0\u4E48\u989C\u8272\u7684\uFF1F", "correct_answer": "\u84DD\u8272", "incorrect_answers": ["\u7EFF\u8272", "\u7EA2\u8272", "\u7D2B\u8272"] },
+  { "question": "\u592A\u9633\u4ECE\u54EA\u4E2A\u65B9\u5411\u5347\u8D77\uFF1F", "correct_answer": "\u4E1C\u65B9", "incorrect_answers": ["\u897F\u65B9", "\u5357\u65B9", "\u5317\u65B9"] },
+  { "question": "\u5C0F\u72D7\u53D1\u51FA\u7684\u53EB\u58F0\u901A\u5E38\u662F\uFF1F", "correct_answer": "\u6C6A\u6C6A", "incorrect_answers": ["\u55B5\u55B5", "\u54A9\u54A9", "\u5471\u5471"] }
+];
+function createVerificationModule(deps) {
+  const {
+    config,
+    tgCall: tgCall2,
+    safeGetJSON: safeGetJSON2,
+    ephemeralStore: ephemeralStore2,
+    checkRateLimit: checkRateLimit2,
+    bumpDailyStat: bumpDailyStat2,
+    resolveUserFromForTopic: resolveUserFromForTopic2,
+    forwardToTopic: forwardToTopic2,
+    saveUserProfileSnapshot: saveUserProfileSnapshot2,
+    shuffleArray: shuffleArray2,
+    secureRandomInt: secureRandomInt2,
+    secureRandomId: secureRandomId2,
+    logger
+  } = deps;
+  async function verifyTurnstileToken(token, secretKey, remoteIp) {
+    const formData = new URLSearchParams();
+    formData.append("secret", secretKey);
+    formData.append("response", token);
+    if (remoteIp) {
+      formData.append("remoteip", remoteIp);
+    }
+    try {
+      const resp = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData.toString()
+      });
+      const result = await resp.json();
+      return { success: result.success === true, error: result["error-codes"]?.join(", ") };
+    } catch (e) {
+      logger.error("turnstile_verify_error", e);
+      return { success: false, error: e.message };
+    }
+  }
+  async function sendVerificationChallenge(userId, env, pendingMsgId, from = null) {
+    if (from) await saveUserProfileSnapshot2(env, userId, from);
+    const writtenKeys = [];
+    try {
+      await _sendVerificationChallengeInner(userId, env, pendingMsgId, writtenKeys);
+    } catch (e) {
+      logger.error("verification_challenge_failed", e, { userId });
+      for (const key of writtenKeys) {
+        try {
+          await env.TOPIC_MAP.delete(key);
+        } catch {
+        }
+      }
+      throw e;
+    }
+  }
+  async function _sendVerificationChallengeInner(userId, env, pendingMsgId, writtenKeys) {
+    const existingChallenge = await env.TOPIC_MAP.get(`user_challenge:${userId}`);
+    if (existingChallenge) {
+      const chalKey = `chal:${existingChallenge}`;
+      const state = await safeGetJSON2(env, chalKey, null);
+      if (!state || state.userId !== userId) {
+        await env.TOPIC_MAP.delete(`user_challenge:${userId}`);
+      } else {
+        if (pendingMsgId) {
+          let pendingIds = [];
+          if (Array.isArray(state.pending_ids)) {
+            pendingIds = state.pending_ids.slice();
+          } else if (state.pending) {
+            pendingIds = [state.pending];
+          }
+          if (!pendingIds.includes(pendingMsgId)) {
+            pendingIds.push(pendingMsgId);
+            if (pendingIds.length > config.PENDING_MAX_MESSAGES) {
+              pendingIds = pendingIds.slice(pendingIds.length - config.PENDING_MAX_MESSAGES);
+            }
+            state.pending_ids = pendingIds;
+            delete state.pending;
+            await env.TOPIC_MAP.put(chalKey, JSON.stringify(state), { expirationTtl: config.VERIFY_EXPIRE_SECONDS });
+          }
+        }
+        logger.debug("verification_duplicate_skipped", { userId, verifyId: existingChallenge, hasPending: !!pendingMsgId });
+        return;
+      }
+    }
+    const verifyLimit = await checkRateLimit2(userId, env, "verify", config.RATE_LIMIT_VERIFY, 300);
+    if (!verifyLimit.allowed) {
+      await tgCall2(env, "sendMessage", {
+        chat_id: userId,
+        text: "\u26A0\uFE0F \u9A8C\u8BC1\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF75\u5206\u949F\u540E\u518D\u8BD5\u3002"
+      });
+      return;
+    }
+    const hasTurnstile = !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY && env.VERIFICATION_PAGE_URL);
+    if (hasTurnstile) {
+      await sendTurnstileChallenge(userId, env, pendingMsgId, writtenKeys);
+    } else {
+      await sendLocalQuizChallenge(userId, env, pendingMsgId, writtenKeys);
+    }
+  }
+  async function sendTurnstileChallenge(userId, env, pendingMsgId, writtenKeys) {
+    const verifyCode = generateVerifyCode();
+    const verifyUrl = `${env.VERIFICATION_PAGE_URL}/verify?code=${verifyCode}&uid=${userId}`;
+    await env.TOPIC_MAP.put(`turnstile_code:${verifyCode}`, String(userId), { expirationTtl: config.TURNSTILE_VERIFY_TTL });
+    writtenKeys.push(`turnstile_code:${verifyCode}`);
+    if (pendingMsgId) {
+      const pendingKey = `pending_turnstile:${userId}`;
+      let pendingIds = [];
+      try {
+        const raw = await env.TOPIC_MAP.get(pendingKey);
+        if (raw) pendingIds = JSON.parse(raw);
+      } catch {
+      }
+      if (!Array.isArray(pendingIds)) pendingIds = [];
+      if (!pendingIds.includes(pendingMsgId)) {
+        pendingIds.push(pendingMsgId);
+        if (pendingIds.length > config.PENDING_MAX_MESSAGES) {
+          pendingIds = pendingIds.slice(pendingIds.length - config.PENDING_MAX_MESSAGES);
+        }
+        await env.TOPIC_MAP.put(pendingKey, JSON.stringify(pendingIds), { expirationTtl: config.TURNSTILE_VERIFY_TTL });
+        writtenKeys.push(pendingKey);
+      }
+    }
+    await env.TOPIC_MAP.put(`user_challenge:${userId}`, `turnstile:${verifyCode}`, { expirationTtl: config.TURNSTILE_VERIFY_TTL });
+    writtenKeys.push(`user_challenge:${userId}`);
+    logger.info("turnstile_verification_sent", { userId, verifyCode });
+    const verifyMsg = await tgCall2(env, "sendMessage", {
+      chat_id: userId,
+      text: VERIFY_COPY.turnstileChallenge,
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: VERIFY_COPY.buttonTurnstile, url: verifyUrl }
+        ]]
+      }
+    });
+    if (!verifyMsg.ok) {
+      throw new Error(`Turnstile \u9A8C\u8BC1\u6D88\u606F\u53D1\u9001\u5931\u8D25: ${verifyMsg.description || "\u672A\u77E5\u9519\u8BEF"}`);
+    }
+    if (verifyMsg.result?.message_id) {
+      await env.TOPIC_MAP.put(`turnstile_msg:${verifyCode}`, String(verifyMsg.result.message_id), { expirationTtl: config.TURNSTILE_VERIFY_TTL });
+      writtenKeys.push(`turnstile_msg:${verifyCode}`);
+    }
+  }
+  async function sendLocalQuizChallenge(userId, env, pendingMsgId, writtenKeys) {
+    const q = LOCAL_QUESTIONS[secureRandomInt2(0, LOCAL_QUESTIONS.length)];
+    const challenge = {
+      question: q.question,
+      correct: q.correct_answer,
+      options: shuffleArray2([...q.incorrect_answers, q.correct_answer])
+    };
+    const verifyId = secureRandomId2(config.VERIFY_ID_LENGTH);
+    const answerIndex = challenge.options.indexOf(challenge.correct);
+    const state = {
+      answerIndex,
+      options: challenge.options,
+      pending_ids: pendingMsgId ? [pendingMsgId] : [],
+      userId
+    };
+    await env.TOPIC_MAP.put(`chal:${verifyId}`, JSON.stringify(state), { expirationTtl: config.VERIFY_EXPIRE_SECONDS });
+    writtenKeys.push(`chal:${verifyId}`);
+    await env.TOPIC_MAP.put(`user_challenge:${userId}`, verifyId, { expirationTtl: config.VERIFY_EXPIRE_SECONDS });
+    writtenKeys.push(`user_challenge:${userId}`);
+    logger.info("verification_sent", {
+      userId,
+      verifyId,
+      question: q.question,
+      pendingCount: state.pending_ids.length
+    });
+    const buttons = challenge.options.map((opt, idx) => ({
+      text: opt,
+      callback_data: `verify:${verifyId}:${idx}`
+    }));
+    const keyboard = [];
+    for (let i = 0; i < buttons.length; i += config.BUTTON_COLUMNS) {
+      keyboard.push(buttons.slice(i, i + config.BUTTON_COLUMNS));
+    }
+    const quizMsg = await tgCall2(env, "sendMessage", {
+      chat_id: userId,
+      text: VERIFY_COPY.quizChallenge(escapeHtml(challenge.question)),
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: keyboard }
+    });
+    if (!quizMsg.ok) {
+      throw new Error(`\u672C\u5730\u9898\u5E93\u9A8C\u8BC1\u6D88\u606F\u53D1\u9001\u5931\u8D25: ${quizMsg.description || "\u672A\u77E5\u9519\u8BEF"}`);
+    }
+  }
+  async function handleCallbackQuery(query, env, ctx) {
+    try {
+      const data = query.data;
+      if (!data.startsWith("verify:")) return;
+      const parts = data.split(":");
+      if (parts.length !== 3) return;
+      const verifyId = parts[1];
+      const selectedIndex = parseInt(parts[2]);
+      const userId = query.from.id;
+      const stateStr = await env.TOPIC_MAP.get(`chal:${verifyId}`);
+      if (!stateStr) {
+        await tgCall2(env, "answerCallbackQuery", {
+          callback_query_id: query.id,
+          text: VERIFY_COPY.expired,
+          show_alert: true
+        });
+        return;
+      }
+      let state;
+      try {
+        state = JSON.parse(stateStr);
+      } catch (e) {
+        await tgCall2(env, "answerCallbackQuery", {
+          callback_query_id: query.id,
+          text: VERIFY_COPY.dataError,
+          show_alert: true
+        });
+        return;
+      }
+      if (state.userId && state.userId !== userId) {
+        await tgCall2(env, "answerCallbackQuery", {
+          callback_query_id: query.id,
+          text: VERIFY_COPY.invalidUser,
+          show_alert: true
+        });
+        return;
+      }
+      if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= state.options.length) {
+        await tgCall2(env, "answerCallbackQuery", {
+          callback_query_id: query.id,
+          text: VERIFY_COPY.invalidOption,
+          show_alert: true
+        });
+        return;
+      }
+      if (selectedIndex === state.answerIndex) {
+        await tgCall2(env, "answerCallbackQuery", {
+          callback_query_id: query.id,
+          text: VERIFY_COPY.successToast
+        });
+        logger.info("verification_passed", {
+          userId,
+          verifyId,
+          selectedOption: state.options[selectedIndex]
+        });
+        await bumpDailyStat2(env, "verifies", 1);
+        await ephemeralStore2(env).setVerification(userId, {
+          ttl: config.VERIFIED_EXPIRE_SECONDS,
+          verifiedAt: Date.now()
+        });
+        await env.TOPIC_MAP.delete(`needs_verify:${userId}`);
+        await env.TOPIC_MAP.delete(`chal:${verifyId}`);
+        await env.TOPIC_MAP.delete(`user_challenge:${userId}`);
+        const hasPending = Array.isArray(state.pending_ids) && state.pending_ids.length > 0 || !!state.pending;
+        await tgCall2(env, "editMessageText", {
+          chat_id: userId,
+          message_id: query.message.message_id,
+          text: hasPending ? VERIFY_COPY.successBodyWithPending : VERIFY_COPY.successBody,
+          parse_mode: "HTML"
+        });
+        if (hasPending) {
+          await forwardPendingMessages(state, userId, query, env, ctx);
+        }
+      } else {
+        logger.info("verification_failed", {
+          userId,
+          verifyId,
+          selectedIndex,
+          correctIndex: state.answerIndex
+        });
+        await tgCall2(env, "answerCallbackQuery", {
+          callback_query_id: query.id,
+          text: VERIFY_COPY.wrongAnswer,
+          show_alert: true
+        });
+        try {
+          const prev = String(query.message?.text || "");
+          if (prev && !prev.includes("\u56DE\u7B54\u4E0D\u6B63\u786E") && query.message?.message_id) {
+            const buttons = (state.options || []).map((opt, idx) => ({
+              text: opt,
+              callback_data: `verify:${verifyId}:${idx}`
+            }));
+            const keyboard = [];
+            for (let i = 0; i < buttons.length; i += config.BUTTON_COLUMNS) {
+              keyboard.push(buttons.slice(i, i + config.BUTTON_COLUMNS));
+            }
+            await tgCall2(env, "editMessageText", {
+              chat_id: userId,
+              message_id: query.message.message_id,
+              text: `${prev}${VERIFY_COPY.wrongAnswerHint}`,
+              parse_mode: "HTML",
+              reply_markup: { inline_keyboard: keyboard }
+            });
+          }
+        } catch {
+        }
+      }
+    } catch (e) {
+      logger.error("callback_query_error", e, {
+        userId: query.from?.id,
+        callbackData: query.data
+      });
+      await tgCall2(env, "answerCallbackQuery", {
+        callback_query_id: query.id,
+        text: VERIFY_COPY.systemError,
+        show_alert: true
+      });
+    }
+  }
+  async function forwardPendingMessageIds(userId, pendingIds, env, ctx, { from = null } = {}) {
+    const limited = (Array.isArray(pendingIds) ? pendingIds : []).filter(Boolean).slice(-config.PENDING_MAX_MESSAGES);
+    const CONCURRENT_FORWARDS = 3;
+    let forwardedCount = 0;
+    let skippedCount = 0;
+    for (let i = 0; i < limited.length; i += CONCURRENT_FORWARDS) {
+      const batch = limited.slice(i, i + CONCURRENT_FORWARDS);
+      const results = await Promise.allSettled(batch.map(async (pendingId) => {
+        const forwardedKey = `forwarded:${userId}:${pendingId}`;
+        const alreadyForwarded = await env.TOPIC_MAP.get(forwardedKey);
+        if (alreadyForwarded) {
+          logger.info("message_forward_duplicate_skipped", { userId, messageId: pendingId });
+          return { forwarded: false, reason: "already_forwarded" };
+        }
+        const topicFrom = await resolveUserFromForTopic2(env, userId, from);
+        const fakeMsg = {
+          message_id: pendingId,
+          chat: { id: Number(userId), type: "private" },
+          from: topicFrom
+        };
+        await forwardToTopic2(fakeMsg, userId, `user:${userId}`, env, ctx);
+        await env.TOPIC_MAP.put(forwardedKey, "1", { expirationTtl: 3600 });
+        return { forwarded: true };
+      }));
+      for (const r of results) {
+        if (r.status === "fulfilled" && r.value?.forwarded) {
+          forwardedCount++;
+        } else if (r.status === "fulfilled") {
+          skippedCount++;
+        } else if (r.status === "rejected") {
+          logger.warn("pending_forward_item_failed", { userId, error: r.reason?.message });
+        }
+      }
+    }
+    if (forwardedCount > 0) {
+      await tgCall2(env, "sendMessage", {
+        chat_id: Number(userId),
+        text: USER_COPY.pendingDelivered(forwardedCount),
+        parse_mode: "HTML"
+      });
+    }
+    return { forwardedCount, skippedCount };
+  }
+  async function forwardPendingMessages(state, userId, query, env, ctx) {
+    try {
+      let pendingIds = [];
+      if (Array.isArray(state.pending_ids)) {
+        pendingIds = state.pending_ids.slice();
+      } else if (state.pending) {
+        pendingIds = [state.pending];
+      }
+      await forwardPendingMessageIds(userId, pendingIds, env, ctx, { from: query?.from });
+    } catch (e) {
+      logger.error("pending_message_forward_failed", e, { userId });
+      await tgCall2(env, "sendMessage", {
+        chat_id: userId,
+        text: "\u26A0\uFE0F \u81EA\u52A8\u9001\u8FBE\u5931\u8D25\uFF0C\u8BF7\u91CD\u65B0\u53D1\u9001\u60A8\u7684\u6D88\u606F\u3002"
+      });
+    }
+  }
+  return {
+    verifyTurnstileToken,
+    sendVerificationChallenge,
+    handleCallbackQuery,
+    forwardPendingMessageIds
+  };
+}
+
+// src/media-group.js
+function createMediaGroupModule(deps) {
+  const {
+    config,
+    tgCall: tgCall2,
+    safeGetJSON: safeGetJSON2,
+    getAllKeys: getAllKeys2,
+    logger
+  } = deps;
+  async function handleMediaGroup(msg, env, ctx, { direction, targetChat, threadId }) {
+    const groupId = msg.media_group_id;
+    const key = `mg:${direction}:${groupId}`;
+    const item = extractMedia(msg);
+    if (!item) {
+      await tgCall2(env, "copyMessage", withMessageThreadId({
+        chat_id: targetChat,
+        from_chat_id: msg.chat.id,
+        message_id: msg.message_id
+      }, threadId));
+      return;
+    }
+    let rec = await safeGetJSON2(env, key, null);
+    if (!rec) rec = { direction, targetChat, threadId: threadId === null ? void 0 : threadId, items: [], last_ts: Date.now() };
+    rec.items.push({ ...item, msg_id: msg.message_id });
+    rec.last_ts = Date.now();
+    await env.TOPIC_MAP.put(key, JSON.stringify(rec), { expirationTtl: config.MEDIA_GROUP_EXPIRE_SECONDS });
+    ctx.waitUntil(delaySend(env, key, rec.last_ts));
+  }
+  function extractMedia(msg) {
+    if (msg.photo && msg.photo.length > 0) {
+      const highestResolution = msg.photo[msg.photo.length - 1];
+      return {
+        type: "photo",
+        id: highestResolution.file_id,
+        cap: msg.caption || ""
+      };
+    }
+    if (msg.video) {
+      return {
+        type: "video",
+        id: msg.video.file_id,
+        cap: msg.caption || ""
+      };
+    }
+    if (msg.document) {
+      return {
+        type: "document",
+        id: msg.document.file_id,
+        cap: msg.caption || ""
+      };
+    }
+    if (msg.audio) {
+      return {
+        type: "audio",
+        id: msg.audio.file_id,
+        cap: msg.caption || ""
+      };
+    }
+    if (msg.animation) {
+      return {
+        type: "animation",
+        id: msg.animation.file_id,
+        cap: msg.caption || ""
+      };
+    }
+    return null;
+  }
+  async function flushExpiredMediaGroups(env, now) {
+    try {
+      const prefix = "mg:";
+      const allKeys = await getAllKeys2(env, prefix, 20);
+      let deletedCount = 0;
+      for (const { name } of allKeys) {
+        const rec = await safeGetJSON2(env, name, null);
+        if (rec && rec.last_ts && now - rec.last_ts > config.MEDIA_GROUP_EXPIRE_SECONDS * 1e3) {
+          await env.TOPIC_MAP.delete(name);
+          deletedCount++;
+        }
+      }
+      if (deletedCount > 0) {
+        logger.info("media_groups_cleaned", { deletedCount });
+      }
+    } catch (e) {
+      logger.error("media_group_cleanup_failed", e);
+    }
+  }
+  async function delaySend(env, key, ts) {
+    await new Promise((r) => setTimeout(r, config.MEDIA_GROUP_DELAY_MS));
+    const rec = await safeGetJSON2(env, key, null);
+    if (rec && rec.last_ts === ts) {
+      if (!rec.items || rec.items.length === 0) {
+        logger.warn("media_group_empty", { key });
+        await env.TOPIC_MAP.delete(key);
+        return;
+      }
+      const media = rec.items.map((it, i) => {
+        if (!it.type || !it.id) {
+          logger.warn("media_group_invalid_item", { key, item: it });
+          return null;
+        }
+        const caption = i === 0 ? (it.cap || "").substring(0, 1024) : "";
+        return {
+          type: it.type,
+          media: it.id,
+          caption
+        };
+      }).filter(Boolean);
+      if (media.length > 0) {
+        try {
+          const result = await tgCall2(env, "sendMediaGroup", withMessageThreadId({
+            chat_id: rec.targetChat,
+            media
+          }, rec.threadId));
+          if (!result.ok) {
+            logger.error("media_group_send_failed", result.description, {
+              key,
+              mediaCount: media.length
+            });
+          } else {
+            logger.info("media_group_sent", {
+              key,
+              mediaCount: media.length,
+              targetChat: rec.targetChat
+            });
+          }
+        } catch (e) {
+          logger.error("media_group_send_exception", e, { key });
+        }
+      }
+      await env.TOPIC_MAP.delete(key);
+    }
+  }
+  return {
+    handleMediaGroup,
+    extractMedia,
+    flushExpiredMediaGroups
+  };
+}
+
+// src/daily-stats.js
+function emptyDailyStats(day) {
+  return {
+    day,
+    messages_in: 0,
+    bans: 0,
+    verifies: 0,
+    spam: 0,
+    hours: Array.from({ length: 24 }, () => 0)
+  };
+}
+async function bumpDailyStat(env, field, n = 1) {
+  if (!env?.TOPIC_MAP) return;
+  try {
+    const day = opsDayKey();
+    const key = `stats:${day}`;
+    let obj = {};
+    try {
+      const raw = await env.TOPIC_MAP.get(key);
+      if (raw) obj = JSON.parse(raw);
+    } catch {
+      obj = {};
+    }
+    if (!obj || typeof obj !== "object") obj = {};
+    obj[field] = Number(obj[field] || 0) + Number(n || 0);
+    obj.tz = `UTC+${OPS_TZ_OFFSET_HOURS}`;
+    if (field === "messages_in") {
+      if (!Array.isArray(obj.hours) || obj.hours.length !== 24) {
+        obj.hours = Array.from({ length: 24 }, () => 0);
+      }
+      const h = (/* @__PURE__ */ new Date()).getUTCHours();
+      obj.hours[h] = Number(obj.hours[h] || 0) + Number(n || 0);
+    }
+    obj.updated_at = Date.now();
+    await env.TOPIC_MAP.put(key, JSON.stringify(obj), { expirationTtl: 21 * 86400 });
+  } catch {
+  }
+}
+async function getDailyStats(env, day = opsDayKey()) {
+  try {
+    const raw = await env.TOPIC_MAP.get(`stats:${day}`);
+    if (!raw) return emptyDailyStats(day);
+    const obj = JSON.parse(raw);
+    const hours = Array.isArray(obj.hours) && obj.hours.length === 24 ? obj.hours.map((n) => Number(n || 0)) : Array.from({ length: 24 }, () => 0);
+    return {
+      day,
+      messages_in: Number(obj.messages_in || 0),
+      bans: Number(obj.bans || 0),
+      verifies: Number(obj.verifies || 0),
+      spam: Number(obj.spam || 0),
+      hours,
+      updated_at: obj.updated_at
+    };
+  } catch {
+    return emptyDailyStats(day);
+  }
+}
+async function getRecentDailySeries(env, days = 7) {
+  const n = Math.min(Math.max(Number(days) || 7, 1), 14);
+  const series = [];
+  const now = Date.now();
+  for (let i = n - 1; i >= 0; i -= 1) {
+    const day = opsDayKey(now - i * 864e5);
+    const s = await getDailyStats(env, day);
+    series.push({
+      day,
+      messages_in: s.messages_in,
+      verifies: s.verifies,
+      bans: s.bans,
+      spam: s.spam
+    });
+  }
+  return series;
+}
+
 // src/admin-commands.js
 function createAdminCommandHandlers(deps) {
   const {
@@ -2233,87 +3564,14 @@ function createAdminCommandHandlers(deps) {
     safeGetJSON: safeGetJSON2,
     resolveThreadIdForUser: resolveThreadIdForUser2,
     getRecentSystemErrors,
-    handleCleanupCommand: handleCleanupCommand2,
-    handleListWordsCommand: handleListWordsCommand2,
+    handleCleanupCommand,
+    handleListWordsCommand,
     // 存储依赖注入：由调用方提供，避免本模块直连 D1/migrations
     createD1Storage: createD1Storage2,
     ensureMigrations: ensureMigrations2,
     userActions = {}
   } = deps;
   const sysinfoKvCache = { ts: 0, data: null, ttlMs: 45e3 };
-  function emptyDailyStats(day) {
-    return {
-      day,
-      messages_in: 0,
-      bans: 0,
-      verifies: 0,
-      spam: 0,
-      hours: Array.from({ length: 24 }, () => 0)
-    };
-  }
-  async function bumpDailyStat2(env, field, n = 1) {
-    if (!env?.TOPIC_MAP) return;
-    try {
-      const day = opsDayKey();
-      const key = `stats:${day}`;
-      let obj = {};
-      try {
-        const raw = await env.TOPIC_MAP.get(key);
-        if (raw) obj = JSON.parse(raw);
-      } catch {
-        obj = {};
-      }
-      if (!obj || typeof obj !== "object") obj = {};
-      obj[field] = Number(obj[field] || 0) + Number(n || 0);
-      obj.tz = `UTC+${OPS_TZ_OFFSET_HOURS}`;
-      if (field === "messages_in") {
-        if (!Array.isArray(obj.hours) || obj.hours.length !== 24) {
-          obj.hours = Array.from({ length: 24 }, () => 0);
-        }
-        const h = (/* @__PURE__ */ new Date()).getUTCHours();
-        obj.hours[h] = Number(obj.hours[h] || 0) + Number(n || 0);
-      }
-      obj.updated_at = Date.now();
-      await env.TOPIC_MAP.put(key, JSON.stringify(obj), { expirationTtl: 21 * 86400 });
-    } catch {
-    }
-  }
-  async function getDailyStats(env, day = opsDayKey()) {
-    try {
-      const raw = await env.TOPIC_MAP.get(`stats:${day}`);
-      if (!raw) return emptyDailyStats(day);
-      const obj = JSON.parse(raw);
-      const hours = Array.isArray(obj.hours) && obj.hours.length === 24 ? obj.hours.map((n) => Number(n || 0)) : Array.from({ length: 24 }, () => 0);
-      return {
-        day,
-        messages_in: Number(obj.messages_in || 0),
-        bans: Number(obj.bans || 0),
-        verifies: Number(obj.verifies || 0),
-        spam: Number(obj.spam || 0),
-        hours,
-        updated_at: obj.updated_at
-      };
-    } catch {
-      return emptyDailyStats(day);
-    }
-  }
-  async function getRecentDailySeries(env, days = 7) {
-    const n = Math.min(Math.max(Number(days) || 7, 1), 14);
-    const series = [];
-    const now = Date.now();
-    for (let i = n - 1; i >= 0; i -= 1) {
-      const day = opsDayKey(now - i * 864e5);
-      const s = await getDailyStats(env, day);
-      series.push({
-        day,
-        messages_in: s.messages_in,
-        verifies: s.verifies,
-        bans: s.bans,
-        spam: s.spam
-      });
-    }
-    return series;
-  }
   async function loadTodayActivity(env) {
     const dayStart = opsDayStartMs();
     const day = opsDayKey();
@@ -2388,7 +3646,7 @@ function createAdminCommandHandlers(deps) {
       source
     };
   }
-  async function handleHelpCommand2(env, threadId, senderId = null) {
+  async function handleHelpCommand(env, threadId, senderId = null) {
     const helpText = `\u{1F4CB} <b>\u7BA1\u7406\u5E2E\u52A9</b> \xB7 v${GATEWAY_VERSION2}
 
 <b>\u6743\u9650</b>
@@ -2418,7 +3676,7 @@ function createAdminCommandHandlers(deps) {
       reply_markup: buildAdminHomeKeyboard(isOwnerUser2(env, senderId))
     });
   }
-  async function handleMenuCommand2(env, threadId, senderId) {
+  async function handleMenuCommand(env, threadId, senderId) {
     const text = [
       `\u{1F3E0} <b>\u7BA1\u7406\u83DC\u5355</b> \xB7 v${GATEWAY_VERSION2}`,
       "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
@@ -2700,7 +3958,7 @@ function createAdminCommandHandlers(deps) {
 \u2026`;
     return { text, activity };
   }
-  async function handleSysinfoCommand2(env, threadId, opts = {}) {
+  async function handleSysinfoCommand(env, threadId, opts = {}) {
     const page = opts.page || "overview";
     const { text, activity } = await buildSysinfoPageText(env, page);
     let markup = buildSysinfoKeyboard(page);
@@ -2753,13 +4011,13 @@ function createAdminCommandHandlers(deps) {
       reply_markup: markup
     });
   }
-  async function handleStatsCommand2(env, threadId) {
-    await handleSysinfoCommand2(env, threadId, { page: "stats" });
+  async function handleStatsCommand(env, threadId) {
+    await handleSysinfoCommand(env, threadId, { page: "stats" });
   }
-  async function handleRankCommand2(env, threadId, opts = {}) {
-    await handleSysinfoCommand2(env, threadId, { page: "activity", edit: opts.edit || null });
+  async function handleRankCommand(env, threadId, opts = {}) {
+    await handleSysinfoCommand(env, threadId, { page: "activity", edit: opts.edit || null });
   }
-  async function handleNotesCommand2(env, threadId, queryText = "") {
+  async function handleNotesCommand(env, threadId, queryText = "") {
     const q = String(queryText || "").replace(/^\/notes(@\w+)?\s*/i, "").trim();
     if (!env.TOPIC_MAP?.list) {
       await tgCall2(env, "sendMessage", {
@@ -2848,7 +4106,7 @@ function createAdminCommandHandlers(deps) {
       reply_markup: buildUserJumpKeyboard(jumpUsers)
     });
   }
-  async function handleWhoamiCommand2(env, threadId, senderId) {
+  async function handleWhoamiCommand(env, threadId, senderId) {
     const admin = await isAdminUser2(env, senderId);
     const owner = isOwnerUser2(env, senderId);
     let member = "unknown";
@@ -2886,7 +4144,7 @@ function createAdminCommandHandlers(deps) {
       reply_markup: buildAdminHomeKeyboard(owner)
     });
   }
-  async function handleFindCommand2(env, threadId, queryText) {
+  async function handleFindCommand(env, threadId, queryText) {
     const q = queryText.replace(/^\/find(@\w+)?\s*/i, "").trim();
     if (!q) {
       await tgCall2(env, "sendMessage", {
@@ -2950,7 +4208,7 @@ function createAdminCommandHandlers(deps) {
       });
     }
   }
-  async function handleSyncCommandsCommand2(env, threadId, senderId) {
+  async function handleSyncCommandsCommand(env, threadId, senderId) {
     if (!isOwnerUser2(env, senderId)) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
@@ -2993,7 +4251,7 @@ function createAdminCommandHandlers(deps) {
       parse_mode: "HTML"
     });
   }
-  async function handleAdminUiCallback2(query, env, ctx) {
+  async function handleAdminUiCallback(query, env, ctx) {
     const data = String(query.data || "");
     const senderId = query.from?.id;
     try {
@@ -3012,7 +4270,7 @@ function createAdminCommandHandlers(deps) {
       if (parts[0] === "adm" && parts[1] === "sys") {
         const page = parts[2] || "overview";
         await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5DF2\u66F4\u65B0" });
-        await handleSysinfoCommand2(env, threadId, {
+        await handleSysinfoCommand(env, threadId, {
           page: ["overview", "storage", "errors", "stats", "activity"].includes(page) ? page : "overview",
           edit: chatId && messageId ? { chatId, messageId } : null
         });
@@ -3033,9 +4291,9 @@ function createAdminCommandHandlers(deps) {
         }
         if (nav === "cleanup_ok") {
           await tgCall2(env, "answerCallbackQuery", { callback_query_id: query.id, text: "\u5F00\u59CB\u6E05\u7406" });
-          if (handleCleanupCommand2) {
-            if (ctx?.waitUntil) ctx.waitUntil(handleCleanupCommand2(threadId, env));
-            else await handleCleanupCommand2(threadId, env);
+          if (handleCleanupCommand) {
+            if (ctx?.waitUntil) ctx.waitUntil(handleCleanupCommand(threadId, env));
+            else await handleCleanupCommand(threadId, env);
           }
           return;
         }
@@ -3051,11 +4309,11 @@ function createAdminCommandHandlers(deps) {
           return;
         }
         const navHandlers = {
-          sysinfo: () => handleSysinfoCommand2(env, threadId, { page: "overview" }),
-          stats: () => handleStatsCommand2(env, threadId),
-          rank: () => handleRankCommand2(env, threadId),
-          activity: () => handleRankCommand2(env, threadId),
-          notes: () => handleNotesCommand2(env, threadId, "/notes"),
+          sysinfo: () => handleSysinfoCommand(env, threadId, { page: "overview" }),
+          stats: () => handleStatsCommand(env, threadId),
+          rank: () => handleRankCommand(env, threadId),
+          activity: () => handleRankCommand(env, threadId),
+          notes: () => handleNotesCommand(env, threadId, "/notes"),
           find: async () => {
             await tgCall2(env, "sendMessage", {
               chat_id: env.SUPERGROUP_ID,
@@ -3076,10 +4334,10 @@ function createAdminCommandHandlers(deps) {
               }
             });
           },
-          whoami: () => handleWhoamiCommand2(env, threadId, senderId),
+          whoami: () => handleWhoamiCommand(env, threadId, senderId),
           listwords: () => {
-            if (typeof handleListWordsCommand2 === "function") {
-              return handleListWordsCommand2(env, threadId);
+            if (typeof handleListWordsCommand === "function") {
+              return handleListWordsCommand(env, threadId);
             }
             return tgCall2(env, "sendMessage", {
               chat_id: env.SUPERGROUP_ID,
@@ -3088,9 +4346,9 @@ function createAdminCommandHandlers(deps) {
               parse_mode: "HTML"
             });
           },
-          help: () => handleHelpCommand2(env, threadId, senderId),
-          menu: () => handleMenuCommand2(env, threadId, senderId),
-          synccommands: () => handleSyncCommandsCommand2(env, threadId, senderId)
+          help: () => handleHelpCommand(env, threadId, senderId),
+          menu: () => handleMenuCommand(env, threadId, senderId),
+          synccommands: () => handleSyncCommandsCommand(env, threadId, senderId)
         };
         const navFn = navHandlers[nav];
         if (!navFn) {
@@ -3255,108 +4513,22 @@ function createAdminCommandHandlers(deps) {
     }
   }
   return {
-    bumpDailyStat: bumpDailyStat2,
+    bumpDailyStat,
     getDailyStats,
     getRecentDailySeries,
     loadTodayActivity,
-    handleHelpCommand: handleHelpCommand2,
-    handleMenuCommand: handleMenuCommand2,
-    handleSysinfoCommand: handleSysinfoCommand2,
-    handleStatsCommand: handleStatsCommand2,
-    handleRankCommand: handleRankCommand2,
-    handleNotesCommand: handleNotesCommand2,
-    handleWhoamiCommand: handleWhoamiCommand2,
-    handleFindCommand: handleFindCommand2,
-    handleSyncCommandsCommand: handleSyncCommandsCommand2,
-    handleAdminUiCallback: handleAdminUiCallback2
+    handleHelpCommand,
+    handleMenuCommand,
+    handleSysinfoCommand,
+    handleStatsCommand,
+    handleRankCommand,
+    handleNotesCommand,
+    handleWhoamiCommand,
+    handleFindCommand,
+    handleSyncCommandsCommand,
+    handleAdminUiCallback
   };
 }
-
-// src/verify-copy.js
-var VERIFY_COPY = {
-  /** Turnstile 私聊提示 */
-  turnstileChallenge: "\u{1F6E1} <b>\u4EBA\u673A\u9A8C\u8BC1</b>\n\n\u8BF7\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u5B8C\u6210\u9A8C\u8BC1\u3002\n\u901A\u8FC7\u540E\u60A8\u521A\u624D\u7684\u6D88\u606F\u4F1A\u81EA\u52A8\u9001\u8FBE\u7BA1\u7406\u5458\u3002",
-  /** 本地题库提示 */
-  quizChallenge(question) {
-    return `\u{1F6E1} <b>\u4EBA\u673A\u9A8C\u8BC1</b>
-
-${question}
-
-\u8BF7\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u4F5C\u7B54\uFF1B\u7B54\u5BF9\u540E\u6D88\u606F\u4F1A\u81EA\u52A8\u9001\u8FBE\u3002`;
-  },
-  buttonTurnstile: "\u{1F510} \u70B9\u51FB\u9A8C\u8BC1",
-  /** callback toast / alert */
-  expired: "\u274C \u9A8C\u8BC1\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u53D1\u4E00\u6761\u6D88\u606F",
-  dataError: "\u274C \u9A8C\u8BC1\u6570\u636E\u5F02\u5E38\uFF0C\u8BF7\u91CD\u65B0\u53D1\u6D88\u606F",
-  invalidUser: "\u274C \u9A8C\u8BC1\u65E0\u6548\uFF0C\u8BF7\u91CD\u65B0\u53D1\u6D88\u606F",
-  invalidOption: "\u274C \u65E0\u6548\u9009\u9879",
-  wrongAnswer: "\u274C \u56DE\u7B54\u9519\u8BEF\uFF0C\u8BF7\u518D\u8BD5\u4E00\u6B21",
-  successToast: "\u2705 \u9A8C\u8BC1\u901A\u8FC7",
-  systemError: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5",
-  /** 编辑/私聊成功正文 */
-  successBody: "\u2705 <b>\u9A8C\u8BC1\u6210\u529F</b>\n\n\u60A8\u73B0\u5728\u53EF\u4EE5\u6B63\u5E38\u5BF9\u8BDD\u4E86\u3002\u76F4\u63A5\u53D1\u6D88\u606F\u5373\u53EF\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
-  successBodyWithPending: "\u2705 <b>\u9A8C\u8BC1\u6210\u529F</b>\n\n\u6B63\u5728\u4E3A\u60A8\u9001\u8FBE\u521A\u624D\u7684\u6D88\u606F\uFF0C\u8BF7\u7A0D\u5019\u2026",
-  /** 答错时在题目下追加的提示（编辑消息用） */
-  wrongAnswerHint: "\n\n\u26A0\uFE0F \u56DE\u7B54\u4E0D\u6B63\u786E\uFF0C\u8BF7\u518D\u9009\u4E00\u6B21\u3002\u94FE\u63A5\u672A\u8FC7\u671F\u524D\u53EF\u7EE7\u7EED\u5C1D\u8BD5\u3002"
-};
-
-// src/user-copy.js
-var USER_COPY = {
-  rateLimited: "\u26A0\uFE0F \u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
-  systemBusy: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
-  bannedHourly: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
-  mutedHourly: "\u{1F507} \u60A8\u5F53\u524D\u5904\u4E8E\u9759\u97F3\u72B6\u6001\uFF0C\u6D88\u606F\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u53D6\u6D88\u9759\u97F3\u3002",
-  blockedWord: "\u{1F6AB} \u60A8\u7684\u6D88\u606F\u5305\u542B\u8FDD\u89C4\u5185\u5BB9\uFF0C\u5DF2\u88AB\u62E6\u622A\u3002\u8BF7\u4FEE\u6539\u540E\u91CD\u65B0\u53D1\u9001\u3002",
-  conversationClosed: "\u{1F6AB} \u5F53\u524D\u5BF9\u8BDD\u5DF2\u88AB\u7BA1\u7406\u5458\u5173\u95ED\u3002\u5982\u9700\u7EE7\u7EED\uFF0C\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u91CD\u65B0\u6253\u5F00\u3002",
-  pendingDelivered(count) {
-    return `\u{1F4E9} \u521A\u624D\u7684 <b>${count}</b> \u6761\u6D88\u606F\u5DF2\u5E2E\u60A8\u9001\u8FBE\u7BA1\u7406\u5458\u3002`;
-  },
-  muteUserNotify: "\u{1F507} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u9759\u97F3\uFF0C\u6D88\u606F\u6682\u65F6\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002",
-  unmuteUserNotify: "\u{1F50A} \u60A8\u7684\u9759\u97F3\u5DF2\u53D6\u6D88\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
-  banUserNotify: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
-  unbanUserNotify: "\u2705 \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u89E3\u5C01\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u4E86\u3002"
-};
-var ADMIN_COPY = {
-  spamIntercepted(userId, reasonText) {
-    return [
-      "\u26A0\uFE0F <b>\u68C0\u6D4B\u5230\u7591\u4F3C\u9A9A\u6270\u6D88\u606F</b>",
-      "",
-      `\u{1F464} \u7528\u6237: <code>${userId}</code>`,
-      reasonText,
-      "",
-      "\u{1F4DD} \u6D88\u606F\u5DF2\u62E6\u622A\u3002\u53EF\u5728\u7528\u6237\u8BDD\u9898\u5185\u4F7F\u7528\u9762\u677F <b>\u5C01\u7981</b>\u3002"
-    ].join("\n");
-  },
-  forwardTotalFail(userId, threadId, fwdDesc, copyDesc) {
-    return [
-      "\u26A0\uFE0F <b>\u6D88\u606F\u8F6C\u53D1\u5B8C\u5168\u5931\u8D25</b>",
-      "",
-      `\u{1F464} \u7528\u6237: <code>${userId}</code>`,
-      `\u{1F4DD} \u8BDD\u9898: <code>${threadId}</code>`,
-      `\u274C forwardMessage: <code>${fwdDesc || "unknown"}</code>`,
-      `\u274C copyMessage: <code>${copyDesc || "unknown"}</code>`
-    ].join("\n");
-  },
-  wordUsageAdd: "\u26A0\uFE0F \u7528\u6CD5: <code>/addword \u5C4F\u853D\u8BCD</code>",
-  wordUsageDel: "\u26A0\uFE0F \u7528\u6CD5: <code>/delword \u5C4F\u853D\u8BCD</code>",
-  wordExists(word) {
-    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u5DF2\u5B58\u5728\u3002`;
-  },
-  wordAdded(word, count) {
-    return `\u2705 \u5DF2\u6DFB\u52A0\u5C4F\u853D\u8BCD\u300C${word}\u300D
-\u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 <b>${count}</b> \u4E2A\u8BCD`;
-  },
-  wordHardcoded(word) {
-    return `\u26A0\uFE0F\u300C${word}\u300D\u662F\u786C\u7F16\u7801\u5C4F\u853D\u8BCD\uFF0C\u65E0\u6CD5\u901A\u8FC7\u547D\u4EE4\u5220\u9664\uFF0C\u8BF7\u76F4\u63A5\u4FEE\u6539\u4EE3\u7801\u4E2D\u7684 BLOCKED_WORDS\u3002`;
-  },
-  wordMissing(word) {
-    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u4E0D\u5B58\u5728\u4E8E\u52A8\u6001\u8BCD\u5E93\u4E2D\u3002`;
-  },
-  wordDeleted(word, count) {
-    return `\u2705 \u5DF2\u5220\u9664\u5C4F\u853D\u8BCD\u300C${word}\u300D
-\u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 <b>${count}</b> \u4E2A\u8BCD`;
-  }
-};
 
 // worker.js
 var CONFIG = {
@@ -3419,63 +4591,6 @@ function setBoundedCache(cache, key, value, maxEntries) {
   cache.set(key, value);
   if (cache.size > maxEntries) cache.delete(cache.keys().next().value);
 }
-var LOCAL_QUESTIONS = [
-  { "question": "\u51B0\u878D\u5316\u540E\u4F1A\u53D8\u6210\u4EC0\u4E48\uFF1F", "correct_answer": "\u6C34", "incorrect_answers": ["\u77F3\u5934", "\u6728\u5934", "\u706B"] },
-  { "question": "\u6B63\u5E38\u4EBA\u6709\u51E0\u53EA\u773C\u775B\uFF1F", "correct_answer": "2", "incorrect_answers": ["1", "3", "4"] },
-  { "question": "\u4EE5\u4E0B\u54EA\u4E2A\u5C5E\u4E8E\u6C34\u679C\uFF1F", "correct_answer": "\u9999\u8549", "incorrect_answers": ["\u767D\u83DC", "\u732A\u8089", "\u5927\u7C73"] },
-  { "question": "1 \u52A0 2 \u7B49\u4E8E\u51E0\uFF1F", "correct_answer": "3", "incorrect_answers": ["2", "4", "5"] },
-  { "question": "5 \u51CF 2 \u7B49\u4E8E\u51E0\uFF1F", "correct_answer": "3", "incorrect_answers": ["1", "2", "4"] },
-  { "question": "2 \u4E58\u4EE5 3 \u7B49\u4E8E\u51E0\uFF1F", "correct_answer": "6", "incorrect_answers": ["4", "5", "7"] },
-  { "question": "10 \u52A0 5 \u7B49\u4E8E\u51E0\uFF1F", "correct_answer": "15", "incorrect_answers": ["10", "12", "20"] },
-  { "question": "8 \u51CF 4 \u7B49\u4E8E\u51E0\uFF1F", "correct_answer": "4", "incorrect_answers": ["2", "3", "5"] },
-  { "question": "\u5728\u5929\u4E0A\u98DE\u7684\u4EA4\u901A\u5DE5\u5177\u662F\u4EC0\u4E48\uFF1F", "correct_answer": "\u98DE\u673A", "incorrect_answers": ["\u6C7D\u8F66", "\u8F6E\u8239", "\u81EA\u884C\u8F66"] },
-  { "question": "\u661F\u671F\u4E00\u7684\u540E\u9762\u662F\u661F\u671F\u51E0\uFF1F", "correct_answer": "\u661F\u671F\u4E8C", "incorrect_answers": ["\u661F\u671F\u65E5", "\u661F\u671F\u4E94", "\u661F\u671F\u4E09"] },
-  { "question": "\u9C7C\u901A\u5E38\u751F\u6D3B\u5728\u54EA\u91CC\uFF1F", "correct_answer": "\u6C34\u91CC", "incorrect_answers": ["\u6811\u4E0A", "\u571F\u91CC", "\u706B\u91CC"] },
-  { "question": "\u6211\u4EEC\u7528\u4EC0\u4E48\u5668\u5B98\u6765\u542C\u58F0\u97F3\uFF1F", "correct_answer": "\u8033\u6735", "incorrect_answers": ["\u773C\u775B", "\u9F3B\u5B50", "\u5634\u5DF4"] },
-  { "question": "\u6674\u6717\u7684\u5929\u7A7A\u901A\u5E38\u662F\u4EC0\u4E48\u989C\u8272\u7684\uFF1F", "correct_answer": "\u84DD\u8272", "incorrect_answers": ["\u7EFF\u8272", "\u7EA2\u8272", "\u7D2B\u8272"] },
-  { "question": "\u592A\u9633\u4ECE\u54EA\u4E2A\u65B9\u5411\u5347\u8D77\uFF1F", "correct_answer": "\u4E1C\u65B9", "incorrect_answers": ["\u897F\u65B9", "\u5357\u65B9", "\u5317\u65B9"] },
-  { "question": "\u5C0F\u72D7\u53D1\u51FA\u7684\u53EB\u58F0\u901A\u5E38\u662F\uFF1F", "correct_answer": "\u6C6A\u6C6A", "incorrect_answers": ["\u55B5\u55B5", "\u54A9\u54A9", "\u5471\u5471"] }
-];
-var BLOCKED_WORDS = [
-  "\u8D4C\u535A",
-  "\u8272\u60C5",
-  "\u4EE3\u5F00\u53D1",
-  "\u52A0\u5FAE\u4FE1"
-  // ↑ 在此添加更多屏蔽词，每行一个，用引号包裹、逗号结尾
-];
-var blockedWordsCache = { data: null, ts: 0, ttl: 6e4 };
-async function getBlockedWords(env, forceRefresh = false) {
-  const now = Date.now();
-  if (!forceRefresh && blockedWordsCache.data && now - blockedWordsCache.ts < blockedWordsCache.ttl) {
-    return blockedWordsCache.data;
-  }
-  let kvWords = [];
-  try {
-    const raw = await env.TOPIC_MAP.get("blocked_words_kv");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        kvWords = parsed.filter((w) => typeof w === "string" && w.trim().length > 0);
-      }
-    }
-  } catch (e) {
-    Logger.warn("blocked_words_kv_parse_error", { error: e.message });
-  }
-  const merged = [.../* @__PURE__ */ new Set([...BLOCKED_WORDS, ...kvWords])];
-  blockedWordsCache.data = merged;
-  blockedWordsCache.ts = now;
-  return merged;
-}
-async function readKvBlockedWords(env) {
-  let kvWords = [];
-  try {
-    const raw = await env.TOPIC_MAP.get("blocked_words_kv");
-    if (raw) kvWords = JSON.parse(raw);
-  } catch {
-  }
-  if (!Array.isArray(kvWords)) kvWords = [];
-  return kvWords;
-}
 var Logger = createLogger({}, console, {
   onError: (action, error, data = {}) => {
     try {
@@ -3517,6 +4632,60 @@ function recordSystemError(action, error, data = {}, env = null) {
     });
   }
 }
+var adminActions = createAdminActions({
+  tgCall,
+  safeGetJSON,
+  escapeHtml,
+  buildUserActionKeyboard,
+  createD1Storage,
+  setPersistentTrust,
+  getVerificationState,
+  resolveUserFromForTopic,
+  buildTopicTitle,
+  bumpDailyStat,
+  probeForumThread,
+  config: CONFIG,
+  logger: Logger,
+  recordSystemError
+});
+var verificationModule = createVerificationModule({
+  config: CONFIG,
+  tgCall,
+  safeGetJSON,
+  ephemeralStore,
+  checkRateLimit,
+  bumpDailyStat,
+  resolveUserFromForTopic,
+  forwardToTopic,
+  saveUserProfileSnapshot,
+  shuffleArray,
+  secureRandomInt,
+  secureRandomId,
+  logger: Logger
+});
+var mediaGroup = createMediaGroupModule({
+  config: CONFIG,
+  tgCall,
+  safeGetJSON,
+  getAllKeys,
+  logger: Logger
+});
+var adminHandlers = createAdminCommandHandlers({
+  tgCall,
+  gatewayVersion: GATEWAY_VERSION,
+  recordSystemError,
+  isOwnerUser,
+  isAdminUser,
+  parseIdAllowlist,
+  safeGetJSON,
+  resolveThreadIdForUser,
+  getRecentSystemErrors: () => recentSystemErrors,
+  handleCleanupCommand: adminActions.cleanup,
+  handleListWordsCommand: adminActions.listWords,
+  createD1Storage,
+  ensureMigrations,
+  userActions: adminActions
+});
 function ephemeralStore(env) {
   return createEphemeralStore(env.TOPIC_MAP);
 }
@@ -3890,7 +5059,7 @@ async function resetUserVerificationAndRequireReverify(env, { userId, userKey, o
     pendingMsgId,
     reason
   });
-  await sendVerificationChallenge(userId, env, pendingMsgId || null);
+  await verificationModule.sendVerificationChallenge(userId, env, pendingMsgId || null);
 }
 function parseAdminIdAllowlist(env) {
   const set = parseIdAllowlistSet(env.ADMIN_IDS);
@@ -3949,26 +5118,6 @@ function shuffleArray(arr) {
 }
 async function checkRateLimit(userId, env, action = "message", limit = 20, window = 60) {
   return ephemeralStore(env).checkRateLimit(userId, action, limit, window);
-}
-async function verifyTurnstileToken(token, secretKey, remoteIp) {
-  const formData = new URLSearchParams();
-  formData.append("secret", secretKey);
-  formData.append("response", token);
-  if (remoteIp) {
-    formData.append("remoteip", remoteIp);
-  }
-  try {
-    const resp = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: formData.toString()
-    });
-    const result = await resp.json();
-    return { success: result.success === true, error: result["error-codes"]?.join(", ") };
-  } catch (e) {
-    Logger.error("turnstile_verify_error", e);
-    return { success: false, error: e.message };
-  }
 }
 function getSpamKeywords(env) {
   if (spamKeywordsCache) return spamKeywordsCache;
@@ -4288,7 +5437,7 @@ var legacyApp = {
             headers: { "Content-Type": "application/json" }
           });
         }
-        const verifyResult = await verifyTurnstileToken(token, turnstileSecret);
+        const verifyResult = await verificationModule.verifyTurnstileToken(token, turnstileSecret);
         if (!verifyResult.success) {
           Logger.warn("turnstile_token_invalid", { userId, error: verifyResult.error });
           return new Response(JSON.stringify({ success: false, error: "turnstile_failed", detail: verifyResult.error }), {
@@ -4341,7 +5490,7 @@ var legacyApp = {
               const limited = pendingIds.slice(-CONFIG.PENDING_MAX_MESSAGES);
               ctx.waitUntil((async () => {
                 try {
-                  await forwardPendingMessageIds(userId, limited, normalizedEnv, ctx, { from: null });
+                  await verificationModule.forwardPendingMessageIds(userId, limited, normalizedEnv, ctx, { from: null });
                 } catch (e) {
                   Logger.error("pending_turnstile_forward_failed", e, { userId });
                 }
@@ -4381,18 +5530,18 @@ var legacyApp = {
     if (update.callback_query) {
       const cbData = String(update.callback_query.data || "");
       if (cbData.startsWith("adm:")) {
-        await handleAdminUiCallback(update.callback_query, normalizedEnv, ctx);
+        await adminHandlers.handleAdminUiCallback(update.callback_query, normalizedEnv, ctx);
       } else if (cbData.startsWith("v1:")) {
         await createLegacyAdminService(normalizedEnv).handleCallbackQuery(update.callback_query);
       } else {
-        await handleCallbackQuery(update.callback_query, normalizedEnv, ctx);
+        await verificationModule.handleCallbackQuery(update.callback_query, normalizedEnv, ctx);
       }
       return new Response("OK");
     }
     const msg = update.message;
     if (!msg) return new Response("OK");
     const now = Date.now();
-    ctx.waitUntil(flushExpiredMediaGroups(normalizedEnv, now));
+    ctx.waitUntil(mediaGroup.flushExpiredMediaGroups(normalizedEnv, now));
     if (Math.random() < 0.01) {
       pruneMessageHashCache(now);
     }
@@ -4540,7 +5689,7 @@ async function handlePrivateMessage(msg, env, ctx) {
   if (policyResult.action === "require_verification") {
     const isStart = msg.text && msg.text.trim() === "/start";
     const pendingMsgId = isStart ? null : msg.message_id;
-    await sendVerificationChallenge(userId, env, pendingMsgId, msg.from);
+    await verificationModule.sendVerificationChallenge(userId, env, pendingMsgId, msg.from);
     return;
   }
   if (policyResult.autoReply) {
@@ -4558,7 +5707,7 @@ async function handlePrivateMessage(msg, env, ctx) {
 async function forwardToTopic(msg, userId, key, env, ctx) {
   const needsVerify = await env.TOPIC_MAP.get(`needs_verify:${userId}`);
   if (needsVerify) {
-    await sendVerificationChallenge(userId, env, msg.message_id || null, msg.from);
+    await verificationModule.sendVerificationChallenge(userId, env, msg.message_id || null, msg.from);
     return;
   }
   let rec = await safeGetJSON(env, key, null);
@@ -4617,7 +5766,7 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
     }
   }
   if (msg.media_group_id) {
-    await handleMediaGroup(msg, env, ctx, {
+    await mediaGroup.handleMediaGroup(msg, env, ctx, {
       direction: "p2t",
       targetChat: env.SUPERGROUP_ID,
       threadId: rec.thread_id
@@ -4786,72 +5935,6 @@ async function handleAdminReply(msg, env, ctx) {
 function isOwnerUser(env, userId) {
   return idAllowlistHas(env.OWNER_IDS, userId);
 }
-var _adminHandlersCache = null;
-function getAdminHandlers() {
-  if (_adminHandlersCache) return _adminHandlersCache;
-  _adminHandlersCache = createAdminCommandHandlers({
-    tgCall,
-    gatewayVersion: GATEWAY_VERSION,
-    recordSystemError,
-    isOwnerUser,
-    isAdminUser,
-    parseIdAllowlist,
-    safeGetJSON,
-    resolveThreadIdForUser,
-    getRecentSystemErrors: () => recentSystemErrors,
-    handleCleanupCommand,
-    handleListWordsCommand,
-    createD1Storage,
-    ensureMigrations,
-    userActions: {
-      ban: handleBanCommand,
-      unban: handleUnbanCommand,
-      close: handleCloseCommand,
-      open: handleOpenCommand,
-      trust: handleTrustCommand,
-      reset: handleResetCommand,
-      mute: handleMuteCommand,
-      unmute: handleUnmuteCommand,
-      info: handleInfoCommand,
-      panel: handlePanelCommand,
-      note: handleNoteCommand
-    }
-  });
-  return _adminHandlersCache;
-}
-function bumpDailyStat(env, field, n = 1) {
-  return getAdminHandlers().bumpDailyStat(env, field, n);
-}
-function handleHelpCommand(env, threadId, senderId = null) {
-  return getAdminHandlers().handleHelpCommand(env, threadId, senderId);
-}
-function handleMenuCommand(env, threadId, senderId) {
-  return getAdminHandlers().handleMenuCommand(env, threadId, senderId);
-}
-function handleSysinfoCommand(env, threadId, opts = {}) {
-  return getAdminHandlers().handleSysinfoCommand(env, threadId, opts);
-}
-function handleStatsCommand(env, threadId) {
-  return getAdminHandlers().handleStatsCommand(env, threadId);
-}
-function handleRankCommand(env, threadId, opts = {}) {
-  return getAdminHandlers().handleRankCommand(env, threadId, opts);
-}
-function handleNotesCommand(env, threadId, queryText = "") {
-  return getAdminHandlers().handleNotesCommand(env, threadId, queryText);
-}
-function handleWhoamiCommand(env, threadId, senderId) {
-  return getAdminHandlers().handleWhoamiCommand(env, threadId, senderId);
-}
-function handleFindCommand(env, threadId, queryText) {
-  return getAdminHandlers().handleFindCommand(env, threadId, queryText);
-}
-function handleSyncCommandsCommand(env, threadId, senderId) {
-  return getAdminHandlers().handleSyncCommandsCommand(env, threadId, senderId);
-}
-function handleAdminUiCallback(query, env, ctx) {
-  return getAdminHandlers().handleAdminUiCallback(query, env, ctx);
-}
 async function resolveThreadIdForUser(env, userId) {
   const rec = await safeGetJSON(env, `user:${userId}`, null);
   if (rec?.thread_id) return rec.thread_id;
@@ -4863,425 +5946,6 @@ async function resolveThreadIdForUser(env, userId) {
     }
   }
   return null;
-}
-async function handlePanelCommand(env, threadId, userId) {
-  const from = await resolveUserFromForTopic(env, userId, null);
-  const name = escapeHtml([from.first_name, from.last_name].filter(Boolean).join(" ").trim() || "\u672A\u77E5");
-  const un = from.username ? `@${escapeHtml(from.username)}` : "\u65E0\u7528\u6237\u540D";
-  const ban = await env.TOPIC_MAP.get(`banned:${userId}`);
-  const muted = await env.TOPIC_MAP.get(`muted:${userId}`);
-  const rec = await safeGetJSON(env, `user:${userId}`, null);
-  const note = await env.TOPIC_MAP.get(`note:${userId}`);
-  let lastMsgLine = "\u6700\u8FD1\u6D88\u606F: \u65E0";
-  let d1Status = null;
-  if (env.TG_BOT_DB) {
-    try {
-      const u = await createD1Storage(env.TG_BOT_DB).getUser(userId);
-      if (u?.lastMessageAt) lastMsgLine = `\u6700\u8FD1\u6D88\u606F: ${formatTimeBoth(u.lastMessageAt)}`;
-      d1Status = u?.status || null;
-    } catch {
-    }
-  }
-  const text = [
-    "\u{1F39B} <b>\u7528\u6237\u9762\u677F</b>",
-    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
-    `\u{1F464} ${name} \xB7 ${un}`,
-    `UID <code>${userId}</code>`,
-    `\u72B6\u6001  \u5C01\u7981:${ban ? "\u{1F6AB} \u662F" : "\u5426"} \xB7 \u9759\u97F3:${muted ? "\u{1F507} \u662F" : "\u5426"} \xB7 \u5173\u95ED:${rec?.closed ? "\u{1F512} \u662F" : "\u5426"}`,
-    d1Status ? `D1: <code>${escapeHtml(d1Status)}</code>` : "",
-    lastMsgLine,
-    note ? `\u{1F4DD} ${escapeHtml(String(note).slice(0, 80))}${String(note).length > 80 ? "\u2026" : ""}` : "\u{1F4DD} \u65E0\u5907\u6CE8 \xB7 <code>/note \u5185\u5BB9</code> \u6DFB\u52A0",
-    "",
-    "\u{1F447} \u70B9\u6309\u94AE\u64CD\u4F5C",
-    "<i>\u5C01\u7981 / \u5173\u95ED / \u91CD\u7F6E\u9700\u4E8C\u6B21\u786E\u8BA4</i>"
-  ].filter(Boolean).join("\n");
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text,
-    parse_mode: "HTML",
-    reply_markup: buildUserActionKeyboard(userId)
-  });
-}
-async function handleMuteCommand(env, threadId, userId) {
-  await env.TOPIC_MAP.put(`muted:${userId}`, "1");
-  if (env.TG_BOT_DB) {
-    try {
-      await createD1Storage(env.TG_BOT_DB).updateUserState(userId, { isMuted: true });
-    } catch {
-    }
-  }
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text: "\u{1F507} <b>\u5DF2\u9759\u97F3</b>\uFF1A\u7528\u6237\u6D88\u606F\u4E0D\u518D\u8F6C\u53D1\u5230\u672C\u7FA4",
-    parse_mode: "HTML"
-  });
-  await tgCall(env, "sendMessage", {
-    chat_id: userId,
-    text: USER_COPY.muteUserNotify
-  });
-}
-async function handleUnmuteCommand(env, threadId, userId) {
-  await env.TOPIC_MAP.delete(`muted:${userId}`);
-  await env.TOPIC_MAP.delete(`mute_notice:${userId}`);
-  if (env.TG_BOT_DB) {
-    try {
-      await createD1Storage(env.TG_BOT_DB).updateUserState(userId, { isMuted: false });
-    } catch {
-    }
-  }
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text: "\u{1F50A} <b>\u5DF2\u53D6\u6D88\u9759\u97F3</b>",
-    parse_mode: "HTML"
-  });
-  await tgCall(env, "sendMessage", {
-    chat_id: userId,
-    text: USER_COPY.unmuteUserNotify
-  });
-}
-async function handleNoteCommand(env, threadId, userId, text) {
-  const note = text.replace(/^\/note(@\w+)?\s*/i, "").trim();
-  if (!note) {
-    const existing = await env.TOPIC_MAP.get(`note:${userId}`);
-    await tgCall(env, "sendMessage", {
-      chat_id: env.SUPERGROUP_ID,
-      message_thread_id: threadId,
-      text: existing ? `\u{1F4DD} <b>\u5F53\u524D\u5907\u6CE8</b>
-${escapeHtml(existing)}
-
-\u7528\u6CD5: <code>/note \u65B0\u5907\u6CE8</code>\uFF08\u53D1 <code>/note clear</code> \u6E05\u7A7A\uFF09` : "\u{1F4DD} \u6682\u65E0\u5907\u6CE8\u3002\u7528\u6CD5: <code>/note \u5185\u5BB9</code>",
-      parse_mode: "HTML"
-    });
-    return;
-  }
-  if (note.toLowerCase() === "clear" || note === "-" || note === "\u6E05\u9664") {
-    await env.TOPIC_MAP.delete(`note:${userId}`);
-    await tgCall(env, "sendMessage", {
-      chat_id: env.SUPERGROUP_ID,
-      message_thread_id: threadId,
-      text: "\u2705 \u5907\u6CE8\u5DF2\u6E05\u9664"
-    });
-    return;
-  }
-  await env.TOPIC_MAP.put(`note:${userId}`, note.slice(0, 500), { expirationTtl: 365 * 86400 });
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text: `\u2705 \u5907\u6CE8\u5DF2\u4FDD\u5B58\uFF1A
-${escapeHtml(note.slice(0, 500))}`,
-    parse_mode: "HTML"
-  });
-}
-async function handleAddWordCommand(env, threadId, text, senderId) {
-  const word = text.slice(9).trim();
-  if (!word) {
-    await tgCall(env, "sendMessage", {
-      chat_id: env.SUPERGROUP_ID,
-      message_thread_id: threadId,
-      text: ADMIN_COPY.wordUsageAdd,
-      parse_mode: "HTML"
-    });
-    return;
-  }
-  let kvWords = await readKvBlockedWords(env);
-  const allWords = [.../* @__PURE__ */ new Set([...BLOCKED_WORDS, ...kvWords])];
-  if (allWords.map((w) => w.toLowerCase()).includes(word.toLowerCase())) {
-    await tgCall(env, "sendMessage", {
-      chat_id: env.SUPERGROUP_ID,
-      message_thread_id: threadId,
-      text: ADMIN_COPY.wordExists(escapeHtml(word)),
-      parse_mode: "HTML"
-    });
-    return;
-  }
-  kvWords.push(word);
-  await env.TOPIC_MAP.put("blocked_words_kv", JSON.stringify(kvWords));
-  blockedWordsCache.data = null;
-  Logger.info("blocked_word_added", { word, by: senderId });
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text: ADMIN_COPY.wordAdded(escapeHtml(word), kvWords.length),
-    parse_mode: "HTML"
-  });
-}
-async function handleDelWordCommand(env, threadId, text, senderId) {
-  const word = text.slice(9).trim();
-  if (!word) {
-    await tgCall(env, "sendMessage", {
-      chat_id: env.SUPERGROUP_ID,
-      message_thread_id: threadId,
-      text: ADMIN_COPY.wordUsageDel,
-      parse_mode: "HTML"
-    });
-    return;
-  }
-  if (BLOCKED_WORDS.map((w) => w.toLowerCase()).includes(word.toLowerCase())) {
-    await tgCall(env, "sendMessage", {
-      chat_id: env.SUPERGROUP_ID,
-      message_thread_id: threadId,
-      text: ADMIN_COPY.wordHardcoded(escapeHtml(word)),
-      parse_mode: "HTML"
-    });
-    return;
-  }
-  let kvWords = await readKvBlockedWords(env);
-  const before = kvWords.length;
-  kvWords = kvWords.filter((w) => w.toLowerCase() !== word.toLowerCase());
-  if (kvWords.length === before) {
-    await tgCall(env, "sendMessage", {
-      chat_id: env.SUPERGROUP_ID,
-      message_thread_id: threadId,
-      text: ADMIN_COPY.wordMissing(escapeHtml(word)),
-      parse_mode: "HTML"
-    });
-    return;
-  }
-  await env.TOPIC_MAP.put("blocked_words_kv", JSON.stringify(kvWords));
-  blockedWordsCache.data = null;
-  Logger.info("blocked_word_removed", { word, by: senderId });
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text: ADMIN_COPY.wordDeleted(escapeHtml(word), kvWords.length),
-    parse_mode: "HTML"
-  });
-}
-async function handleListWordsCommand(env, threadId) {
-  const allWords = await getBlockedWords(env, true);
-  const kvWords = await readKvBlockedWords(env);
-  const hardcoded = BLOCKED_WORDS;
-  const dynamic = kvWords.filter((w) => !BLOCKED_WORDS.map((h) => h.toLowerCase()).includes(w.toLowerCase()));
-  const spamKeywords = parseSpamKeywords((env.SPAM_KEYWORDS || "").toString());
-  const blockedTotal = allWords.length;
-  const lines = [
-    "\u{1F4DD} <b>\u5185\u5BB9\u8FC7\u6EE4\u8BCD\u5E93</b>",
-    "",
-    `<b>\u4E00\u3001\u5C4F\u853D\u8BCD</b>\uFF08\u547D\u4E2D\u540E\u62E6\u622A\u5E76\u63D0\u793A\u7528\u6237\uFF0C\u5171 ${blockedTotal} \u4E2A\uFF09`,
-    "",
-    `\u{1F527} <b>\u786C\u7F16\u7801\u8BCD</b> (${hardcoded.length} \u4E2A\uFF0C\u4FEE\u6539\u9700\u6539\u4EE3\u7801):`,
-    hardcoded.length > 0 ? hardcoded.map((w) => `  \u2022 ${escapeHtml(w)}`).join("\n") : "  (\u65E0)",
-    "",
-    `\u{1F4BE} <b>\u52A8\u6001\u8BCD</b> (${dynamic.length} \u4E2A\uFF0C\u53EF\u7528 /addword /delword):`,
-    dynamic.length > 0 ? dynamic.map((w) => `  \u2022 ${escapeHtml(w)}`).join("\n") : "  (\u65E0)",
-    "",
-    `<b>\u4E8C\u3001\u5783\u573E\u5173\u952E\u8BCD SPAM_KEYWORDS</b>\uFF08\u73AF\u5883\u53D8\u91CF\uFF0C\u5171 ${spamKeywords.length} \u4E2A\uFF09`,
-    spamKeywords.length > 0 ? spamKeywords.map((w) => `  \u2022 ${escapeHtml(w)}`).join("\n") : "  (\u672A\u914D\u7F6E\uFF1B\u5728 Cloudflare Variables \u4E2D\u8BBE\u7F6E SPAM_KEYWORDS)",
-    "",
-    "<i>\u8BF4\u660E\uFF1A/addword \u53EA\u5199\u5165\u52A8\u6001\u5C4F\u853D\u8BCD\uFF0C\u4E0D\u4F1A\u6539 SPAM_KEYWORDS\u3002</i>"
-  ];
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text: lines.join("\n"),
-    parse_mode: "HTML"
-  });
-}
-async function handleCloseCommand(env, threadId, userId) {
-  const key = `user:${userId}`;
-  let rec = await safeGetJSON(env, key, null);
-  if (!rec) {
-    rec = { thread_id: threadId, closed: true };
-  } else {
-    rec.closed = true;
-    if (!rec.thread_id) rec.thread_id = threadId;
-  }
-  await env.TOPIC_MAP.put(key, JSON.stringify(rec));
-  if (env.TG_BOT_DB) {
-    try {
-      await createD1Storage(env.TG_BOT_DB).updateUserState(userId, { status: "closed" });
-    } catch (e) {
-      Logger.warn("close_d1_update_failed", { userId, error: e?.message });
-    }
-  }
-  await tgCall(env, "closeForumTopic", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId
-  });
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text: "\u{1F6AB} <b>\u5BF9\u8BDD\u5DF2\u5F3A\u5236\u5173\u95ED</b>",
-    parse_mode: "HTML"
-  });
-}
-async function handleOpenCommand(env, threadId, userId) {
-  const key = `user:${userId}`;
-  let rec = await safeGetJSON(env, key, null);
-  if (!rec) {
-    rec = { thread_id: threadId, closed: false };
-  } else {
-    rec.closed = false;
-    if (!rec.thread_id) rec.thread_id = threadId;
-  }
-  await env.TOPIC_MAP.put(key, JSON.stringify(rec));
-  if (env.TG_BOT_DB) {
-    try {
-      await createD1Storage(env.TG_BOT_DB).updateUserState(userId, { status: "active" });
-    } catch (e) {
-      Logger.warn("open_d1_update_failed", { userId, error: e?.message });
-    }
-  }
-  await tgCall(env, "reopenForumTopic", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId
-  });
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text: "\u2705 <b>\u5BF9\u8BDD\u5DF2\u6062\u590D</b>",
-    parse_mode: "HTML"
-  });
-}
-async function handleResetCommand(env, threadId, userId) {
-  await setPersistentTrust(env, userId, "normal");
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text: "\u{1F504} <b>\u9A8C\u8BC1\u91CD\u7F6E</b>\uFF08\u5DF2\u53D6\u6D88\u6C38\u4E45\u4FE1\u4EFB\uFF0C\u4E0B\u6B21\u9700\u91CD\u65B0\u9A8C\u8BC1\uFF09",
-    parse_mode: "HTML"
-  });
-}
-async function handleTrustCommand(env, threadId, userId) {
-  await setPersistentTrust(env, userId, "trusted");
-  await env.TOPIC_MAP.delete(`needs_verify:${userId}`);
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text: "\u{1F31F} <b>\u5DF2\u8BBE\u7F6E\u6C38\u4E45\u4FE1\u4EFB</b>",
-    parse_mode: "HTML"
-  });
-}
-async function handleBanCommand(env, threadId, userId) {
-  await env.TOPIC_MAP.put(`banned:${userId}`, "1");
-  if (env.TG_BOT_DB) {
-    try {
-      await createD1Storage(env.TG_BOT_DB).updateUserState(userId, { status: "banned" });
-    } catch (e) {
-      Logger.warn("ban_d1_update_failed", { userId, error: e?.message });
-    }
-  }
-  await bumpDailyStat(env, "bans", 1);
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text: "\u{1F6AB} <b>\u7528\u6237\u5DF2\u5C01\u7981</b>\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
-    parse_mode: "HTML"
-  });
-  const notify = await tgCall(env, "sendMessage", {
-    chat_id: userId,
-    text: USER_COPY.banUserNotify
-  });
-  if (!notify?.ok) {
-    Logger.warn("ban_user_notify_failed", {
-      userId,
-      description: notify?.description
-    });
-    await tgCall(env, "sendMessage", {
-      chat_id: env.SUPERGROUP_ID,
-      message_thread_id: threadId,
-      text: `\u26A0\uFE0F \u5DF2\u5C01\u7981\uFF0C\u4F46\u901A\u77E5\u7528\u6237\u5931\u8D25\uFF08\u53EF\u80FD\u5BF9\u65B9\u672A\u79C1\u804A\u8FC7\u673A\u5668\u4EBA\u6216\u5DF2\u62C9\u9ED1\uFF09\uFF1A${escapeHtml(notify?.description || "unknown")}`,
-      parse_mode: "HTML"
-    });
-  } else {
-    await env.TOPIC_MAP.put(`ban_notice:${userId}`, "1", { expirationTtl: 3600 });
-  }
-}
-async function handleUnbanCommand(env, threadId, userId) {
-  await env.TOPIC_MAP.delete(`banned:${userId}`);
-  await env.TOPIC_MAP.delete(`ban_notice:${userId}`);
-  if (env.TG_BOT_DB) {
-    try {
-      await createD1Storage(env.TG_BOT_DB).updateUserState(userId, { status: "active" });
-    } catch (e) {
-      Logger.warn("unban_d1_update_failed", { userId, error: e?.message });
-    }
-  }
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text: "\u2705 <b>\u7528\u6237\u5DF2\u89E3\u5C01</b>\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
-    parse_mode: "HTML"
-  });
-  const notify = await tgCall(env, "sendMessage", {
-    chat_id: userId,
-    text: USER_COPY.unbanUserNotify
-  });
-  if (!notify?.ok) {
-    Logger.warn("unban_user_notify_failed", {
-      userId,
-      description: notify?.description
-    });
-  }
-}
-async function handleInfoCommand(env, threadId, userId) {
-  const userKey = `user:${userId}`;
-  let userRec = await safeGetJSON(env, userKey, null);
-  const verifyStatus = await getVerificationState(env, userId);
-  const banStatus = await env.TOPIC_MAP.get(`banned:${userId}`);
-  const from = await resolveUserFromForTopic(env, userId, null);
-  const resolvedTitle = buildTopicTitle(from);
-  if (userRec?.thread_id && resolvedTitle && resolvedTitle !== "User" && (!userRec.title || userRec.title === "User" || /^User(\s@|$)/i.test(userRec.title))) {
-    try {
-      const edit = await tgCall(env, "editForumTopic", {
-        chat_id: env.SUPERGROUP_ID,
-        message_thread_id: userRec.thread_id,
-        name: resolvedTitle
-      });
-      if (edit?.ok) {
-        userRec = { ...userRec, title: resolvedTitle };
-        await env.TOPIC_MAP.put(userKey, JSON.stringify(userRec));
-      }
-    } catch (e) {
-      Logger.warn("info_topic_title_repair_failed", { userId, error: e?.message });
-    }
-  }
-  const displayName = escapeHtml(
-    [from.first_name, from.last_name].filter(Boolean).join(" ").trim() || "\u672A\u77E5"
-  );
-  const usernameText = from.username ? `@${escapeHtml(from.username)}` : "\u65E0";
-  const openLink = from.username ? `<a href="https://t.me/${escapeHtml(from.username)}">\u6253\u5F00\u4E3B\u9875 @${escapeHtml(from.username)}</a>` : `<a href="tg://user?id=${userId}">\u6253\u5F00\u7528\u6237\u8D44\u6599</a>`;
-  const topicTitle = escapeHtml(userRec?.title || resolvedTitle || "\u672A\u77E5");
-  const verifyText = verifyStatus ? verifyStatus.type === "trusted" ? "\u{1F31F} \u6C38\u4E45\u4FE1\u4EFB" : "\u2705 \u5DF2\u9A8C\u8BC1" : "\u274C \u672A\u9A8C\u8BC1";
-  const banText = banStatus ? "\u{1F6AB} \u5DF2\u5C01\u7981" : "\u2705 \u6B63\u5E38";
-  const muted = await env.TOPIC_MAP.get(`muted:${userId}`);
-  const note = await env.TOPIC_MAP.get(`note:${userId}`);
-  let lastMsgAt = null;
-  let d1Status = null;
-  if (env.TG_BOT_DB) {
-    try {
-      const u = await createD1Storage(env.TG_BOT_DB).getUser(userId);
-      lastMsgAt = u?.lastMessageAt ?? null;
-      d1Status = u?.status ?? null;
-    } catch {
-    }
-  }
-  const info = [
-    "\u{1F464} <b>\u7528\u6237\u4FE1\u606F</b>",
-    `\u59D3\u540D: ${displayName}`,
-    `\u7528\u6237\u540D: ${usernameText}`,
-    `UID: <code>${userId}</code>`,
-    `Topic ID: <code>${threadId}</code>`,
-    `\u8BDD\u9898\u6807\u9898: ${topicTitle}`,
-    `\u9A8C\u8BC1: ${verifyText}`,
-    `\u5C01\u7981: ${banText} \xB7 \u9759\u97F3: ${muted ? "\u{1F507} \u662F" : "\u5426"} \xB7 \u4F1A\u8BDD\u5173\u95ED: ${userRec?.closed ? "\u662F" : "\u5426"}`,
-    d1Status ? `D1 \u72B6\u6001: <code>${escapeHtml(d1Status)}</code>` : "",
-    `\u6700\u8FD1\u6D88\u606F: ${formatTimeBoth(lastMsgAt)}`,
-    note ? `\u5907\u6CE8: ${escapeHtml(note)}` : "\u5907\u6CE8: \u65E0\uFF08/note \u5185\u5BB9\uFF09",
-    `\u94FE\u63A5: ${openLink}`,
-    from.username ? "" : "<i>\u65E0\u516C\u5F00\u7528\u6237\u540D\u65F6\u90E8\u5206\u5BA2\u6237\u7AEF\u65E0\u6CD5\u70B9\u51FB tg \u94FE\u63A5</i>"
-  ].filter(Boolean).join("\n");
-  await tgCall(env, "sendMessage", {
-    chat_id: env.SUPERGROUP_ID,
-    message_thread_id: threadId,
-    text: info,
-    parse_mode: "HTML",
-    disable_web_page_preview: true,
-    reply_markup: buildUserActionKeyboard(userId)
-  });
 }
 async function _handleAdminReplyInner(msg, env, ctx) {
   const threadId = msg.message_thread_id;
@@ -5311,51 +5975,51 @@ async function _handleAdminReplyInner(msg, env, ctx) {
     return;
   }
   if (text === "/help") {
-    await handleHelpCommand(env, threadId, senderId);
+    await adminHandlers.handleHelpCommand(env, threadId, senderId);
     return;
   }
   if (text === "/menu" || text === "/dashboard") {
-    await handleMenuCommand(env, threadId, senderId);
+    await adminHandlers.handleMenuCommand(env, threadId, senderId);
     return;
   }
   if (text === "/sysinfo" || text === "/system" || text === "/status") {
-    await handleSysinfoCommand(env, threadId, { page: "overview" });
+    await adminHandlers.handleSysinfoCommand(env, threadId, { page: "overview" });
     return;
   }
   if (text === "/stats") {
-    await handleStatsCommand(env, threadId);
+    await adminHandlers.handleStatsCommand(env, threadId);
     return;
   }
   if (text === "/rank" || text === "/activity" || text === "/heat") {
-    await handleRankCommand(env, threadId);
+    await adminHandlers.handleRankCommand(env, threadId);
     return;
   }
   if (text === "/whoami") {
-    await handleWhoamiCommand(env, threadId, senderId);
+    await adminHandlers.handleWhoamiCommand(env, threadId, senderId);
     return;
   }
   if (text === "/synccommands") {
-    await handleSyncCommandsCommand(env, threadId, senderId);
+    await adminHandlers.handleSyncCommandsCommand(env, threadId, senderId);
     return;
   }
   if (text.startsWith("/find")) {
-    await handleFindCommand(env, threadId, text);
+    await adminHandlers.handleFindCommand(env, threadId, text);
     return;
   }
   if (text === "/notes" || text.startsWith("/notes ")) {
-    await handleNotesCommand(env, threadId, text);
+    await adminHandlers.handleNotesCommand(env, threadId, text);
     return;
   }
   if (text.startsWith("/addword ")) {
-    await handleAddWordCommand(env, threadId, text, senderId);
+    await adminActions.addWord(env, threadId, text, senderId);
     return;
   }
   if (text.startsWith("/delword ")) {
-    await handleDelWordCommand(env, threadId, text, senderId);
+    await adminActions.delWord(env, threadId, text, senderId);
     return;
   }
   if (text === "/listwords") {
-    await handleListWordsCommand(env, threadId);
+    await adminActions.listWords(env, threadId);
     return;
   }
   let userId = null;
@@ -5411,7 +6075,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
     return;
   }
   if (text === "/open") {
-    await handleOpenCommand(env, threadId, userId);
+    await adminActions.open(env, threadId, userId);
     return;
   }
   if (text === "/reset") {
@@ -5426,7 +6090,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
     return;
   }
   if (text === "/trust") {
-    await handleTrustCommand(env, threadId, userId);
+    await adminActions.trust(env, threadId, userId);
     return;
   }
   if (text === "/ban") {
@@ -5441,31 +6105,31 @@ async function _handleAdminReplyInner(msg, env, ctx) {
     return;
   }
   if (text === "/unban") {
-    await handleUnbanCommand(env, threadId, userId);
+    await adminActions.unban(env, threadId, userId);
     return;
   }
   if (text === "/info") {
-    await handleInfoCommand(env, threadId, userId);
+    await adminActions.info(env, threadId, userId);
     return;
   }
   if (text === "/panel") {
-    await handlePanelCommand(env, threadId, userId);
+    await adminActions.panel(env, threadId, userId);
     return;
   }
   if (text === "/mute") {
-    await handleMuteCommand(env, threadId, userId);
+    await adminActions.mute(env, threadId, userId);
     return;
   }
   if (text === "/unmute") {
-    await handleUnmuteCommand(env, threadId, userId);
+    await adminActions.unmute(env, threadId, userId);
     return;
   }
   if (text.startsWith("/note")) {
-    await handleNoteCommand(env, threadId, userId, text);
+    await adminActions.note(env, threadId, userId, text);
     return;
   }
   if (msg.media_group_id) {
-    await handleMediaGroup(msg, env, ctx, { direction: "t2p", targetChat: userId, threadId: void 0 });
+    await mediaGroup.handleMediaGroup(msg, env, ctx, { direction: "t2p", targetChat: userId, threadId: void 0 });
     return;
   }
   const response = await tgCall(env, "copyMessage", {
@@ -5482,473 +6146,6 @@ async function _handleAdminReplyInner(msg, env, ctx) {
       topicId: threadId,
       userId
     });
-  }
-}
-async function sendVerificationChallenge(userId, env, pendingMsgId, from = null) {
-  if (from) await saveUserProfileSnapshot(env, userId, from);
-  const writtenKeys = [];
-  try {
-    await _sendVerificationChallengeInner(userId, env, pendingMsgId, writtenKeys);
-  } catch (e) {
-    Logger.error("verification_challenge_failed", e, { userId });
-    for (const key of writtenKeys) {
-      try {
-        await env.TOPIC_MAP.delete(key);
-      } catch {
-      }
-    }
-    throw e;
-  }
-}
-async function _sendVerificationChallengeInner(userId, env, pendingMsgId, writtenKeys) {
-  const existingChallenge = await env.TOPIC_MAP.get(`user_challenge:${userId}`);
-  if (existingChallenge) {
-    const chalKey = `chal:${existingChallenge}`;
-    const state = await safeGetJSON(env, chalKey, null);
-    if (!state || state.userId !== userId) {
-      await env.TOPIC_MAP.delete(`user_challenge:${userId}`);
-    } else {
-      if (pendingMsgId) {
-        let pendingIds = [];
-        if (Array.isArray(state.pending_ids)) {
-          pendingIds = state.pending_ids.slice();
-        } else if (state.pending) {
-          pendingIds = [state.pending];
-        }
-        if (!pendingIds.includes(pendingMsgId)) {
-          pendingIds.push(pendingMsgId);
-          if (pendingIds.length > CONFIG.PENDING_MAX_MESSAGES) {
-            pendingIds = pendingIds.slice(pendingIds.length - CONFIG.PENDING_MAX_MESSAGES);
-          }
-          state.pending_ids = pendingIds;
-          delete state.pending;
-          await env.TOPIC_MAP.put(chalKey, JSON.stringify(state), { expirationTtl: CONFIG.VERIFY_EXPIRE_SECONDS });
-        }
-      }
-      Logger.debug("verification_duplicate_skipped", { userId, verifyId: existingChallenge, hasPending: !!pendingMsgId });
-      return;
-    }
-  }
-  const verifyLimit = await checkRateLimit(userId, env, "verify", CONFIG.RATE_LIMIT_VERIFY, 300);
-  if (!verifyLimit.allowed) {
-    await tgCall(env, "sendMessage", {
-      chat_id: userId,
-      text: "\u26A0\uFE0F \u9A8C\u8BC1\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF75\u5206\u949F\u540E\u518D\u8BD5\u3002"
-    });
-    return;
-  }
-  const hasTurnstile = !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY && env.VERIFICATION_PAGE_URL);
-  if (hasTurnstile) {
-    await sendTurnstileChallenge(userId, env, pendingMsgId, writtenKeys);
-  } else {
-    await sendLocalQuizChallenge(userId, env, pendingMsgId, writtenKeys);
-  }
-}
-async function sendTurnstileChallenge(userId, env, pendingMsgId, writtenKeys) {
-  const verifyCode = generateVerifyCode();
-  const verifyUrl = `${env.VERIFICATION_PAGE_URL}/verify?code=${verifyCode}&uid=${userId}`;
-  await env.TOPIC_MAP.put(`turnstile_code:${verifyCode}`, String(userId), { expirationTtl: CONFIG.TURNSTILE_VERIFY_TTL });
-  writtenKeys.push(`turnstile_code:${verifyCode}`);
-  if (pendingMsgId) {
-    const pendingKey = `pending_turnstile:${userId}`;
-    let pendingIds = [];
-    try {
-      const raw = await env.TOPIC_MAP.get(pendingKey);
-      if (raw) pendingIds = JSON.parse(raw);
-    } catch {
-    }
-    if (!Array.isArray(pendingIds)) pendingIds = [];
-    if (!pendingIds.includes(pendingMsgId)) {
-      pendingIds.push(pendingMsgId);
-      if (pendingIds.length > CONFIG.PENDING_MAX_MESSAGES) {
-        pendingIds = pendingIds.slice(pendingIds.length - CONFIG.PENDING_MAX_MESSAGES);
-      }
-      await env.TOPIC_MAP.put(pendingKey, JSON.stringify(pendingIds), { expirationTtl: CONFIG.TURNSTILE_VERIFY_TTL });
-      writtenKeys.push(pendingKey);
-    }
-  }
-  await env.TOPIC_MAP.put(`user_challenge:${userId}`, `turnstile:${verifyCode}`, { expirationTtl: CONFIG.TURNSTILE_VERIFY_TTL });
-  writtenKeys.push(`user_challenge:${userId}`);
-  Logger.info("turnstile_verification_sent", { userId, verifyCode });
-  const verifyMsg = await tgCall(env, "sendMessage", {
-    chat_id: userId,
-    text: VERIFY_COPY.turnstileChallenge,
-    parse_mode: "HTML",
-    reply_markup: {
-      inline_keyboard: [[
-        { text: VERIFY_COPY.buttonTurnstile, url: verifyUrl }
-      ]]
-    }
-  });
-  if (!verifyMsg.ok) {
-    throw new Error(`Turnstile \u9A8C\u8BC1\u6D88\u606F\u53D1\u9001\u5931\u8D25: ${verifyMsg.description || "\u672A\u77E5\u9519\u8BEF"}`);
-  }
-  if (verifyMsg.result?.message_id) {
-    await env.TOPIC_MAP.put(`turnstile_msg:${verifyCode}`, String(verifyMsg.result.message_id), { expirationTtl: CONFIG.TURNSTILE_VERIFY_TTL });
-    writtenKeys.push(`turnstile_msg:${verifyCode}`);
-  }
-}
-async function sendLocalQuizChallenge(userId, env, pendingMsgId, writtenKeys) {
-  const q = LOCAL_QUESTIONS[secureRandomInt(0, LOCAL_QUESTIONS.length)];
-  const challenge = {
-    question: q.question,
-    correct: q.correct_answer,
-    options: shuffleArray([...q.incorrect_answers, q.correct_answer])
-  };
-  const verifyId = secureRandomId(CONFIG.VERIFY_ID_LENGTH);
-  const answerIndex = challenge.options.indexOf(challenge.correct);
-  const state = {
-    answerIndex,
-    options: challenge.options,
-    pending_ids: pendingMsgId ? [pendingMsgId] : [],
-    userId
-  };
-  await env.TOPIC_MAP.put(`chal:${verifyId}`, JSON.stringify(state), { expirationTtl: CONFIG.VERIFY_EXPIRE_SECONDS });
-  writtenKeys.push(`chal:${verifyId}`);
-  await env.TOPIC_MAP.put(`user_challenge:${userId}`, verifyId, { expirationTtl: CONFIG.VERIFY_EXPIRE_SECONDS });
-  writtenKeys.push(`user_challenge:${userId}`);
-  Logger.info("verification_sent", {
-    userId,
-    verifyId,
-    question: q.question,
-    pendingCount: state.pending_ids.length
-  });
-  const buttons = challenge.options.map((opt, idx) => ({
-    text: opt,
-    callback_data: `verify:${verifyId}:${idx}`
-  }));
-  const keyboard = [];
-  for (let i = 0; i < buttons.length; i += CONFIG.BUTTON_COLUMNS) {
-    keyboard.push(buttons.slice(i, i + CONFIG.BUTTON_COLUMNS));
-  }
-  const quizMsg = await tgCall(env, "sendMessage", {
-    chat_id: userId,
-    text: VERIFY_COPY.quizChallenge(escapeHtml(challenge.question)),
-    parse_mode: "HTML",
-    reply_markup: { inline_keyboard: keyboard }
-  });
-  if (!quizMsg.ok) {
-    throw new Error(`\u672C\u5730\u9898\u5E93\u9A8C\u8BC1\u6D88\u606F\u53D1\u9001\u5931\u8D25: ${quizMsg.description || "\u672A\u77E5\u9519\u8BEF"}`);
-  }
-}
-async function handleCallbackQuery(query, env, ctx) {
-  try {
-    const data = query.data;
-    if (!data.startsWith("verify:")) return;
-    const parts = data.split(":");
-    if (parts.length !== 3) return;
-    const verifyId = parts[1];
-    const selectedIndex = parseInt(parts[2]);
-    const userId = query.from.id;
-    const stateStr = await env.TOPIC_MAP.get(`chal:${verifyId}`);
-    if (!stateStr) {
-      await tgCall(env, "answerCallbackQuery", {
-        callback_query_id: query.id,
-        text: VERIFY_COPY.expired,
-        show_alert: true
-      });
-      return;
-    }
-    let state;
-    try {
-      state = JSON.parse(stateStr);
-    } catch (e) {
-      await tgCall(env, "answerCallbackQuery", {
-        callback_query_id: query.id,
-        text: VERIFY_COPY.dataError,
-        show_alert: true
-      });
-      return;
-    }
-    if (state.userId && state.userId !== userId) {
-      await tgCall(env, "answerCallbackQuery", {
-        callback_query_id: query.id,
-        text: VERIFY_COPY.invalidUser,
-        show_alert: true
-      });
-      return;
-    }
-    if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= state.options.length) {
-      await tgCall(env, "answerCallbackQuery", {
-        callback_query_id: query.id,
-        text: VERIFY_COPY.invalidOption,
-        show_alert: true
-      });
-      return;
-    }
-    if (selectedIndex === state.answerIndex) {
-      await tgCall(env, "answerCallbackQuery", {
-        callback_query_id: query.id,
-        text: VERIFY_COPY.successToast
-      });
-      Logger.info("verification_passed", {
-        userId,
-        verifyId,
-        selectedOption: state.options[selectedIndex]
-      });
-      await bumpDailyStat(env, "verifies", 1);
-      await ephemeralStore(env).setVerification(userId, {
-        ttl: CONFIG.VERIFIED_EXPIRE_SECONDS,
-        verifiedAt: Date.now()
-      });
-      await env.TOPIC_MAP.delete(`needs_verify:${userId}`);
-      await env.TOPIC_MAP.delete(`chal:${verifyId}`);
-      await env.TOPIC_MAP.delete(`user_challenge:${userId}`);
-      const hasPending = Array.isArray(state.pending_ids) && state.pending_ids.length > 0 || !!state.pending;
-      await tgCall(env, "editMessageText", {
-        chat_id: userId,
-        message_id: query.message.message_id,
-        text: hasPending ? VERIFY_COPY.successBodyWithPending : VERIFY_COPY.successBody,
-        parse_mode: "HTML"
-      });
-      if (hasPending) {
-        await forwardPendingMessages(state, userId, query, env, ctx);
-      }
-    } else {
-      Logger.info("verification_failed", {
-        userId,
-        verifyId,
-        selectedIndex,
-        correctIndex: state.answerIndex
-      });
-      await tgCall(env, "answerCallbackQuery", {
-        callback_query_id: query.id,
-        text: VERIFY_COPY.wrongAnswer,
-        show_alert: true
-      });
-      try {
-        const prev = String(query.message?.text || "");
-        if (prev && !prev.includes("\u56DE\u7B54\u4E0D\u6B63\u786E") && query.message?.message_id) {
-          const buttons = (state.options || []).map((opt, idx) => ({
-            text: opt,
-            callback_data: `verify:${verifyId}:${idx}`
-          }));
-          const keyboard = [];
-          for (let i = 0; i < buttons.length; i += CONFIG.BUTTON_COLUMNS) {
-            keyboard.push(buttons.slice(i, i + CONFIG.BUTTON_COLUMNS));
-          }
-          await tgCall(env, "editMessageText", {
-            chat_id: userId,
-            message_id: query.message.message_id,
-            text: `${prev}${VERIFY_COPY.wrongAnswerHint}`,
-            parse_mode: "HTML",
-            reply_markup: { inline_keyboard: keyboard }
-          });
-        }
-      } catch {
-      }
-    }
-  } catch (e) {
-    Logger.error("callback_query_error", e, {
-      userId: query.from?.id,
-      callbackData: query.data
-    });
-    await tgCall(env, "answerCallbackQuery", {
-      callback_query_id: query.id,
-      text: VERIFY_COPY.systemError,
-      show_alert: true
-    });
-  }
-}
-async function forwardPendingMessageIds(userId, pendingIds, env, ctx, { from = null } = {}) {
-  const limited = (Array.isArray(pendingIds) ? pendingIds : []).filter(Boolean).slice(-CONFIG.PENDING_MAX_MESSAGES);
-  const CONCURRENT_FORWARDS = 3;
-  let forwardedCount = 0;
-  let skippedCount = 0;
-  for (let i = 0; i < limited.length; i += CONCURRENT_FORWARDS) {
-    const batch = limited.slice(i, i + CONCURRENT_FORWARDS);
-    const results = await Promise.allSettled(batch.map(async (pendingId) => {
-      const forwardedKey = `forwarded:${userId}:${pendingId}`;
-      const alreadyForwarded = await env.TOPIC_MAP.get(forwardedKey);
-      if (alreadyForwarded) {
-        Logger.info("message_forward_duplicate_skipped", { userId, messageId: pendingId });
-        return { forwarded: false, reason: "already_forwarded" };
-      }
-      const topicFrom = await resolveUserFromForTopic(env, userId, from);
-      const fakeMsg = {
-        message_id: pendingId,
-        chat: { id: Number(userId), type: "private" },
-        from: topicFrom
-      };
-      await forwardToTopic(fakeMsg, userId, `user:${userId}`, env, ctx);
-      await env.TOPIC_MAP.put(forwardedKey, "1", { expirationTtl: 3600 });
-      return { forwarded: true };
-    }));
-    for (const r of results) {
-      if (r.status === "fulfilled" && r.value?.forwarded) {
-        forwardedCount++;
-      } else if (r.status === "fulfilled") {
-        skippedCount++;
-      } else if (r.status === "rejected") {
-        Logger.warn("pending_forward_item_failed", { userId, error: r.reason?.message });
-      }
-    }
-  }
-  if (forwardedCount > 0) {
-    await tgCall(env, "sendMessage", {
-      chat_id: Number(userId),
-      text: USER_COPY.pendingDelivered(forwardedCount),
-      parse_mode: "HTML"
-    });
-  }
-  return { forwardedCount, skippedCount };
-}
-async function forwardPendingMessages(state, userId, query, env, ctx) {
-  try {
-    let pendingIds = [];
-    if (Array.isArray(state.pending_ids)) {
-      pendingIds = state.pending_ids.slice();
-    } else if (state.pending) {
-      pendingIds = [state.pending];
-    }
-    await forwardPendingMessageIds(userId, pendingIds, env, ctx, { from: query?.from });
-  } catch (e) {
-    Logger.error("pending_message_forward_failed", e, { userId });
-    await tgCall(env, "sendMessage", {
-      chat_id: userId,
-      text: "\u26A0\uFE0F \u81EA\u52A8\u9001\u8FBE\u5931\u8D25\uFF0C\u8BF7\u91CD\u65B0\u53D1\u9001\u60A8\u7684\u6D88\u606F\u3002"
-    });
-  }
-}
-async function handleCleanupCommand(threadId, env) {
-  const lockKey = "cleanup:lock";
-  const locked = await env.TOPIC_MAP.get(lockKey);
-  if (locked) {
-    await tgCall(env, "sendMessage", withMessageThreadId({
-      chat_id: env.SUPERGROUP_ID,
-      text: "\u23F3 **\u5DF2\u6709\u6E05\u7406\u4EFB\u52A1\u6B63\u5728\u8FD0\u884C\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002**",
-      parse_mode: "Markdown"
-    }, threadId));
-    return;
-  }
-  await env.TOPIC_MAP.put(lockKey, "1", { expirationTtl: CONFIG.CLEANUP_LOCK_TTL_SECONDS });
-  await tgCall(env, "sendMessage", withMessageThreadId({
-    chat_id: env.SUPERGROUP_ID,
-    text: "\u{1F504} **\u6B63\u5728\u626B\u63CF\u9700\u8981\u6E05\u7406\u7684\u7528\u6237...**",
-    parse_mode: "Markdown"
-  }, threadId));
-  let cleanedCount = 0;
-  let errorCount = 0;
-  const cleanedUsers = [];
-  let scannedCount = 0;
-  try {
-    let cursor = void 0;
-    do {
-      const result = await env.TOPIC_MAP.list({ prefix: "user:", cursor });
-      const names = (result.keys || []).map((k) => k.name);
-      scannedCount += names.length;
-      for (let i = 0; i < names.length; i += CONFIG.CLEANUP_BATCH_SIZE) {
-        const batch = names.slice(i, i + CONFIG.CLEANUP_BATCH_SIZE);
-        const results = await Promise.allSettled(
-          batch.map(async (name) => {
-            const rec = await safeGetJSON(env, name, null);
-            if (!rec || !rec.thread_id) return null;
-            const userId = name.slice(5);
-            const topicThreadId = rec.thread_id;
-            const probe = await probeForumThread(env, topicThreadId, {
-              userId,
-              reason: "cleanup_check",
-              doubleCheckOnMissingThreadId: false
-            });
-            if (probe.status === "redirected" || probe.status === "missing") {
-              await env.TOPIC_MAP.delete(name);
-              await setPersistentTrust(env, userId, "normal");
-              await env.TOPIC_MAP.delete(`thread:${topicThreadId}`);
-              return {
-                userId,
-                threadId: topicThreadId,
-                title: rec.title || "\u672A\u77E5"
-              };
-            } else if (probe.status === "probe_invalid") {
-              Logger.warn("cleanup_probe_invalid_message", {
-                userId,
-                threadId: topicThreadId,
-                errorDescription: probe.description
-              });
-            } else if (probe.status === "unknown_error") {
-              Logger.warn("cleanup_probe_failed_unknown", {
-                userId,
-                threadId: topicThreadId,
-                errorDescription: probe.description
-              });
-            } else if (probe.status === "missing_thread_id") {
-              Logger.warn("cleanup_probe_missing_thread_id", { userId, threadId: topicThreadId });
-            }
-            return null;
-          })
-        );
-        results.forEach((result2) => {
-          if (result2.status === "fulfilled" && result2.value) {
-            cleanedCount++;
-            cleanedUsers.push(result2.value);
-            Logger.info("cleanup_user", {
-              userId: result2.value.userId,
-              threadId: result2.value.threadId
-            });
-          } else if (result2.status === "rejected") {
-            errorCount++;
-            Logger.error("cleanup_batch_error", result2.reason);
-          }
-        });
-        if (i + CONFIG.CLEANUP_BATCH_SIZE < names.length) {
-          await new Promise((r) => setTimeout(r, 600));
-        }
-      }
-      cursor = result.list_complete ? void 0 : result.cursor;
-      if (cursor) {
-        await new Promise((r) => setTimeout(r, 200));
-      }
-    } while (cursor);
-    let reportText = `\u2705 <b>\u6E05\u7406\u5B8C\u6210</b>
-
-`;
-    reportText += `\u{1F4CA} <b>\u7EDF\u8BA1</b>
-`;
-    reportText += `\u2022 \u626B\u63CF\u7528\u6237: <b>${scannedCount}</b>
-`;
-    reportText += `\u2022 \u5DF2\u6E05\u7406: <b>${cleanedCount}</b>
-`;
-    reportText += `\u2022 \u9519\u8BEF: ${errorCount}
-
-`;
-    if (cleanedCount > 0) {
-      reportText += `\u{1F5D1} <b>\u5DF2\u6E05\u7406\u7528\u6237</b>\uFF08\u8BDD\u9898\u5DF2\u5220\u9664\uFF09:
-`;
-      for (const user of cleanedUsers.slice(0, CONFIG.MAX_CLEANUP_DISPLAY)) {
-        reportText += `\u2022 UID <code>${escapeHtml(String(user.userId))}</code> \xB7 ${escapeHtml(user.title || "")}
-`;
-      }
-      if (cleanedUsers.length > CONFIG.MAX_CLEANUP_DISPLAY) {
-        reportText += `
-\u2026\u8FD8\u6709 ${cleanedUsers.length - CONFIG.MAX_CLEANUP_DISPLAY} \u4E2A
-`;
-      }
-      reportText += `
-\u{1F4A1} \u8FD9\u4E9B\u7528\u6237\u4E0B\u6B21\u53D1\u6D88\u606F\u5C06\u91CD\u65B0\u9A8C\u8BC1\u5E76\u521B\u5EFA\u65B0\u8BDD\u9898\u3002`;
-    } else {
-      reportText += `\u2728 \u6CA1\u6709\u53D1\u73B0\u9700\u8981\u6E05\u7406\u7684\u7528\u6237\u8BB0\u5F55\u3002`;
-    }
-    Logger.info("cleanup_completed", {
-      cleanedCount,
-      errorCount,
-      totalUsers: scannedCount
-    });
-    await tgCall(env, "sendMessage", withMessageThreadId({
-      chat_id: env.SUPERGROUP_ID,
-      text: reportText,
-      parse_mode: "HTML"
-    }, threadId));
-  } catch (e) {
-    Logger.error("cleanup_failed", e, { threadId });
-    await tgCall(env, "sendMessage", withMessageThreadId({
-      chat_id: env.SUPERGROUP_ID,
-      text: `\u274C **\u6E05\u7406\u8FC7\u7A0B\u51FA\u9519**
-
-\u9519\u8BEF\u4FE1\u606F: \`${e.message}\``,
-      parse_mode: "Markdown"
-    }, threadId));
-  } finally {
-    await env.TOPIC_MAP.delete(lockKey);
   }
 }
 async function createTopic(from, key, env, userId) {
@@ -6044,129 +6241,6 @@ async function tgCall(env, method, body, timeout = CONFIG.API_TIMEOUT_MS) {
       };
     }
     throw error;
-  }
-}
-async function handleMediaGroup(msg, env, ctx, { direction, targetChat, threadId }) {
-  const groupId = msg.media_group_id;
-  const key = `mg:${direction}:${groupId}`;
-  const item = extractMedia(msg);
-  if (!item) {
-    await tgCall(env, "copyMessage", withMessageThreadId({
-      chat_id: targetChat,
-      from_chat_id: msg.chat.id,
-      message_id: msg.message_id
-    }, threadId));
-    return;
-  }
-  let rec = await safeGetJSON(env, key, null);
-  if (!rec) rec = { direction, targetChat, threadId: threadId === null ? void 0 : threadId, items: [], last_ts: Date.now() };
-  rec.items.push({ ...item, msg_id: msg.message_id });
-  rec.last_ts = Date.now();
-  await env.TOPIC_MAP.put(key, JSON.stringify(rec), { expirationTtl: CONFIG.MEDIA_GROUP_EXPIRE_SECONDS });
-  ctx.waitUntil(delaySend(env, key, rec.last_ts));
-}
-function extractMedia(msg) {
-  if (msg.photo && msg.photo.length > 0) {
-    const highestResolution = msg.photo[msg.photo.length - 1];
-    return {
-      type: "photo",
-      id: highestResolution.file_id,
-      cap: msg.caption || ""
-    };
-  }
-  if (msg.video) {
-    return {
-      type: "video",
-      id: msg.video.file_id,
-      cap: msg.caption || ""
-    };
-  }
-  if (msg.document) {
-    return {
-      type: "document",
-      id: msg.document.file_id,
-      cap: msg.caption || ""
-    };
-  }
-  if (msg.audio) {
-    return {
-      type: "audio",
-      id: msg.audio.file_id,
-      cap: msg.caption || ""
-    };
-  }
-  if (msg.animation) {
-    return {
-      type: "animation",
-      id: msg.animation.file_id,
-      cap: msg.caption || ""
-    };
-  }
-  return null;
-}
-async function flushExpiredMediaGroups(env, now) {
-  try {
-    const prefix = "mg:";
-    const allKeys = await getAllKeys(env, prefix, 20);
-    let deletedCount = 0;
-    for (const { name } of allKeys) {
-      const rec = await safeGetJSON(env, name, null);
-      if (rec && rec.last_ts && now - rec.last_ts > CONFIG.MEDIA_GROUP_EXPIRE_SECONDS * 1e3) {
-        await env.TOPIC_MAP.delete(name);
-        deletedCount++;
-      }
-    }
-    if (deletedCount > 0) {
-      Logger.info("media_groups_cleaned", { deletedCount });
-    }
-  } catch (e) {
-    Logger.error("media_group_cleanup_failed", e);
-  }
-}
-async function delaySend(env, key, ts) {
-  await new Promise((r) => setTimeout(r, CONFIG.MEDIA_GROUP_DELAY_MS));
-  const rec = await safeGetJSON(env, key, null);
-  if (rec && rec.last_ts === ts) {
-    if (!rec.items || rec.items.length === 0) {
-      Logger.warn("media_group_empty", { key });
-      await env.TOPIC_MAP.delete(key);
-      return;
-    }
-    const media = rec.items.map((it, i) => {
-      if (!it.type || !it.id) {
-        Logger.warn("media_group_invalid_item", { key, item: it });
-        return null;
-      }
-      const caption = i === 0 ? (it.cap || "").substring(0, 1024) : "";
-      return {
-        type: it.type,
-        media: it.id,
-        caption
-      };
-    }).filter(Boolean);
-    if (media.length > 0) {
-      try {
-        const result = await tgCall(env, "sendMediaGroup", withMessageThreadId({
-          chat_id: rec.targetChat,
-          media
-        }, rec.threadId));
-        if (!result.ok) {
-          Logger.error("media_group_send_failed", result.description, {
-            key,
-            mediaCount: media.length
-          });
-        } else {
-          Logger.info("media_group_sent", {
-            key,
-            mediaCount: media.length,
-            targetChat: rec.targetChat
-          });
-        }
-      } catch (e) {
-        Logger.error("media_group_send_exception", e, { key });
-      }
-    }
-    await env.TOPIC_MAP.delete(key);
   }
 }
 var workerApp = createApp({
