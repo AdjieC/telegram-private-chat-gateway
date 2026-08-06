@@ -134,6 +134,11 @@ export function createMockD1() {
           }).slice(0, Number(bindings[3] || 10));
           return { results: rows.map(row => ({ ...row })) };
         }
+        if (/FROM users[\s\S]*WHERE user_id IN/i.test(normalized)) {
+          const ids = bindings.map(String);
+          const rows = (tables.get('users') || []).filter(row => ids.includes(String(row.user_id)));
+          return { results: rows.map(row => ({ ...row })) };
+        }
         if (/SELECT user_id, created_at FROM message_links WHERE created_at >= \? AND direction = \?/i.test(normalized)) {
           const [since, direction, limit] = bindings;
           const rows = [...(tables.get('message_links') || [])]

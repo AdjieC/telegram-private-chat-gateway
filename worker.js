@@ -11,30 +11,11 @@ import { createTelegramClient, TelegramApiError } from './src/telegram-client.js
 import { createD1Storage } from './src/storage/d1-storage.js';
 import { ensureMigrations } from './src/storage/migrations.js';
 import { createEphemeralStore } from './src/storage/kv-ephemeral-store.js';
-import { createKVStorage } from './src/storage/kv-storage.js';
 import { createUpdateHandler } from './src/update-router.js';
 import {
-  OPS_TZ_OFFSET_HOURS,
-  opsDayKey,
-  opsYesterdayKey,
-  opsDayStartMs,
-  summarizeInboundActivity,
-  formatSparkline,
-  activitySourceLabel,
-} from './src/activity-summary.js';
-import {
   escapeHtml,
-  formatSysTime,
-  formatRelativeTime,
   formatTimeBoth,
-  statusChip,
   buildUserActionKeyboard,
-  buildSysinfoKeyboard,
-  buildUserJumpKeyboard,
-  formatRankingBlock,
-  formatHeatBlock,
-  formatCompareLine,
-  buildAdminHomeKeyboard,
   buildBanConfirmKeyboard,
   buildCloseConfirmKeyboard,
   buildResetConfirmKeyboard,
@@ -202,8 +183,14 @@ async function readKvBlockedWords(env) {
 
 // --- 辅助工具函数 ---
 
-// 结构化日志系统
-const Logger = createLogger();
+// 结构化日志系统：错误统一经由 onError 写入系统错误环形缓冲与 KV
+const Logger = createLogger({}, console, {
+  onError: (action, error, data = {}) => {
+    try {
+      recordSystemError(action, error, data, data?.env || null);
+    } catch { /* 忽略环形缓冲失败 */ }
+  },
+});
 
 // 进程内最近错误环形缓冲（isolate 生命周期内有效；并尽力写入 KV）
 const RECENT_SYSTEM_ERRORS_MAX = 12;
@@ -239,14 +226,6 @@ function recordSystemError(action, error, data = {}, env = null) {
       .catch(() => {});
   }
 }
-
-const _loggerError = Logger.error.bind(Logger);
-Logger.error = (action, error, data = {}) => {
-  try {
-    recordSystemError(action, error, data, data?.env || null);
-  } catch { /* 忽略环形缓冲失败 */ }
-  return _loggerError(action, error, data);
-};
 
 function ephemeralStore(env) {
   return createEphemeralStore(env.TOPIC_MAP);
@@ -360,10 +339,26 @@ async function setPersistentTrust(env, userId, trustLevel) {
   if (!env.TG_BOT_DB) throw new Error("D1 'TG_BOT_DB' not bound");
   const d1Storage = createD1Storage(env.TG_BOT_DB);
   const existing = await d1Storage.getUser(userId)
-    || await createKVStorage(env.TOPIC_MAP).getUser(userId)
+    || await readLegacyKvUser(env, userId)
     || { userId: String(userId) };
   await d1Storage.upsertUser({ ...existing, userId: String(userId), trustLevel });
   await ephemeralStore(env).clearVerification(userId);
+}
+
+/**
+ * 读取 KV 旧版 user: 记录作为 D1 兜底（迁移期用户资料尚未写入 D1 时使用）。
+ * 替代已删除的 createKVStorage 模块，仅保留 setPersistentTrust 需要的字段。
+ */
+async function readLegacyKvUser(env, userId) {
+  const rec = await safeGetJSON(env, `user:${userId}`, null);
+  if (!rec || typeof rec !== 'object') return null;
+  return {
+    userId: String(userId),
+    username: rec.username ?? null,
+    firstName: rec.first_name ?? null,
+    lastName: rec.last_name ?? null,
+    topicId: rec.thread_id == null ? null : String(rec.thread_id),
+  };
 }
 
 async function saveLegacyMessageLink(env, link) {
@@ -384,12 +379,18 @@ async function saveLegacyMessageLink(env, link) {
   });
 }
 
-// 加密安全的随机数生成
+// 加密安全的随机数生成（拒绝采样消除取模偏差）
 function secureRandomInt(min, max) {
   const range = max - min;
+  if (range <= 0) return min;
+  const limit = Math.floor(0x100000000 / range) * range;
   const bytes = new Uint32Array(1);
-  crypto.getRandomValues(bytes);
-  return min + (bytes[0] % range);
+  let value;
+  do {
+    crypto.getRandomValues(bytes);
+    value = bytes[0];
+  } while (value >= limit);
+  return min + (value % range);
 }
 
 function secureRandomId(length = 12) {
@@ -724,16 +725,18 @@ async function isAdminUser(env, userId) {
   }
 }
 
-// 获取所有 KV keys（处理分页）
-async function getAllKeys(env, prefix) {
+// 获取所有 KV keys（处理分页；maxPages=0 表示不限制页数）
+async function getAllKeys(env, prefix, maxPages = 0) {
   const allKeys = [];
   let cursor = undefined;
+  let pages = 0;
 
   do {
     const result = await env.TOPIC_MAP.list({ prefix, cursor });
     allKeys.push(...result.keys);
     cursor = result.list_complete ? undefined : result.cursor;
-  } while (cursor);
+    pages += 1;
+  } while (cursor && (maxPages <= 0 || pages < maxPages));
 
   return allKeys;
 }
@@ -3202,7 +3205,7 @@ async function updateThreadStatus(threadId, isClosed, env) {
       await env.TOPIC_MAP.delete(`thread:${threadId}`);
     }
 
-    const allKeys = await getAllKeys(env, "user:");
+    const allKeys = await getAllKeys(env, "user:", 20);
     const updates = [];
 
     for (const { name } of allKeys) {
@@ -3369,7 +3372,7 @@ function extractMedia(msg) {
 async function flushExpiredMediaGroups(env, now) {
   try {
     const prefix = "mg:";
-    const allKeys = await getAllKeys(env, prefix);
+    const allKeys = await getAllKeys(env, prefix, 20);
     let deletedCount = 0;
 
     for (const { name } of allKeys) {

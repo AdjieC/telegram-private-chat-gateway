@@ -517,15 +517,22 @@ export function createD1Storage(db) {
 
     /**
      * 批量取用户资料（排行展示姓名）
+     * 单条 IN 查询替代 N+1 逐条 getUser
      */
     async getUsersByIds(userIds) {
       const ids = [...new Set((userIds || []).map(String).filter(Boolean))].slice(0, 30);
       if (!ids.length) return new Map();
+      const placeholders = ids.map(() => '?').join(', ');
+      const result = await db.prepare(`
+        SELECT user_id, username, first_name, last_name, last_message_at, topic_id, status, trust_level
+        FROM users
+        WHERE user_id IN (${placeholders})
+      `).bind(...ids).all();
       const map = new Map();
-      await Promise.all(ids.map(async (id) => {
-        const u = await this.getUser(id);
-        if (u) map.set(id, u);
-      }));
+      for (const row of result.results || []) {
+        const user = mapUser(row);
+        if (user) map.set(user.userId, user);
+      }
       return map;
     },
   };

@@ -35,7 +35,9 @@ export function redactLogData(data = {}) {
   return redactValue('', data, new WeakSet());
 }
 
-export function createLogger(baseContext = {}, sink = console) {
+export function createLogger(baseContext = {}, sink = console, options = {}) {
+  const { onError } = options;
+
   function emit(level, action, data = {}) {
     const method = level.toLowerCase();
     const log = redactLogData({
@@ -62,6 +64,10 @@ export function createLogger(baseContext = {}, sink = console) {
         stack: error instanceof Error ? error.stack : undefined,
         ...data,
       });
+      // 错误旁路：供网关收集系统错误（环形缓冲/KV），异常不得影响主流程
+      try {
+        onError?.(action, error, data);
+      } catch { /* 忽略旁路失败 */ }
     },
     debug(action, data = {}) {
       emit('DEBUG', action, data);
