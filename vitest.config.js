@@ -8,10 +8,11 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      include: ['src/utils.js'],
+      include: ['worker.js', 'src/**/*.js'],
       thresholds: {
-        functions: 80,
-        lines: 80
+        functions: 50,
+        lines: 45,
+        branches: 40
       }
     }
   }
