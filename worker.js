@@ -289,7 +289,6 @@ function createLegacyConversationService(env) {
     telegram: { call: (method, body) => tgCall(env, method, body) },
     policy: ({ message, user }) => evaluateLegacyPolicy(env, message, user),
     logger: Logger,
-    supergroupId: env.SUPERGROUP_ID,
   });
 }
 

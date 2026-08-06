@@ -1494,114 +1494,6 @@ function createAdminService({
 
 // src/conversation-service.js
 var SNAPSHOT_LIMIT = 5e3;
-var TOPIC_LOCK_TTL_MS = 3e4;
-var TOPIC_TITLE_LIMIT = 128;
-var TOPIC_UPDATE_INTERVAL_MS = 60 * 60 * 1e3;
-function buildTopicTitle(user) {
-  const userId = cleanProfileText(user.userId) || "unknown";
-  const username = cleanProfileText(user.username).replace(/[^\w]/g, "");
-  const displayName = cleanProfileText(
-    [user.firstName, user.lastName].filter(Boolean).join(" ")
-  ) || "User";
-  const suffix = `${username ? ` \xB7 @${username}` : ""} \xB7 ${userId}`;
-  return `${displayName.slice(0, Math.max(0, TOPIC_TITLE_LIMIT - suffix.length))}${suffix}`;
-}
-function buildProfileCard(user) {
-  const status = user.status === "banned" ? "\u5DF2\u5C01\u7981" : user.status === "closed" ? "\u5DF2\u5173\u95ED" : "\u6B63\u5E38";
-  const trust = user.trustLevel === "trusted" ? "\u6C38\u4E45\u4FE1\u4EFB" : "\u666E\u901A";
-  const muted = user.isMuted ? "\u5DF2\u9759\u97F3" : "\u672A\u9759\u97F3";
-  const username = user.username ? `@${user.username}` : "\u65E0";
-  return {
-    text: [
-      "\u{1F464} \u7528\u6237\u8D44\u6599",
-      `UID: ${user.userId}`,
-      `\u7528\u6237\u540D: ${username}`,
-      `\u59D3\u540D: ${cleanProfileText([user.firstName, user.lastName].filter(Boolean).join(" ")) || "\u672A\u77E5"}`,
-      `\u4F1A\u8BDD\u72B6\u6001: ${status}`,
-      `\u4FE1\u4EFB\u72B6\u6001: ${trust}`,
-      `\u9759\u97F3\u72B6\u6001: ${muted}`,
-      `\u8FDD\u89C4\u6B21\u6570: ${Number(user.violationCount || 0)}`
-    ].join("\n"),
-    replyMarkup: {
-      inline_keyboard: [
-        [
-          { text: "\u4FE1\u4EFB/\u53D6\u6D88", callback_data: `v1:user:trust:${user.userId}` },
-          { text: "\u5C01\u7981/\u89E3\u5C01", callback_data: `v1:user:ban:${user.userId}` }
-        ],
-        [
-          { text: "\u5173\u95ED/\u6253\u5F00", callback_data: `v1:user:close:${user.userId}` },
-          { text: "\u9759\u97F3/\u53D6\u6D88", callback_data: `v1:user:mute:${user.userId}` }
-        ]
-      ]
-    }
-  };
-}
-async function syncUserProfile(user, {
-  storage,
-  telegram,
-  logger,
-  now = Date.now,
-  supergroupId
-}) {
-  try {
-    let previous = {};
-    try {
-      previous = user.profileSnapshot ? JSON.parse(user.profileSnapshot) : {};
-    } catch {
-      previous = {};
-    }
-    const profile = {
-      username: user.username ?? null,
-      firstName: user.firstName ?? null,
-      lastName: user.lastName ?? null
-    };
-    const profileChanged = JSON.stringify(previous.profile || null) !== JSON.stringify(profile);
-    if (!profileChanged && user.infoCardMessageId) return { status: "unchanged" };
-    const titleUpdateDue = user.topicId && profileChanged && (!previous.titleUpdatedAt || now() - previous.titleUpdatedAt >= TOPIC_UPDATE_INTERVAL_MS);
-    if (titleUpdateDue) {
-      await telegram.call("editForumTopic", {
-        chat_id: supergroupId,
-        message_thread_id: user.topicId,
-        name: buildTopicTitle(user)
-      });
-    }
-    const card = buildProfileCard(user);
-    let infoCardMessageId = user.infoCardMessageId;
-    if (user.topicId && !infoCardMessageId) {
-      const response = await telegram.call("sendMessage", {
-        chat_id: supergroupId,
-        message_thread_id: user.topicId,
-        text: card.text,
-        reply_markup: card.replyMarkup
-      });
-      infoCardMessageId = telegramResultValue(response, "message_id") ?? null;
-    } else if (user.topicId && infoCardMessageId && profileChanged) {
-      await telegram.call("editMessageText", {
-        chat_id: supergroupId,
-        message_id: infoCardMessageId,
-        text: card.text,
-        reply_markup: card.replyMarkup
-      });
-    }
-    await storage.updateUserState(user.userId, {
-      username: profile.username,
-      firstName: profile.firstName,
-      lastName: profile.lastName,
-      infoCardMessageId,
-      profileSnapshot: JSON.stringify({
-        profile,
-        titleUpdatedAt: titleUpdateDue ? now() : previous.titleUpdatedAt ?? null
-      })
-    });
-    return { status: "synced" };
-  } catch (error) {
-    logger?.warn?.("profile_sync_failed", {
-      userId: user.userId,
-      error: error?.message || "unknown"
-    });
-    return { status: "failed" };
-  }
-}
 function snapshotMessage(message) {
   return extractMessageText(message).slice(0, SNAPSHOT_LIMIT);
 }
@@ -1613,22 +1505,12 @@ function hashContent(content) {
   }
   return (hash >>> 0).toString(16);
 }
-function telegramResultValue(response, key) {
-  return response?.result?.[key] ?? response?.[key];
-}
-function createRetryableError(message, category) {
-  return Object.assign(new Error(message), { category, retryable: true });
-}
 function createConversationService({
   storage,
   telegram,
   policy,
   logger,
-  now = Date.now,
-  randomId = () => crypto.randomUUID(),
-  sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
-  supergroupId,
-  syncProfiles = true
+  now = Date.now
 }) {
   async function evaluate(message, user) {
     return policy ? policy({ message, user }) : {
@@ -1637,139 +1519,6 @@ function createConversationService({
       shouldForward: true,
       shouldIncrementViolation: false
     };
-  }
-  async function ensureUser(message) {
-    const userId = String(message.from?.id ?? message.chat?.id);
-    const existing = await storage.getUser(userId);
-    if (existing) return existing;
-    const user = {
-      userId,
-      username: message.from?.username ?? null,
-      firstName: message.from?.first_name ?? null,
-      lastName: message.from?.last_name ?? null,
-      status: "active",
-      trustLevel: "normal"
-    };
-    if (storage.ensureUser) return storage.ensureUser(user);
-    await storage.upsertUser(user);
-    return storage.getUser(userId);
-  }
-  async function createTopic2(user, token) {
-    const response = await telegram.call("createForumTopic", {
-      chat_id: supergroupId,
-      name: buildTopicTitle(user)
-    });
-    const topicId = telegramResultValue(response, "message_thread_id");
-    if (topicId == null) throw createRetryableError("createForumTopic missing topic id", "temporary");
-    const saved = await storage.setTopic(user.userId, topicId, token, now());
-    if (!saved) throw createRetryableError("topic lock ownership lost", "topic_lock_lost");
-    return String(topicId);
-  }
-  async function getOrCreateTopic(user) {
-    const current = await storage.getUser(user.userId);
-    if (current?.topicId) return current.topicId;
-    const token = randomId();
-    const acquired = await storage.acquireTopicLock(
-      user.userId,
-      token,
-      now(),
-      TOPIC_LOCK_TTL_MS
-    );
-    if (acquired) {
-      try {
-        return await createTopic2(current || user, token);
-      } finally {
-        await storage.releaseTopicLock(user.userId, token, now());
-      }
-    }
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      await sleep(150 + attempt * 75);
-      const refreshed = await storage.getUser(user.userId);
-      if (refreshed?.topicId) return refreshed.topicId;
-    }
-    throw createRetryableError("topic creation is locked", "topic_lock_busy");
-  }
-  async function saveLink({ direction, message, response, userId, topicId, targetChatId }) {
-    const contentSnapshot = snapshotMessage(message);
-    await storage.saveMessageLink({
-      direction,
-      sourceChatId: message.chat.id,
-      sourceMessageId: message.message_id,
-      targetChatId,
-      targetMessageId: telegramResultValue(response, "message_id"),
-      topicId,
-      userId,
-      contentSnapshot,
-      contentHash: hashContent(contentSnapshot),
-      createdAt: now(),
-      updatedAt: now()
-    });
-  }
-  async function copyPrivateMessage(message, user, topicId) {
-    try {
-      const response = await telegram.call("copyMessage", {
-        chat_id: supergroupId,
-        from_chat_id: message.chat.id,
-        message_id: message.message_id,
-        message_thread_id: topicId
-      });
-      await saveLink({
-        direction: "user_to_admin",
-        message,
-        response,
-        userId: user.userId,
-        topicId,
-        targetChatId: supergroupId
-      });
-      return { status: "forwarded", topicId };
-    } catch (error) {
-      if (error?.category !== "topic_missing") throw error;
-      await storage.clearTopic(user.userId, topicId, now());
-      const replacementTopicId = await getOrCreateTopic(user);
-      return copyPrivateMessage(message, user, replacementTopicId);
-    }
-  }
-  async function handlePrivateMessage2(message) {
-    const user = await ensureUser(message);
-    const policyResult = await evaluate(message, user);
-    if (!policyResult.shouldForward) {
-      return { status: policyResult.action, reason: policyResult.reason };
-    }
-    const topicId = await getOrCreateTopic(user);
-    if (syncProfiles) {
-      await syncUserProfile({
-        ...user,
-        topicId,
-        username: message.from?.username ?? user.username,
-        firstName: message.from?.first_name ?? user.firstName,
-        lastName: message.from?.last_name ?? user.lastName
-      }, {
-        storage,
-        telegram,
-        logger,
-        now,
-        supergroupId
-      });
-    }
-    return copyPrivateMessage(message, user, topicId);
-  }
-  async function handleAdminMessage(message) {
-    const user = await storage.findUserByTopic(message.message_thread_id);
-    if (!user) return { status: "missing_user" };
-    const response = await telegram.call("copyMessage", {
-      chat_id: user.userId,
-      from_chat_id: message.chat.id,
-      message_id: message.message_id
-    });
-    await saveLink({
-      direction: "admin_to_user",
-      message,
-      response,
-      userId: user.userId,
-      topicId: user.topicId,
-      targetChatId: user.userId
-    });
-    return { status: "forwarded" };
   }
   async function updateLinkSnapshot(link, message, contentSnapshot) {
     await storage.saveMessageLink({
@@ -1827,8 +1576,6 @@ function createConversationService({
     return { status: "notified" };
   }
   return {
-    handlePrivateMessage: handlePrivateMessage2,
-    handleAdminMessage,
     handleEditedPrivateMessage,
     handleEditedAdminMessage
   };
@@ -3799,8 +3546,7 @@ function createLegacyConversationService(env) {
     storage: createD1Storage(env.TG_BOT_DB),
     telegram: { call: (method, body) => tgCall(env, method, body) },
     policy: ({ message, user }) => evaluateLegacyPolicy(env, message, user),
-    logger: Logger,
-    supergroupId: env.SUPERGROUP_ID
+    logger: Logger
   });
 }
 var idAllowlistParseCache = /* @__PURE__ */ new Map();
@@ -4018,7 +3764,7 @@ async function getOrCreateUserTopicRec(from, key, env, userId) {
       }
     }
     if (user?.topicId) {
-      const rec = { thread_id: user.topicId, title: buildTopicTitle2(resolvedFrom), closed: false };
+      const rec = { thread_id: user.topicId, title: buildTopicTitle(resolvedFrom), closed: false };
       await env.TOPIC_MAP.put(key, JSON.stringify(rec));
       await env.TOPIC_MAP.put(`thread:${user.topicId}`, String(userId));
       return rec;
@@ -4039,7 +3785,7 @@ async function getOrCreateUserTopicRec(from, key, env, userId) {
       await new Promise((resolve) => setTimeout(resolve, 150 + attempt * 75));
       const refreshed = await storage.getUser(userId);
       if (refreshed?.topicId) {
-        const rec = { thread_id: refreshed.topicId, title: buildTopicTitle2(resolvedFrom), closed: false };
+        const rec = { thread_id: refreshed.topicId, title: buildTopicTitle(resolvedFrom), closed: false };
         await env.TOPIC_MAP.put(key, JSON.stringify(rec));
         await env.TOPIC_MAP.put(`thread:${refreshed.topicId}`, String(userId));
         return rec;
@@ -4812,7 +4558,7 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
   } else if (!rec.title || rec.title === "User" || /^User @/i.test(rec.title)) {
     try {
       const resolvedFrom = await resolveUserFromForTopic(env, userId, msg.from);
-      const title = buildTopicTitle2(resolvedFrom);
+      const title = buildTopicTitle(resolvedFrom);
       if (title && title !== "User" && title !== rec.title) {
         const edit = await tgCall(env, "editForumTopic", {
           chat_id: env.SUPERGROUP_ID,
@@ -5452,7 +5198,7 @@ async function handleInfoCommand(env, threadId, userId) {
   const verifyStatus = await getVerificationState(env, userId);
   const banStatus = await env.TOPIC_MAP.get(`banned:${userId}`);
   const from = await resolveUserFromForTopic(env, userId, null);
-  const resolvedTitle = buildTopicTitle2(from);
+  const resolvedTitle = buildTopicTitle(from);
   if (userRec?.thread_id && resolvedTitle && resolvedTitle !== "User" && (!userRec.title || userRec.title === "User" || /^User(\s@|$)/i.test(userRec.title))) {
     try {
       const edit = await tgCall(env, "editForumTopic", {
@@ -6181,7 +5927,7 @@ async function handleCleanupCommand(threadId, env) {
   }
 }
 async function createTopic(from, key, env, userId) {
-  const title = buildTopicTitle2(from);
+  const title = buildTopicTitle(from);
   if (!env.SUPERGROUP_ID.toString().startsWith("-100")) throw new Error("SUPERGROUP_ID\u5FC5\u987B\u4EE5-100\u5F00\u5934");
   const res = await tgCall(env, "createForumTopic", { chat_id: env.SUPERGROUP_ID, name: title });
   if (!res.ok) throw new Error(`\u521B\u5EFA\u8BDD\u9898\u5931\u8D25: ${res.description}`);
@@ -6222,7 +5968,7 @@ async function updateThreadStatus(threadId, isClosed, env) {
     throw e;
   }
 }
-function buildTopicTitle2(from) {
+function buildTopicTitle(from) {
   const src = from || {};
   const firstName = (src.first_name || src.firstName || "").trim().substring(0, CONFIG.MAX_NAME_LENGTH);
   const lastName = (src.last_name || src.lastName || "").trim().substring(0, CONFIG.MAX_NAME_LENGTH);
