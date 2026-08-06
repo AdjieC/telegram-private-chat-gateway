@@ -152,7 +152,7 @@ npm run build:single
 node --check dist/worker.single.js
 ```
 
-提交时若变更了 `worker.js` / `src/` / `package.json`，`.githooks/pre-commit` 会自动执行 `build:single` 并 stage `dist/worker.single.js`。  
+提交时若变更了 `worker.js` / `src/` / `package.json` / `package-lock.json`，`.githooks/pre-commit` 会自动递增版本号（`worker.js` 的 `GATEWAY_VERSION` 与 `package.json` / `package-lock.json` 的 `version` 同步；patch 逢 10 进位到 minor，minor 逢 10 进位到 major），随后执行 `build:single` 并 stage `dist/worker.single.js`，保证版本号与构建产物一致。
 首次克隆后执行 `npm install`（或 `npm run hooks:install`）以启用 hooks。
 
 ## 推荐开发顺序
