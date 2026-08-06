@@ -2235,6 +2235,9 @@ function createAdminCommandHandlers(deps) {
     getRecentSystemErrors,
     handleCleanupCommand: handleCleanupCommand2,
     handleListWordsCommand: handleListWordsCommand2,
+    // 存储依赖注入：由调用方提供，避免本模块直连 D1/migrations
+    createD1Storage: createD1Storage2,
+    ensureMigrations: ensureMigrations2,
     userActions = {}
   } = deps;
   const sysinfoKvCache = { ts: 0, data: null, ttlMs: 45e3 };
@@ -2317,10 +2320,10 @@ function createAdminCommandHandlers(deps) {
     const today = await getDailyStats(env, day);
     let summary = summarizeInboundActivity([], { topN: 10 });
     let source = "none";
-    const storage = env.TG_BOT_DB ? createD1Storage(env.TG_BOT_DB) : null;
+    const storage = env.TG_BOT_DB ? createD1Storage2(env.TG_BOT_DB) : null;
     if (storage) {
       try {
-        await ensureMigrations(env.TG_BOT_DB);
+        await ensureMigrations2(env.TG_BOT_DB);
         const rows = await storage.getInboundMessageRows(dayStart, 2e3);
         if (rows.length) {
           summary = summarizeInboundActivity(rows, { topN: 10 });
@@ -2498,177 +2501,197 @@ function createAdminCommandHandlers(deps) {
     sysinfoKvCache.data = rows;
     return rows;
   }
-  async function buildSysinfoPageText(env, page = "overview") {
-    const started = Date.now();
+  async function renderOverviewStatsSection(env, page) {
     const hasKv = Boolean(env.TOPIC_MAP && typeof env.TOPIC_MAP.get === "function");
     const hasD1 = Boolean(env.TG_BOT_DB && typeof env.TG_BOT_DB.prepare === "function");
     const baseUrl = String(env.VERIFICATION_PAGE_URL || "").replace(/\/$/, "") || "(\u672A\u914D\u7F6E VERIFICATION_PAGE_URL)";
     const turnstileOn = !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY && env.VERIFICATION_PAGE_URL);
     const lines = [];
     let activity = null;
-    if (page === "overview" || page === "stats") {
-      lines.push(`\u{1F5A5} <b>\u7CFB\u7EDF \xB7 ${page === "stats" ? "\u4ECA\u65E5\u7EDF\u8BA1" : "\u6982\u89C8"}</b>`);
-      lines.push(`<code>v${GATEWAY_VERSION2}</code>`);
-      lines.push("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-      lines.push(`${statusChip(true, "Worker \u8FD0\u884C\u4E2D")}`);
-      lines.push(`${statusChip(hasKv, "KV \u5DF2\u7ED1\u5B9A", "KV \u7F3A\u5931")} \xB7 ${statusChip(hasD1, "D1 \u5DF2\u7ED1\u5B9A", "D1 \u7F3A\u5931")}`);
-      lines.push(`\u9A8C\u8BC1: ${turnstileOn ? "\u{1F6E1} Turnstile" : "\u{1F4DD} \u672C\u5730\u9898\u5E93"} \xB7 Owner: ${parseIdAllowlist2(env.OWNER_IDS).length > 0 ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E"}`);
-      lines.push(`\u8D85\u7EA7\u7FA4 ID: ${String(env.SUPERGROUP_ID || "").startsWith("-100") ? "\u2705 \u683C\u5F0F\u6B63\u786E" : "\u274C \u9700 -100 \u5F00\u5934"}`);
-      lines.push("");
-      if (hasD1) {
-        try {
-          await ensureMigrations(env.TG_BOT_DB);
-          const stats = await createD1Storage(env.TG_BOT_DB).getSystemStats();
-          lines.push("\u{1F4CA} <b>\u4F1A\u8BDD</b>");
-          lines.push(`  \u7528\u6237 <b>${stats.usersTotal}</b>  \xB7  Topic ${stats.usersWithTopic}`);
-          lines.push(`  \u5C01\u7981 ${stats.usersBanned}  \xB7  \u5173\u95ED ${stats.usersClosed || 0}`);
-          lines.push("\u{1F5C2} <b>\u6570\u636E</b>");
-          lines.push(`  \u6620\u5C04 ${stats.messageLinks}  \xB7  \u89C4\u5219 ${stats.rulesTotal}`);
-          lines.push(`  Update \u5904\u7406\u4E2D/\u53EF\u91CD\u8BD5  ${stats.updatesProcessing}/${stats.updatesRetryable}`);
-          const recent = stats.recentActiveUsers?.length ? stats.recentActiveUsers : stats.lastActiveUser ? [stats.lastActiveUser] : [];
-          if (recent.length) {
-            lines.push("");
-            lines.push("<b>\u6700\u8FD1\u6D3B\u8DC3</b>");
-            for (const u of recent.slice(0, 5)) {
-              const name = escapeHtml([u.firstName, u.lastName].filter(Boolean).join(" ").trim() || "\u672A\u77E5");
-              const un = u.username ? `@${escapeHtml(u.username)}` : "\u65E0\u7528\u6237\u540D";
-              lines.push(`\u2022 ${name} \xB7 ${un}`);
-              lines.push(`  <code>${escapeHtml(u.userId)}</code> \xB7 ${formatTimeBoth(u.lastMessageAt)}`);
-            }
-          } else {
-            lines.push("\u6700\u8FD1\u6D3B\u8DC3: \u6682\u65E0");
-          }
-          if (stats.updatesProcessing > 20) {
-            lines.push("");
-            lines.push("\u26A0\uFE0F Update \u5904\u7406\u4E2D\u6570\u91CF\u504F\u9AD8\uFF0C\u8BF7\u68C0\u67E5 Webhook \u662F\u5426\u6301\u7EED 5xx");
-          }
-        } catch (e) {
-          recordSystemError2("sysinfo_d1_failed", e, {}, env);
-          lines.push(`D1 \u8BFB\u53D6\u5931\u8D25: ${escapeHtml(e?.message || String(e))}`);
-        }
-      } else {
-        lines.push("D1 \u672A\u7ED1\u5B9A\uFF0C\u65E0\u6CD5\u663E\u793A\u4F1A\u8BDD\u7EDF\u8BA1");
-      }
-      if (page === "overview") {
-        try {
-          const recentErrs = await collectRecentErrors(env);
-          if (recentErrs.length) {
-            lines.push("");
-            lines.push(`\u26A0\uFE0F \u6700\u8FD1\u9519\u8BEF <b>${recentErrs.length}</b> \u6761 \xB7 \u70B9\u4E0B\u65B9\u300C\u9519\u8BEF\u300D\u5206\u9875\u67E5\u770B`);
-          }
-        } catch {
-        }
-      }
-      if (page === "stats") {
-        activity = await loadTodayActivity(env);
-        const today = activity.today;
-        const yday = await getDailyStats(env, opsYesterdayKey());
-        const week = await getRecentDailySeries(env, 7);
-        const peaks = pickPeakDays(week, 2);
-        lines.push("");
-        lines.push(`\u{1F4C5} <b>\u4ECA\u65E5</b> <code>${escapeHtml(today.day)}</code> <i>CST UTC+${OPS_TZ_OFFSET_HOURS}</i>`);
-        lines.push(formatCompareLine("\u{1F4AC} \u5165\u7AD9", today.messages_in, yday.messages_in));
-        lines.push(formatCompareLine("\u2705 \u9A8C\u8BC1", today.verifies, yday.verifies));
-        lines.push(formatCompareLine("\u{1F6AB} \u5C01\u7981", today.bans, yday.bans));
-        lines.push(formatCompareLine("\u{1F6E1} \u5783\u573E", today.spam, yday.spam));
-        lines.push(`  <i>\u6628 ${escapeHtml(yday.day)}\uFF1A\u5165\u7AD9 ${yday.messages_in} \xB7 \u9A8C\u8BC1 ${yday.verifies} \xB7 \u5783\u573E ${yday.spam}</i>`);
-        if (today.messages_in === 0 && yday.messages_in === 0) {
+    lines.push(`\u{1F5A5} <b>\u7CFB\u7EDF \xB7 ${page === "stats" ? "\u4ECA\u65E5\u7EDF\u8BA1" : "\u6982\u89C8"}</b>`);
+    lines.push(`<code>v${GATEWAY_VERSION2}</code>`);
+    lines.push("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+    lines.push(`${statusChip(true, "Worker \u8FD0\u884C\u4E2D")}`);
+    lines.push(`${statusChip(hasKv, "KV \u5DF2\u7ED1\u5B9A", "KV \u7F3A\u5931")} \xB7 ${statusChip(hasD1, "D1 \u5DF2\u7ED1\u5B9A", "D1 \u7F3A\u5931")}`);
+    lines.push(`\u9A8C\u8BC1: ${turnstileOn ? "\u{1F6E1} Turnstile" : "\u{1F4DD} \u672C\u5730\u9898\u5E93"} \xB7 Owner: ${parseIdAllowlist2(env.OWNER_IDS).length > 0 ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E"}`);
+    lines.push(`\u8D85\u7EA7\u7FA4 ID: ${String(env.SUPERGROUP_ID || "").startsWith("-100") ? "\u2705 \u683C\u5F0F\u6B63\u786E" : "\u274C \u9700 -100 \u5F00\u5934"}`);
+    lines.push("");
+    if (hasD1) {
+      try {
+        await ensureMigrations2(env.TG_BOT_DB);
+        const stats = await createD1Storage2(env.TG_BOT_DB).getSystemStats();
+        lines.push("\u{1F4CA} <b>\u4F1A\u8BDD</b>");
+        lines.push(`  \u7528\u6237 <b>${stats.usersTotal}</b>  \xB7  Topic ${stats.usersWithTopic}`);
+        lines.push(`  \u5C01\u7981 ${stats.usersBanned}  \xB7  \u5173\u95ED ${stats.usersClosed || 0}`);
+        lines.push("\u{1F5C2} <b>\u6570\u636E</b>");
+        lines.push(`  \u6620\u5C04 ${stats.messageLinks}  \xB7  \u89C4\u5219 ${stats.rulesTotal}`);
+        lines.push(`  Update \u5904\u7406\u4E2D/\u53EF\u91CD\u8BD5  ${stats.updatesProcessing}/${stats.updatesRetryable}`);
+        const recent = stats.recentActiveUsers?.length ? stats.recentActiveUsers : stats.lastActiveUser ? [stats.lastActiveUser] : [];
+        if (recent.length) {
           lines.push("");
-          lines.push(...formatEmptyActivityHints());
+          lines.push("<b>\u6700\u8FD1\u6D3B\u8DC3</b>");
+          for (const u of recent.slice(0, 5)) {
+            const name = escapeHtml([u.firstName, u.lastName].filter(Boolean).join(" ").trim() || "\u672A\u77E5");
+            const un = u.username ? `@${escapeHtml(u.username)}` : "\u65E0\u7528\u6237\u540D";
+            lines.push(`\u2022 ${name} \xB7 ${un}`);
+            lines.push(`  <code>${escapeHtml(u.userId)}</code> \xB7 ${formatTimeBoth(u.lastMessageAt)}`);
+          }
+        } else {
+          lines.push("\u6700\u8FD1\u6D3B\u8DC3: \u6682\u65E0");
         }
-        lines.push("");
-        lines.push("\u{1F4C8} <b>\u8FD1 7 \u65E5\u5165\u7AD9</b> <i>CST</i>");
-        lines.push(`<code>${formatSparkline(week.map((d) => d.messages_in))}</code>`);
-        lines.push(week.map((d) => {
-          const mmdd = d.day.slice(5);
-          return `${mmdd}:${d.messages_in}`;
-        }).join(" \xB7 "));
-        lines.push(`\u5CF0\u503C\u65E5 ${escapeHtml(formatPeakDays(peaks))}`);
-        lines.push("");
-        lines.push(...formatHeatBlock(activity.summary.hours));
-        if (activity.rankingUsers.length) {
+        if (stats.updatesProcessing > 20) {
           lines.push("");
-          lines.push("\u{1F3C6} <b>\u4ECA\u65E5 Top</b> <i>\uFF08\u5B8C\u6574\u89C1 /rank\uFF09</i>");
-          lines.push(...formatRankingBlock(activity.rankingUsers.slice(0, 3)));
+          lines.push("\u26A0\uFE0F Update \u5904\u7406\u4E2D\u6570\u91CF\u504F\u9AD8\uFF0C\u8BF7\u68C0\u67E5 Webhook \u662F\u5426\u6301\u7EED 5xx");
         }
+      } catch (e) {
+        recordSystemError2("sysinfo_d1_failed", e, {}, env);
+        lines.push(`D1 \u8BFB\u53D6\u5931\u8D25: ${escapeHtml(e?.message || String(e))}`);
       }
-      lines.push("");
-      lines.push("\u{1F517} <b>\u7AEF\u70B9</b>");
-      lines.push(`<code>${escapeHtml(baseUrl)}/health</code>`);
-      lines.push(`<code>\u2026/health/env</code> \xB7 <code>\u2026/health/d1</code> \xB7 <code>\u2026/verify</code>`);
-      lines.push(`Webhook <code>POST ${escapeHtml(baseUrl)}/</code>`);
+    } else {
+      lines.push("D1 \u672A\u7ED1\u5B9A\uFF0C\u65E0\u6CD5\u663E\u793A\u4F1A\u8BDD\u7EDF\u8BA1");
     }
-    if (page === "activity") {
+    if (page === "overview") {
+      try {
+        const recentErrs = await collectRecentErrors(env);
+        if (recentErrs.length) {
+          lines.push("");
+          lines.push(`\u26A0\uFE0F \u6700\u8FD1\u9519\u8BEF <b>${recentErrs.length}</b> \u6761 \xB7 \u70B9\u4E0B\u65B9\u300C\u9519\u8BEF\u300D\u5206\u9875\u67E5\u770B`);
+        }
+      } catch {
+      }
+    }
+    if (page === "stats") {
       activity = await loadTodayActivity(env);
-      const unique = activity.summary.uniqueUsers || activity.rankingUsers.length;
-      lines.push("\u{1F525} <b>\u7CFB\u7EDF \xB7 \u4ECA\u65E5\u6D3B\u8DC3</b>");
-      lines.push(`<code>v${GATEWAY_VERSION2}</code> \xB7 <code>${escapeHtml(activity.day)}</code> CST`);
-      lines.push("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-      lines.push(`\u5165\u7AD9\u6837\u672C <b>${activity.summary.total}</b> \xB7 \u72EC\u7ACB\u7528\u6237 <b>${unique}</b>`);
-      lines.push(`\u6570\u636E\u6E90: ${escapeHtml(activitySourceLabel(activity.source))}`);
+      const today = activity.today;
+      const yday = await getDailyStats(env, opsYesterdayKey());
+      const week = await getRecentDailySeries(env, 7);
+      const peaks = pickPeakDays(week, 2);
       lines.push("");
-      if (activity.summary.total === 0 && !activity.rankingUsers.length) {
+      lines.push(`\u{1F4C5} <b>\u4ECA\u65E5</b> <code>${escapeHtml(today.day)}</code> <i>CST UTC+${OPS_TZ_OFFSET_HOURS}</i>`);
+      lines.push(formatCompareLine("\u{1F4AC} \u5165\u7AD9", today.messages_in, yday.messages_in));
+      lines.push(formatCompareLine("\u2705 \u9A8C\u8BC1", today.verifies, yday.verifies));
+      lines.push(formatCompareLine("\u{1F6AB} \u5C01\u7981", today.bans, yday.bans));
+      lines.push(formatCompareLine("\u{1F6E1} \u5783\u573E", today.spam, yday.spam));
+      lines.push(`  <i>\u6628 ${escapeHtml(yday.day)}\uFF1A\u5165\u7AD9 ${yday.messages_in} \xB7 \u9A8C\u8BC1 ${yday.verifies} \xB7 \u5783\u573E ${yday.spam}</i>`);
+      if (today.messages_in === 0 && yday.messages_in === 0) {
+        lines.push("");
         lines.push(...formatEmptyActivityHints());
-        lines.push("");
       }
+      lines.push("");
+      lines.push("\u{1F4C8} <b>\u8FD1 7 \u65E5\u5165\u7AD9</b> <i>CST</i>");
+      lines.push(`<code>${formatSparkline(week.map((d) => d.messages_in))}</code>`);
+      lines.push(week.map((d) => {
+        const mmdd = d.day.slice(5);
+        return `${mmdd}:${d.messages_in}`;
+      }).join(" \xB7 "));
+      lines.push(`\u5CF0\u503C\u65E5 ${escapeHtml(formatPeakDays(peaks))}`);
+      lines.push("");
       lines.push(...formatHeatBlock(activity.summary.hours));
-      lines.push("");
-      lines.push("\u{1F3C6} <b>\u6D3B\u8DC3\u6392\u884C</b>");
-      lines.push(...formatRankingBlock(activity.rankingUsers, {
-        withCount: activity.rankingUsers.some((u) => u.count != null)
-      }));
-      lines.push("");
-      lines.push("<i>\u70B9\u4E0B\u65B9\u7528\u6237\u6309\u94AE\u6253\u5F00\u9762\u677F \xB7 \u65E5\u5207\u4E0E\u70ED\u529B\u5747\u4E3A\u4E2D\u56FD\u65F6\u95F4 CST</i>");
-    }
-    if (page === "storage") {
-      lines.push("\u{1F5C4} <b>\u7CFB\u7EDF \xB7 \u5B58\u50A8</b>");
-      lines.push(`<code>v${GATEWAY_VERSION2}</code>`);
-      lines.push("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-      if (hasD1) {
-        try {
-          const stats = await createD1Storage(env.TG_BOT_DB).getSystemStats();
-          lines.push("<b>D1</b>");
-          lines.push(`\u2022 users: ${stats.usersTotal} (topic ${stats.usersWithTopic})`);
-          lines.push(`\u2022 banned ${stats.usersBanned} \xB7 closed ${stats.usersClosed || 0}`);
-          lines.push(`\u2022 message_links ${stats.messageLinks} \xB7 rules ${stats.rulesTotal}`);
-          lines.push(`\u2022 processed processing/retryable: ${stats.updatesProcessing}/${stats.updatesRetryable}`);
-        } catch (e) {
-          lines.push(`D1: ${escapeHtml(e?.message || String(e))}`);
-        }
-      } else lines.push("D1: \u672A\u7ED1\u5B9A");
-      lines.push("");
-      lines.push("<b>KV \u524D\u7F00</b>");
-      if (hasKv) {
-        try {
-          const rows = await getCachedKvPrefixCounts(env);
-          for (const r of rows) {
-            lines.push(`\u2022 ${r.label} <code>${r.prefix}</code> ${r.total}${r.truncated ? "+" : ""}`);
-          }
-          lines.push("<i>\u8BA1\u6570\u7F13\u5B58\u7EA6 45s</i>");
-        } catch (e) {
-          lines.push(`KV: ${escapeHtml(e?.message || String(e))}`);
-        }
-      } else lines.push("KV: \u672A\u7ED1\u5B9A");
-    }
-    if (page === "errors") {
-      lines.push("\u26A0\uFE0F <b>\u7CFB\u7EDF \xB7 \u6700\u8FD1\u9519\u8BEF</b>");
-      lines.push(`<code>v${GATEWAY_VERSION2}</code>`);
-      lines.push("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-      const top = await collectRecentErrors(env);
-      if (!top.length) {
-        lines.push("\u2728 \u6682\u65E0\u9519\u8BEF\u8BB0\u5F55");
-        lines.push("<i>\u51B7\u542F\u52A8\u540E\u5185\u5B58\u7F13\u51B2\u4F1A\u6E05\u7A7A\uFF1B\u6301\u7EED 5xx \u65F6\u8BF7\u67E5 /health \u4E0E CF \u65E5\u5FD7</i>");
-      } else {
-        for (const err of top) {
-          const act = escapeHtml(err.action || "?");
-          const msg = escapeHtml(String(err.error || "").slice(0, 140));
-          const uid = err.userId ? ` \xB7 uid ${escapeHtml(err.userId)}` : "";
-          lines.push(`\u{1F534} <b>${act}</b>${uid}`);
-          lines.push(`   ${formatRelativeTime(err.ts)} \xB7 ${msg}`);
-        }
+      if (activity.rankingUsers.length) {
         lines.push("");
-        lines.push("<i>\u5EFA\u8BAE\uFF1A\u5BF9\u7167 Webhook \u662F\u5426 5xx\u3001D1/KV \u7ED1\u5B9A\u662F\u5426\u6B63\u5E38</i>");
+        lines.push("\u{1F3C6} <b>\u4ECA\u65E5 Top</b> <i>\uFF08\u5B8C\u6574\u89C1 /rank\uFF09</i>");
+        lines.push(...formatRankingBlock(activity.rankingUsers.slice(0, 3)));
       }
+    }
+    lines.push("");
+    lines.push("\u{1F517} <b>\u7AEF\u70B9</b>");
+    lines.push(`<code>${escapeHtml(baseUrl)}/health</code>`);
+    lines.push(`<code>\u2026/health/env</code> \xB7 <code>\u2026/health/d1</code> \xB7 <code>\u2026/verify</code>`);
+    lines.push(`Webhook <code>POST ${escapeHtml(baseUrl)}/</code>`);
+    return { lines, activity };
+  }
+  async function renderActivityPage(env) {
+    const lines = [];
+    const activity = await loadTodayActivity(env);
+    const unique = activity.summary.uniqueUsers || activity.rankingUsers.length;
+    lines.push("\u{1F525} <b>\u7CFB\u7EDF \xB7 \u4ECA\u65E5\u6D3B\u8DC3</b>");
+    lines.push(`<code>v${GATEWAY_VERSION2}</code> \xB7 <code>${escapeHtml(activity.day)}</code> CST`);
+    lines.push("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+    lines.push(`\u5165\u7AD9\u6837\u672C <b>${activity.summary.total}</b> \xB7 \u72EC\u7ACB\u7528\u6237 <b>${unique}</b>`);
+    lines.push(`\u6570\u636E\u6E90: ${escapeHtml(activitySourceLabel(activity.source))}`);
+    lines.push("");
+    if (activity.summary.total === 0 && !activity.rankingUsers.length) {
+      lines.push(...formatEmptyActivityHints());
+      lines.push("");
+    }
+    lines.push(...formatHeatBlock(activity.summary.hours));
+    lines.push("");
+    lines.push("\u{1F3C6} <b>\u6D3B\u8DC3\u6392\u884C</b>");
+    lines.push(...formatRankingBlock(activity.rankingUsers, {
+      withCount: activity.rankingUsers.some((u) => u.count != null)
+    }));
+    lines.push("");
+    lines.push("<i>\u70B9\u4E0B\u65B9\u7528\u6237\u6309\u94AE\u6253\u5F00\u9762\u677F \xB7 \u65E5\u5207\u4E0E\u70ED\u529B\u5747\u4E3A\u4E2D\u56FD\u65F6\u95F4 CST</i>");
+    return { lines, activity };
+  }
+  async function renderStoragePage(env) {
+    const hasKv = Boolean(env.TOPIC_MAP && typeof env.TOPIC_MAP.get === "function");
+    const hasD1 = Boolean(env.TG_BOT_DB && typeof env.TG_BOT_DB.prepare === "function");
+    const lines = [];
+    lines.push("\u{1F5C4} <b>\u7CFB\u7EDF \xB7 \u5B58\u50A8</b>");
+    lines.push(`<code>v${GATEWAY_VERSION2}</code>`);
+    lines.push("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+    if (hasD1) {
+      try {
+        const stats = await createD1Storage2(env.TG_BOT_DB).getSystemStats();
+        lines.push("<b>D1</b>");
+        lines.push(`\u2022 users: ${stats.usersTotal} (topic ${stats.usersWithTopic})`);
+        lines.push(`\u2022 banned ${stats.usersBanned} \xB7 closed ${stats.usersClosed || 0}`);
+        lines.push(`\u2022 message_links ${stats.messageLinks} \xB7 rules ${stats.rulesTotal}`);
+        lines.push(`\u2022 processed processing/retryable: ${stats.updatesProcessing}/${stats.updatesRetryable}`);
+      } catch (e) {
+        lines.push(`D1: ${escapeHtml(e?.message || String(e))}`);
+      }
+    } else lines.push("D1: \u672A\u7ED1\u5B9A");
+    lines.push("");
+    lines.push("<b>KV \u524D\u7F00</b>");
+    if (hasKv) {
+      try {
+        const rows = await getCachedKvPrefixCounts(env);
+        for (const r of rows) {
+          lines.push(`\u2022 ${r.label} <code>${r.prefix}</code> ${r.total}${r.truncated ? "+" : ""}`);
+        }
+        lines.push("<i>\u8BA1\u6570\u7F13\u5B58\u7EA6 45s</i>");
+      } catch (e) {
+        lines.push(`KV: ${escapeHtml(e?.message || String(e))}`);
+      }
+    } else lines.push("KV: \u672A\u7ED1\u5B9A");
+    return lines;
+  }
+  async function renderErrorsPage(env) {
+    const lines = [];
+    lines.push("\u26A0\uFE0F <b>\u7CFB\u7EDF \xB7 \u6700\u8FD1\u9519\u8BEF</b>");
+    lines.push(`<code>v${GATEWAY_VERSION2}</code>`);
+    lines.push("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+    const top = await collectRecentErrors(env);
+    if (!top.length) {
+      lines.push("\u2728 \u6682\u65E0\u9519\u8BEF\u8BB0\u5F55");
+      lines.push("<i>\u51B7\u542F\u52A8\u540E\u5185\u5B58\u7F13\u51B2\u4F1A\u6E05\u7A7A\uFF1B\u6301\u7EED 5xx \u65F6\u8BF7\u67E5 /health \u4E0E CF \u65E5\u5FD7</i>");
+    } else {
+      for (const err of top) {
+        const act = escapeHtml(err.action || "?");
+        const msg = escapeHtml(String(err.error || "").slice(0, 140));
+        const uid = err.userId ? ` \xB7 uid ${escapeHtml(err.userId)}` : "";
+        lines.push(`\u{1F534} <b>${act}</b>${uid}`);
+        lines.push(`   ${formatRelativeTime(err.ts)} \xB7 ${msg}`);
+      }
+      lines.push("");
+      lines.push("<i>\u5EFA\u8BAE\uFF1A\u5BF9\u7167 Webhook \u662F\u5426 5xx\u3001D1/KV \u7ED1\u5B9A\u662F\u5426\u6B63\u5E38</i>");
+    }
+    return lines;
+  }
+  async function buildSysinfoPageText(env, page = "overview") {
+    const started = Date.now();
+    let lines = [];
+    let activity = null;
+    if (page === "overview" || page === "stats") {
+      ({ lines, activity } = await renderOverviewStatsSection(env, page));
+    } else if (page === "activity") {
+      ({ lines, activity } = await renderActivityPage(env));
+    } else if (page === "storage") {
+      lines = await renderStoragePage(env);
+    } else if (page === "errors") {
+      lines = await renderErrorsPage(env);
     }
     lines.push("");
     lines.push(`\u23F1 ${Date.now() - started} ms \xB7 \u70B9\u4E0B\u65B9\u5207\u6362\u5206\u9875`);
@@ -2797,8 +2820,8 @@ function createAdminCommandHandlers(deps) {
     let userMap = /* @__PURE__ */ new Map();
     if (env.TG_BOT_DB) {
       try {
-        await ensureMigrations(env.TG_BOT_DB);
-        userMap = await createD1Storage(env.TG_BOT_DB).getUsersByIds(matches.map((m) => m.userId));
+        await ensureMigrations2(env.TG_BOT_DB);
+        userMap = await createD1Storage2(env.TG_BOT_DB).getUsersByIds(matches.map((m) => m.userId));
       } catch {
       }
     }
@@ -2883,8 +2906,8 @@ function createAdminCommandHandlers(deps) {
       return;
     }
     try {
-      await ensureMigrations(env.TG_BOT_DB);
-      const hits = await createD1Storage(env.TG_BOT_DB).searchUsers(q, 10);
+      await ensureMigrations2(env.TG_BOT_DB);
+      const hits = await createD1Storage2(env.TG_BOT_DB).searchUsers(q, 10);
       if (!hits.length) {
         await tgCall2(env, "sendMessage", {
           chat_id: env.SUPERGROUP_ID,
@@ -4778,6 +4801,8 @@ function getAdminHandlers() {
     getRecentSystemErrors: () => recentSystemErrors,
     handleCleanupCommand,
     handleListWordsCommand,
+    createD1Storage,
+    ensureMigrations,
     userActions: {
       ban: handleBanCommand,
       unban: handleUnbanCommand,

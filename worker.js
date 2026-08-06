@@ -1852,6 +1852,8 @@ function getAdminHandlers() {
     getRecentSystemErrors: () => recentSystemErrors,
     handleCleanupCommand,
     handleListWordsCommand,
+    createD1Storage,
+    ensureMigrations,
     userActions: {
       ban: handleBanCommand,
       unban: handleUnbanCommand,

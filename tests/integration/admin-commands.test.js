@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAdminCommandHandlers } from '../../src/admin-commands.js';
+import { createD1Storage } from '../../src/storage/d1-storage.js';
+import { ensureMigrations } from '../../src/storage/migrations.js';
 import { createMockEnv } from '../helpers/mock-env.js';
 
 describe('admin-commands handlers', () => {
@@ -21,6 +23,8 @@ describe('admin-commands handlers', () => {
       safeGetJSON: async () => null,
       resolveThreadIdForUser: async () => 10,
       getRecentSystemErrors: () => [],
+      createD1Storage,
+      ensureMigrations,
       userActions: {},
     });
   }

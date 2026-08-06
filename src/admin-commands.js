@@ -31,8 +31,6 @@ import {
   buildCleanupConfirmKeyboard,
   formatEmptyActivityHints,
 } from './admin-ui-format.js';
-import { createD1Storage } from './storage/d1-storage.js';
-import { ensureMigrations } from './storage/migrations.js';
 
 /**
  * @param {object} deps
@@ -50,9 +48,13 @@ export function createAdminCommandHandlers(deps) {
     getRecentSystemErrors,
     handleCleanupCommand,
     handleListWordsCommand,
+    // 存储依赖注入：由调用方提供，避免本模块直连 D1/migrations
+    createD1Storage,
+    ensureMigrations,
     userActions = {},
   } = deps;
 
+  // 每个 handler 实例独立缓存，避免模块级共享状态污染测试
   const sysinfoKvCache = { ts: 0, data: null, ttlMs: 45000 };
 
 function emptyDailyStats(day) {
@@ -340,12 +342,10 @@ async function getCachedKvPrefixCounts(env) {
 }
 
 /**
- * 构建 sysinfo 某一页正文
- * @param {'overview'|'storage'|'errors'|'stats'|'activity'} page
- * @returns {Promise<{text:string, activity:object|null}>}
+ * 系统概览 / 今日统计共享区块（overview 与 stats 共用的页头与统计行）
+ * @returns {Promise<{lines:string[], activity:object|null}>}
  */
-async function buildSysinfoPageText(env, page = 'overview') {
-  const started = Date.now();
+async function renderOverviewStatsSection(env, page) {
   const hasKv = Boolean(env.TOPIC_MAP && typeof env.TOPIC_MAP.get === 'function');
   const hasD1 = Boolean(env.TG_BOT_DB && typeof env.TG_BOT_DB.prepare === 'function');
   const baseUrl = String(env.VERIFICATION_PAGE_URL || '').replace(/\/$/, '') || '(未配置 VERIFICATION_PAGE_URL)';
@@ -353,182 +353,214 @@ async function buildSysinfoPageText(env, page = 'overview') {
   const lines = [];
   let activity = null;
 
-  if (page === 'overview' || page === 'stats') {
-    lines.push(`🖥 <b>系统 · ${page === 'stats' ? '今日统计' : '概览'}</b>`);
-    lines.push(`<code>v${GATEWAY_VERSION}</code>`);
-    lines.push('────────────────');
-    lines.push(`${statusChip(true, 'Worker 运行中')}`);
-    lines.push(`${statusChip(hasKv, 'KV 已绑定', 'KV 缺失')} · ${statusChip(hasD1, 'D1 已绑定', 'D1 缺失')}`);
-    lines.push(`验证: ${turnstileOn ? '🛡 Turnstile' : '📝 本地题库'} · Owner: ${
-      parseIdAllowlist(env.OWNER_IDS).length > 0 ? '已配置' : '未配置'
-    }`);
-    lines.push(`超级群 ID: ${
-      String(env.SUPERGROUP_ID || '').startsWith('-100') ? '✅ 格式正确' : '❌ 需 -100 开头'
-    }`);
-    lines.push('');
+  lines.push(`🖥 <b>系统 · ${page === 'stats' ? '今日统计' : '概览'}</b>`);
+  lines.push(`<code>v${GATEWAY_VERSION}</code>`);
+  lines.push('────────────────');
+  lines.push(`${statusChip(true, 'Worker 运行中')}`);
+  lines.push(`${statusChip(hasKv, 'KV 已绑定', 'KV 缺失')} · ${statusChip(hasD1, 'D1 已绑定', 'D1 缺失')}`);
+  lines.push(`验证: ${turnstileOn ? '🛡 Turnstile' : '📝 本地题库'} · Owner: ${
+    parseIdAllowlist(env.OWNER_IDS).length > 0 ? '已配置' : '未配置'
+  }`);
+  lines.push(`超级群 ID: ${
+    String(env.SUPERGROUP_ID || '').startsWith('-100') ? '✅ 格式正确' : '❌ 需 -100 开头'
+  }`);
+  lines.push('');
 
-    if (hasD1) {
-      try {
-        await ensureMigrations(env.TG_BOT_DB);
-        const stats = await createD1Storage(env.TG_BOT_DB).getSystemStats();
-        lines.push('📊 <b>会话</b>');
-        lines.push(`  用户 <b>${stats.usersTotal}</b>  ·  Topic ${stats.usersWithTopic}`);
-        lines.push(`  封禁 ${stats.usersBanned}  ·  关闭 ${stats.usersClosed || 0}`);
-        lines.push('🗂 <b>数据</b>');
-        lines.push(`  映射 ${stats.messageLinks}  ·  规则 ${stats.rulesTotal}`);
-        lines.push(`  Update 处理中/可重试  ${stats.updatesProcessing}/${stats.updatesRetryable}`);
-        const recent = stats.recentActiveUsers?.length
-          ? stats.recentActiveUsers
-          : (stats.lastActiveUser ? [stats.lastActiveUser] : []);
-        if (recent.length) {
-          lines.push('');
-          lines.push('<b>最近活跃</b>');
-          for (const u of recent.slice(0, 5)) {
-            const name = escapeHtml([u.firstName, u.lastName].filter(Boolean).join(' ').trim() || '未知');
-            const un = u.username ? `@${escapeHtml(u.username)}` : '无用户名';
-            lines.push(`• ${name} · ${un}`);
-            lines.push(`  <code>${escapeHtml(u.userId)}</code> · ${formatTimeBoth(u.lastMessageAt)}`);
-          }
-        } else {
-          lines.push('最近活跃: 暂无');
-        }
-        if (stats.updatesProcessing > 20) {
-          lines.push('');
-          lines.push('⚠️ Update 处理中数量偏高，请检查 Webhook 是否持续 5xx');
-        }
-      } catch (e) {
-        recordSystemError('sysinfo_d1_failed', e, {}, env);
-        lines.push(`D1 读取失败: ${escapeHtml(e?.message || String(e))}`);
-      }
-    } else {
-      lines.push('D1 未绑定，无法显示会话统计');
-    }
-
-    // 概览页：轻量告警入口
-    if (page === 'overview') {
-      try {
-        const recentErrs = await collectRecentErrors(env);
-        if (recentErrs.length) {
-          lines.push('');
-          lines.push(`⚠️ 最近错误 <b>${recentErrs.length}</b> 条 · 点下方「错误」分页查看`);
-        }
-      } catch { /* ignore */ }
-    }
-
-    if (page === 'stats') {
-      activity = await loadTodayActivity(env);
-      const today = activity.today;
-      const yday = await getDailyStats(env, opsYesterdayKey());
-      const week = await getRecentDailySeries(env, 7);
-      const peaks = pickPeakDays(week, 2);
-      lines.push('');
-      lines.push(`📅 <b>今日</b> <code>${escapeHtml(today.day)}</code> <i>CST UTC+${OPS_TZ_OFFSET_HOURS}</i>`);
-      lines.push(formatCompareLine('💬 入站', today.messages_in, yday.messages_in));
-      lines.push(formatCompareLine('✅ 验证', today.verifies, yday.verifies));
-      lines.push(formatCompareLine('🚫 封禁', today.bans, yday.bans));
-      lines.push(formatCompareLine('🛡 垃圾', today.spam, yday.spam));
-      lines.push(`  <i>昨 ${escapeHtml(yday.day)}：入站 ${yday.messages_in} · 验证 ${yday.verifies} · 垃圾 ${yday.spam}</i>`);
-      if (today.messages_in === 0 && yday.messages_in === 0) {
+  if (hasD1) {
+    try {
+      await ensureMigrations(env.TG_BOT_DB);
+      const stats = await createD1Storage(env.TG_BOT_DB).getSystemStats();
+      lines.push('📊 <b>会话</b>');
+      lines.push(`  用户 <b>${stats.usersTotal}</b>  ·  Topic ${stats.usersWithTopic}`);
+      lines.push(`  封禁 ${stats.usersBanned}  ·  关闭 ${stats.usersClosed || 0}`);
+      lines.push('🗂 <b>数据</b>');
+      lines.push(`  映射 ${stats.messageLinks}  ·  规则 ${stats.rulesTotal}`);
+      lines.push(`  Update 处理中/可重试  ${stats.updatesProcessing}/${stats.updatesRetryable}`);
+      const recent = stats.recentActiveUsers?.length
+        ? stats.recentActiveUsers
+        : (stats.lastActiveUser ? [stats.lastActiveUser] : []);
+      if (recent.length) {
         lines.push('');
-        lines.push(...formatEmptyActivityHints());
+        lines.push('<b>最近活跃</b>');
+        for (const u of recent.slice(0, 5)) {
+          const name = escapeHtml([u.firstName, u.lastName].filter(Boolean).join(' ').trim() || '未知');
+          const un = u.username ? `@${escapeHtml(u.username)}` : '无用户名';
+          lines.push(`• ${name} · ${un}`);
+          lines.push(`  <code>${escapeHtml(u.userId)}</code> · ${formatTimeBoth(u.lastMessageAt)}`);
+        }
+      } else {
+        lines.push('最近活跃: 暂无');
       }
-      lines.push('');
-      lines.push('📈 <b>近 7 日入站</b> <i>CST</i>');
-      lines.push(`<code>${formatSparkline(week.map(d => d.messages_in))}</code>`);
-      lines.push(week.map(d => {
-        const mmdd = d.day.slice(5);
-        return `${mmdd}:${d.messages_in}`;
-      }).join(' · '));
-      lines.push(`峰值日 ${escapeHtml(formatPeakDays(peaks))}`);
-      lines.push('');
-      lines.push(...formatHeatBlock(activity.summary.hours));
-      if (activity.rankingUsers.length) {
+      if (stats.updatesProcessing > 20) {
         lines.push('');
-        lines.push('🏆 <b>今日 Top</b> <i>（完整见 /rank）</i>');
-        lines.push(...formatRankingBlock(activity.rankingUsers.slice(0, 3)));
+        lines.push('⚠️ Update 处理中数量偏高，请检查 Webhook 是否持续 5xx');
       }
+    } catch (e) {
+      recordSystemError('sysinfo_d1_failed', e, {}, env);
+      lines.push(`D1 读取失败: ${escapeHtml(e?.message || String(e))}`);
     }
-
-    lines.push('');
-    lines.push('🔗 <b>端点</b>');
-    lines.push(`<code>${escapeHtml(baseUrl)}/health</code>`);
-    lines.push(`<code>…/health/env</code> · <code>…/health/d1</code> · <code>…/verify</code>`);
-    lines.push(`Webhook <code>POST ${escapeHtml(baseUrl)}/</code>`);
+  } else {
+    lines.push('D1 未绑定，无法显示会话统计');
   }
 
-  if (page === 'activity') {
+  // 概览页：轻量告警入口
+  if (page === 'overview') {
+    try {
+      const recentErrs = await collectRecentErrors(env);
+      if (recentErrs.length) {
+        lines.push('');
+        lines.push(`⚠️ 最近错误 <b>${recentErrs.length}</b> 条 · 点下方「错误」分页查看`);
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (page === 'stats') {
     activity = await loadTodayActivity(env);
-    const unique = activity.summary.uniqueUsers || activity.rankingUsers.length;
-    lines.push('🔥 <b>系统 · 今日活跃</b>');
-    lines.push(`<code>v${GATEWAY_VERSION}</code> · <code>${escapeHtml(activity.day)}</code> CST`);
-    lines.push('────────────────');
-    lines.push(`入站样本 <b>${activity.summary.total}</b> · 独立用户 <b>${unique}</b>`);
-    lines.push(`数据源: ${escapeHtml(activitySourceLabel(activity.source))}`);
+    const today = activity.today;
+    const yday = await getDailyStats(env, opsYesterdayKey());
+    const week = await getRecentDailySeries(env, 7);
+    const peaks = pickPeakDays(week, 2);
     lines.push('');
-    if (activity.summary.total === 0 && !activity.rankingUsers.length) {
+    lines.push(`📅 <b>今日</b> <code>${escapeHtml(today.day)}</code> <i>CST UTC+${OPS_TZ_OFFSET_HOURS}</i>`);
+    lines.push(formatCompareLine('💬 入站', today.messages_in, yday.messages_in));
+    lines.push(formatCompareLine('✅ 验证', today.verifies, yday.verifies));
+    lines.push(formatCompareLine('🚫 封禁', today.bans, yday.bans));
+    lines.push(formatCompareLine('🛡 垃圾', today.spam, yday.spam));
+    lines.push(`  <i>昨 ${escapeHtml(yday.day)}：入站 ${yday.messages_in} · 验证 ${yday.verifies} · 垃圾 ${yday.spam}</i>`);
+    if (today.messages_in === 0 && yday.messages_in === 0) {
+      lines.push('');
       lines.push(...formatEmptyActivityHints());
-      lines.push('');
     }
+    lines.push('');
+    lines.push('📈 <b>近 7 日入站</b> <i>CST</i>');
+    lines.push(`<code>${formatSparkline(week.map(d => d.messages_in))}</code>`);
+    lines.push(week.map(d => {
+      const mmdd = d.day.slice(5);
+      return `${mmdd}:${d.messages_in}`;
+    }).join(' · '));
+    lines.push(`峰值日 ${escapeHtml(formatPeakDays(peaks))}`);
+    lines.push('');
     lines.push(...formatHeatBlock(activity.summary.hours));
-    lines.push('');
-    lines.push('🏆 <b>活跃排行</b>');
-    lines.push(...formatRankingBlock(activity.rankingUsers, {
-      withCount: activity.rankingUsers.some(u => u.count != null),
-    }));
-    lines.push('');
-    lines.push('<i>点下方用户按钮打开面板 · 日切与热力均为中国时间 CST</i>');
-  }
-
-  if (page === 'storage') {
-    lines.push('🗄 <b>系统 · 存储</b>');
-    lines.push(`<code>v${GATEWAY_VERSION}</code>`);
-    lines.push('────────────────');
-    if (hasD1) {
-      try {
-        const stats = await createD1Storage(env.TG_BOT_DB).getSystemStats();
-        lines.push('<b>D1</b>');
-        lines.push(`• users: ${stats.usersTotal} (topic ${stats.usersWithTopic})`);
-        lines.push(`• banned ${stats.usersBanned} · closed ${stats.usersClosed || 0}`);
-        lines.push(`• message_links ${stats.messageLinks} · rules ${stats.rulesTotal}`);
-        lines.push(`• processed processing/retryable: ${stats.updatesProcessing}/${stats.updatesRetryable}`);
-      } catch (e) {
-        lines.push(`D1: ${escapeHtml(e?.message || String(e))}`);
-      }
-    } else lines.push('D1: 未绑定');
-    lines.push('');
-    lines.push('<b>KV 前缀</b>');
-    if (hasKv) {
-      try {
-        const rows = await getCachedKvPrefixCounts(env);
-        for (const r of rows) {
-          lines.push(`• ${r.label} <code>${r.prefix}</code> ${r.total}${r.truncated ? '+' : ''}`);
-        }
-        lines.push('<i>计数缓存约 45s</i>');
-      } catch (e) {
-        lines.push(`KV: ${escapeHtml(e?.message || String(e))}`);
-      }
-    } else lines.push('KV: 未绑定');
-  }
-
-  if (page === 'errors') {
-    lines.push('⚠️ <b>系统 · 最近错误</b>');
-    lines.push(`<code>v${GATEWAY_VERSION}</code>`);
-    lines.push('────────────────');
-    const top = await collectRecentErrors(env);
-    if (!top.length) {
-      lines.push('✨ 暂无错误记录');
-      lines.push('<i>冷启动后内存缓冲会清空；持续 5xx 时请查 /health 与 CF 日志</i>');
-    } else {
-      for (const err of top) {
-        const act = escapeHtml(err.action || '?');
-        const msg = escapeHtml(String(err.error || '').slice(0, 140));
-        const uid = err.userId ? ` · uid ${escapeHtml(err.userId)}` : '';
-        lines.push(`🔴 <b>${act}</b>${uid}`);
-        lines.push(`   ${formatRelativeTime(err.ts)} · ${msg}`);
-      }
+    if (activity.rankingUsers.length) {
       lines.push('');
-      lines.push('<i>建议：对照 Webhook 是否 5xx、D1/KV 绑定是否正常</i>');
+      lines.push('🏆 <b>今日 Top</b> <i>（完整见 /rank）</i>');
+      lines.push(...formatRankingBlock(activity.rankingUsers.slice(0, 3)));
     }
+  }
+
+  lines.push('');
+  lines.push('🔗 <b>端点</b>');
+  lines.push(`<code>${escapeHtml(baseUrl)}/health</code>`);
+  lines.push(`<code>…/health/env</code> · <code>…/health/d1</code> · <code>…/verify</code>`);
+  lines.push(`Webhook <code>POST ${escapeHtml(baseUrl)}/</code>`);
+
+  return { lines, activity };
+}
+
+/** 活跃排行页正文 */
+async function renderActivityPage(env) {
+  const lines = [];
+  const activity = await loadTodayActivity(env);
+  const unique = activity.summary.uniqueUsers || activity.rankingUsers.length;
+  lines.push('🔥 <b>系统 · 今日活跃</b>');
+  lines.push(`<code>v${GATEWAY_VERSION}</code> · <code>${escapeHtml(activity.day)}</code> CST`);
+  lines.push('────────────────');
+  lines.push(`入站样本 <b>${activity.summary.total}</b> · 独立用户 <b>${unique}</b>`);
+  lines.push(`数据源: ${escapeHtml(activitySourceLabel(activity.source))}`);
+  lines.push('');
+  if (activity.summary.total === 0 && !activity.rankingUsers.length) {
+    lines.push(...formatEmptyActivityHints());
+    lines.push('');
+  }
+  lines.push(...formatHeatBlock(activity.summary.hours));
+  lines.push('');
+  lines.push('🏆 <b>活跃排行</b>');
+  lines.push(...formatRankingBlock(activity.rankingUsers, {
+    withCount: activity.rankingUsers.some(u => u.count != null),
+  }));
+  lines.push('');
+  lines.push('<i>点下方用户按钮打开面板 · 日切与热力均为中国时间 CST</i>');
+  return { lines, activity };
+}
+
+/** 存储页正文 */
+async function renderStoragePage(env) {
+  const hasKv = Boolean(env.TOPIC_MAP && typeof env.TOPIC_MAP.get === 'function');
+  const hasD1 = Boolean(env.TG_BOT_DB && typeof env.TG_BOT_DB.prepare === 'function');
+  const lines = [];
+  lines.push('🗄 <b>系统 · 存储</b>');
+  lines.push(`<code>v${GATEWAY_VERSION}</code>`);
+  lines.push('────────────────');
+  if (hasD1) {
+    try {
+      const stats = await createD1Storage(env.TG_BOT_DB).getSystemStats();
+      lines.push('<b>D1</b>');
+      lines.push(`• users: ${stats.usersTotal} (topic ${stats.usersWithTopic})`);
+      lines.push(`• banned ${stats.usersBanned} · closed ${stats.usersClosed || 0}`);
+      lines.push(`• message_links ${stats.messageLinks} · rules ${stats.rulesTotal}`);
+      lines.push(`• processed processing/retryable: ${stats.updatesProcessing}/${stats.updatesRetryable}`);
+    } catch (e) {
+      lines.push(`D1: ${escapeHtml(e?.message || String(e))}`);
+    }
+  } else lines.push('D1: 未绑定');
+  lines.push('');
+  lines.push('<b>KV 前缀</b>');
+  if (hasKv) {
+    try {
+      const rows = await getCachedKvPrefixCounts(env);
+      for (const r of rows) {
+        lines.push(`• ${r.label} <code>${r.prefix}</code> ${r.total}${r.truncated ? '+' : ''}`);
+      }
+      lines.push('<i>计数缓存约 45s</i>');
+    } catch (e) {
+      lines.push(`KV: ${escapeHtml(e?.message || String(e))}`);
+    }
+  } else lines.push('KV: 未绑定');
+  return lines;
+}
+
+/** 错误页正文 */
+async function renderErrorsPage(env) {
+  const lines = [];
+  lines.push('⚠️ <b>系统 · 最近错误</b>');
+  lines.push(`<code>v${GATEWAY_VERSION}</code>`);
+  lines.push('────────────────');
+  const top = await collectRecentErrors(env);
+  if (!top.length) {
+    lines.push('✨ 暂无错误记录');
+    lines.push('<i>冷启动后内存缓冲会清空；持续 5xx 时请查 /health 与 CF 日志</i>');
+  } else {
+    for (const err of top) {
+      const act = escapeHtml(err.action || '?');
+      const msg = escapeHtml(String(err.error || '').slice(0, 140));
+      const uid = err.userId ? ` · uid ${escapeHtml(err.userId)}` : '';
+      lines.push(`🔴 <b>${act}</b>${uid}`);
+      lines.push(`   ${formatRelativeTime(err.ts)} · ${msg}`);
+    }
+    lines.push('');
+    lines.push('<i>建议：对照 Webhook 是否 5xx、D1/KV 绑定是否正常</i>');
+  }
+  return lines;
+}
+
+/**
+ * 构建 sysinfo 某一页正文（分页渲染器分发 + 统一页脚）
+ * @param {'overview'|'storage'|'errors'|'stats'|'activity'} page
+ * @returns {Promise<{text:string, activity:object|null}>}
+ */
+async function buildSysinfoPageText(env, page = 'overview') {
+  const started = Date.now();
+  let lines = [];
+  let activity = null;
+
+  if (page === 'overview' || page === 'stats') {
+    ({ lines, activity } = await renderOverviewStatsSection(env, page));
+  } else if (page === 'activity') {
+    ({ lines, activity } = await renderActivityPage(env));
+  } else if (page === 'storage') {
+    lines = await renderStoragePage(env);
+  } else if (page === 'errors') {
+    lines = await renderErrorsPage(env);
   }
 
   lines.push('');
