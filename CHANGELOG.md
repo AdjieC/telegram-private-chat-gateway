@@ -15,6 +15,14 @@
 - `cleanProfileText` 上提至 `src/utils.js`，统一话题标题与资料卡文本清理规则。
 - ID 白名单解析带实例级缓存，避免每次权限判断重复 split。
 - 删除零引用的 `StorageError` 死代码（`src/storage/storage.js`）。
+- **消除双栈重复**：删除 `conversation-service.js` 中生产不可达的私聊/管理员消息处理与资料卡（`syncUserProfile`/`buildProfileCard` 等约 600 行），收敛为编辑消息映射/通知单一职责；`buildTopicTitle` 唯一实现归 `worker.js`。
+- **主文件拆分**：`worker.js` 由 3457 行降至约 2140 行；新增 `src/admin-actions.js`（管理动作/词库/清理）、`src/verification.js`（题库+Turnstile 验证）、`src/media-group.js`（媒体组合并）、`src/blocked-words.js`（词库共享）、`src/daily-stats.js`（CST 日统计共享）；移除 `getAdminHandlers` 门面与 12 个转手包装器。
+- **webhook 单次解析**：`app.js` 解析后的 update 直传业务层，消除双重 JSON 读取/校验；补充「私聊路径失败返回 200 不重试」的刻意设计注释。
+- 覆盖率门槛从仅 `src/utils.js` 扩展到 `worker.js` + `src/**`；新增主消息链路集成测试（验证→建话题→转发/媒体组/编辑通知/封禁/屏蔽词/垃圾检测），worker.js 行覆盖 12% → 53%。
+- `getUsersByIds` 改单条 IN 查询（消除 N+1）；`secureRandomInt` 拒绝采样消除取模偏差；`getAllKeys` 支持页数上限。
+- `Logger` 增加 `onError` 旁路，替换模块级 monkey-patch；删除 `kv-storage` 死模块（唯一调用点改内联 KV 读取）。
+- `admin-commands` 的存储访问改为依赖注入、`sysinfoKvCache` 移入实例、看板分页拆分为独立渲染器。
+- 测试：新增 `admin-actions` 单测 8 例；`conversation-service` 测试重写为仅覆盖活面。
 
 ### 管理体验
 
