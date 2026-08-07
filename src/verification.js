@@ -324,7 +324,8 @@ export function createVerificationModule(deps) {
         logger.info('verification_passed', {
           userId,
           verifyId,
-          selectedOption: state.options[selectedIndex]
+          // 只记索引不记选项文本：避免正确答案落入日志，收紧日志脱敏边界
+          selectedIndex,
         });
         await bumpDailyStat(env, 'verifies', 1);
 
@@ -344,7 +345,9 @@ export function createVerificationModule(deps) {
           chat_id: userId,
           message_id: query.message.message_id,
           text: hasPending ? VERIFY_COPY.successBodyWithPending : VERIFY_COPY.successBody,
-          parse_mode: "HTML"
+          parse_mode: "HTML",
+          // 清空答题按钮，避免验证通过后残留可点击的选项（再点只会提示「已过期」）
+          reply_markup: { inline_keyboard: [] }
         });
 
         if (hasPending) {

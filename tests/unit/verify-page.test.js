@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderVerifyPage } from '../../src/verify-page.js';
+import { renderVerifyPage, renderVerifyErrorPage } from '../../src/verify-page.js';
 
 describe('verify-page', () => {
   const page = renderVerifyPage({
@@ -24,6 +24,9 @@ describe('verify-page', () => {
     expect(page).toContain('prefers-color-scheme: dark');
     expect(page).toContain('color-scheme');
     expect(page).toContain('theme-color');
+    // 主题不应硬编码为 light：由脚本按系统偏好动态设置，避免暗色用户看到亮色闪烁
+    expect(page).not.toContain('data-theme="light"');
+    expect(page).toContain("setAttribute('data-theme', theme)");
   });
 
   it('状态区具备加载动画、无障碍与成功/错误样式', () => {
@@ -44,5 +47,38 @@ describe('verify-page', () => {
     expect(page).toContain('cf-turnstile');
     expect(page).toContain('id="back-btn"');
     expect(page).toContain('tg://resolve');
+  });
+
+  it('过期提示分钟数由参数注入且缺省兜底为 10', () => {
+    const withMinutes = renderVerifyPage({
+      siteKey: 'k', code: 'c', userId: '1', workerUrl: 'https://x.workers.dev',
+      verifyExpireMinutes: 5,
+    });
+    expect(withMinutes).toContain('约 5 分钟');
+    // 未传参时兜底 10，且模板占位符必须被替换干净
+    expect(page).toContain('约 10 分钟');
+    expect(page).not.toContain('{{VERIFY_EXPIRE_MINUTES}}');
+  });
+});
+
+describe('verify-page error page', () => {
+  it('渲染错误提示并转义用户可控内容', () => {
+    const page = renderVerifyErrorPage({ message: '缺少参数<坏>', hint: '请重新发送消息' });
+    expect(page).toContain('缺少参数&lt;坏&gt;');
+    expect(page).toContain('请重新发送消息');
+    expect(page).toContain('tg://resolve');
+    expect(page).toContain('prefers-color-scheme: dark');
+  });
+
+  it('无 hint 时只渲染 message，且默认值兜底', () => {
+    const page = renderVerifyErrorPage();
+    expect(page).toContain('验证链接无效或已失效');
+    expect(page).not.toContain('<br>');
+    expect(page).not.toContain('{{DESC}}');
+  });
+
+  it('message 与 hint 同时存在时以换行分隔', () => {
+    const page = renderVerifyErrorPage({ message: '原因', hint: '引导' });
+    expect(page).toContain('原因<br>引导');
   });
 });

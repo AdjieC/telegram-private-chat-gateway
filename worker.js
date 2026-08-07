@@ -29,7 +29,7 @@ import {
 } from './src/admin-ui-format.js';
 import { createAdminCommandHandlers } from './src/admin-commands.js';
 import { VERIFY_COPY } from './src/verify-copy.js';
-import { renderVerifyPage } from './src/verify-page.js';
+import { renderVerifyPage, renderVerifyErrorPage } from './src/verify-page.js';
 import { USER_COPY, ADMIN_COPY } from './src/user-copy.js';
 import {
   containsLink,
@@ -80,7 +80,7 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.0.4';
+const GATEWAY_VERSION = '1.0.7';
 
 // 线程健康检查缓存，减少频繁探测请求
 const threadHealthCache = new Map();
@@ -192,7 +192,6 @@ const mediaGroup = createMediaGroupModule({
   config: CONFIG,
   tgCall,
   safeGetJSON,
-  getAllKeys,
   logger: Logger,
 });
 
@@ -853,6 +852,8 @@ async function spamCheck(msg, userId, env) {
 
 // 管理告警节流：同类型告警在窗口内只发一条，避免故障期间告警风暴刷屏
 const adminAlertThrottle = createThrottle({ windowMs: CONFIG.ALERT_THROTTLE_MS });
+// 节流窗口内被丢弃的告警计数：放行时汇总输出一次，避免风暴期逐条 DEBUG 刷屏
+const adminAlertSuppressedCounts = new Map();
 
 /**
  * 统一管理员告警通知
@@ -865,8 +866,13 @@ const adminAlertThrottle = createThrottle({ windowMs: CONFIG.ALERT_THROTTLE_MS }
  */
 async function notifyAdmin(env, alertType, message, threadId, parseMode = 'HTML') {
   if (!adminAlertThrottle(alertType)) {
-    Logger.debug('admin_alert_throttled', { alertType });
+    adminAlertSuppressedCounts.set(alertType, (adminAlertSuppressedCounts.get(alertType) || 0) + 1);
     return;
+  }
+  const suppressed = adminAlertSuppressedCounts.get(alertType) || 0;
+  if (suppressed > 0) {
+    adminAlertSuppressedCounts.delete(alertType);
+    Logger.warn('admin_alert_burst_summary', { alertType, suppressedCount: suppressed });
   }
   Logger.warn('admin_alert', { alertType, messageLength: message.length });
 
@@ -927,6 +933,12 @@ async function handleSpamMessage(env, userId, msg, spamResult, threadId, ctx) {
   }
 
   if (CONFIG.SPAM_NOTIFY_ADMIN && !CONFIG.SPAM_SILENCE_MODE) {
+    // 反查用户话题：有话题时把告警发到对应话题并给出可操作提示，避免文案与实际不符
+    let notifyThreadId = threadId;
+    if (!notifyThreadId) {
+      const rec = await safeGetJSON(env, `user:${userId}`, null);
+      notifyThreadId = rec?.thread_id || null;
+    }
     const reasonText = spamResult.reasons.map(r => {
       switch (r) {
         case 'keyword': return `🔑 关键词: <code>${escapeHtml(spamResult.details.keyword)}</code>`;
@@ -936,11 +948,11 @@ async function handleSpamMessage(env, userId, msg, spamResult, threadId, ctx) {
       }
     }).join('\n');
 
-    const body = threadId ? { message_thread_id: threadId } : {};
+    const body = notifyThreadId ? { message_thread_id: notifyThreadId } : {};
 
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
-      text: ADMIN_COPY.spamIntercepted(escapeHtml(String(userId)), reasonText, { threadId }),
+      text: ADMIN_COPY.spamIntercepted(escapeHtml(String(userId)), reasonText, { threadId: notifyThreadId }),
       parse_mode: 'HTML',
       ...body
     });
@@ -993,10 +1005,15 @@ const legacyApp = {
         const siteKey = (env.TURNSTILE_SITE_KEY || '').toString().trim();
 
         if (!code || !userId || !siteKey) {
-          return new Response(
-            '<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><h2>❌ 参数无效</h2><p>缺少验证信息或系统未配置 Turnstile。</p></body></html>',
-            { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
-          );
+          const hint = siteKey
+            ? '请返回 Telegram 后向机器人重新发送消息获取新链接。'
+            : '管理员尚未配置 TURNSTILE_SITE_KEY，可暂时改用本地题库验证。';
+          return new Response(renderVerifyErrorPage({
+            message: '验证链接缺少必要参数或系统未配置 Turnstile。',
+            hint,
+          }), {
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          });
         }
 
         const workerUrl = url.origin;
@@ -1020,7 +1037,14 @@ const legacyApp = {
           "frame-ancestors 'none'",
         ].join('; ');
 
-        return new Response(renderVerifyPage({ siteKey, code, userId, workerUrl }),
+        return new Response(renderVerifyPage({
+          siteKey,
+          code,
+          userId,
+          workerUrl,
+          // 过期提示分钟数对齐 TURNSTILE_VERIFY_TTL，避免页面文案与后端有效期漂移
+          verifyExpireMinutes: CONFIG.TURNSTILE_VERIFY_TTL / 60,
+        }),
           { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': csp } }
         );
       }
@@ -1191,10 +1215,15 @@ const legacyApp = {
               '👋 <b>私聊网关</b>',
               '',
               '直接发送文字 / 图片 / 文件即可联系管理员。',
-              '首次使用可能需要人机验证（题目按钮或网页验证）。',
-              '若被静音或封禁，会收到单独通知。',
               '',
-              '<b>常用</b>',
+              '<b>常见问题</b>',
+              '• 提示「人机验证」— 点按钮答题或打开网页完成，答对后消息自动送达',
+              '• 验证链接过期 — 重新发一条消息即可获取新链接',
+              '• 提示「包含违规内容」— 修改措辞后重新发送',
+              '• 提示「发送过于频繁」— 请稍等约 1 分钟再发',
+              '• 被静音或封禁 — 会收到单独通知，请等待管理员处理',
+              '',
+              '<b>命令</b>',
               '• /start — 开始或重新验证',
               '• /help — 本说明',
               '',

@@ -303,7 +303,19 @@ function storageValue(key, value) {
   }
   return value ?? null;
 }
+var d1StorageCache = /* @__PURE__ */ new WeakMap();
 function createD1Storage(db) {
+  if (db && (typeof db === "object" || typeof db === "function")) {
+    const cached = d1StorageCache.get(db);
+    if (cached) return cached;
+  }
+  const storage = buildD1Storage(db);
+  if (db && (typeof db === "object" || typeof db === "function")) {
+    d1StorageCache.set(db, storage);
+  }
+  return storage;
+}
+function buildD1Storage(db) {
   function mapUser(row) {
     if (!row) return null;
     return {
@@ -3319,7 +3331,8 @@ function createVerificationModule(deps) {
         logger.info("verification_passed", {
           userId,
           verifyId,
-          selectedOption: state.options[selectedIndex]
+          // 只记索引不记选项文本：避免正确答案落入日志，收紧日志脱敏边界
+          selectedIndex
         });
         await bumpDailyStat2(env, "verifies", 1);
         await ephemeralStore2(env).setVerification(userId, {
@@ -3334,7 +3347,9 @@ function createVerificationModule(deps) {
           chat_id: userId,
           message_id: query.message.message_id,
           text: hasPending ? VERIFY_COPY.successBodyWithPending : VERIFY_COPY.successBody,
-          parse_mode: "HTML"
+          parse_mode: "HTML",
+          // 清空答题按钮，避免验证通过后残留可点击的选项（再点只会提示「已过期」）
+          reply_markup: { inline_keyboard: [] }
         });
         if (hasPending) {
           await forwardPendingMessages(state, userId, query, env, ctx);
@@ -3460,7 +3475,6 @@ function createMediaGroupModule(deps) {
     config,
     tgCall: tgCall2,
     safeGetJSON: safeGetJSON2,
-    getAllKeys: getAllKeys2,
     logger
   } = deps;
   async function handleMediaGroup(msg, env, ctx, { direction, targetChat, threadId }) {
@@ -3523,10 +3537,9 @@ function createMediaGroupModule(deps) {
   }
   async function flushExpiredMediaGroups(env, now) {
     try {
-      const prefix = "mg:";
-      const allKeys = await getAllKeys2(env, prefix, 20);
+      const result = await env.TOPIC_MAP.list({ prefix: "mg:", limit: 100 });
       let deletedCount = 0;
-      for (const { name } of allKeys) {
+      for (const { name } of result.keys || []) {
         const rec = await safeGetJSON2(env, name, null);
         if (rec && rec.last_ts && now - rec.last_ts > config.MEDIA_GROUP_EXPIRE_SECONDS * 1e3) {
           await env.TOPIC_MAP.delete(name);
@@ -4697,7 +4710,7 @@ p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
   <h2>\u4EBA\u673A\u9A8C\u8BC1</h2>
   <p class="desc">\u8BF7\u5B8C\u6210\u4E0B\u65B9\u9A8C\u8BC1\u4EE5\u786E\u8BA4\u60A8\u4E0D\u662F\u673A\u5668\u4EBA\u3002<br>\u9A8C\u8BC1\u901A\u8FC7\u540E\u60A8\u7684\u6D88\u606F\u5C06\u81EA\u52A8\u9001\u8FBE\u3002</p>
   <div class="turnstile-container">
-    <div class="cf-turnstile" data-sitekey="{{SITE_KEY}}" data-callback="onTurnstileSuccess" data-error-callback="onTurnstileError" data-theme="light"></div>
+    <div class="cf-turnstile" data-sitekey="{{SITE_KEY}}" data-callback="onTurnstileSuccess" data-error-callback="onTurnstileError"></div>
   </div>
   <div id="status" aria-live="polite"></div>
   <a id="back-btn" href="tg://resolve">\u{1F4F1} \u8FD4\u56DE Telegram</a>
@@ -4706,11 +4719,33 @@ p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
   </div>
 </div>
 <script>
-// Turnstile \u7EC4\u4EF6\u4E3B\u9898\u8DDF\u968F\u7CFB\u7EDF\u504F\u597D\uFF08\u9700\u5728 widget \u6E32\u67D3\u524D\u8BBE\u7F6E\uFF09
+// Turnstile \u7EC4\u4EF6\u4E3B\u9898\u8DDF\u968F\u7CFB\u7EDF\u504F\u597D\uFF08\u9700\u5728 widget \u6E32\u67D3\u524D\u8BBE\u7F6E\uFF0C\u5E76\u968F\u7CFB\u7EDF\u5207\u6362\u5B9E\u65F6\u91CD\u5EFA\uFF09
 (function(){
-  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  var mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
   var el = document.querySelector('.cf-turnstile');
-  if (el && dark) { el.setAttribute('data-theme', 'dark'); }
+  if (!mq) return;
+  function applyTheme() {
+    var theme = mq.matches ? 'dark' : 'light';
+    if (el) el.setAttribute('data-theme', theme);
+    // \u5DF2\u9A8C\u8BC1\u6D41\u7A0B\u5F00\u59CB\u540E\u4E0D\u518D\u91CD\u5EFA\uFF0C\u907F\u514D\u6253\u65AD\u7528\u6237\u64CD\u4F5C
+    if (window.turnstile && !submitted) {
+      try {
+        window.turnstile.remove(el);
+        window.turnstile.render(el, {
+          sitekey: el.getAttribute('data-sitekey'),
+          callback: el.getAttribute('data-callback'),
+          'error-callback': el.getAttribute('data-error-callback'),
+          theme: theme
+        });
+      } catch (e) { /* \u91CD\u5EFA\u5931\u8D25\u65F6\u4FDD\u6301\u73B0\u72B6\uFF0C\u4E0D\u963B\u585E\u9875\u9762 */ }
+    }
+  }
+  applyTheme();
+  if (mq.addEventListener) {
+    mq.addEventListener('change', applyTheme);
+  } else if (mq.addListener) { // \u65E7 Safari
+    mq.addListener(applyTheme);
+  }
 })();
 var submitted = false;
 function showStatus(msg, cls) {
@@ -4753,7 +4788,7 @@ function onTurnstileSuccess(token) {
     } else {
       var errMap = {
         'turnstile_failed': '\u4EBA\u673A\u9A8C\u8BC1\u672A\u901A\u8FC7\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5',
-        'code_invalid_or_expired': '\u9A8C\u8BC1\u94FE\u63A5\u5DF2\u8FC7\u671F\uFF08\u7EA6 10 \u5206\u949F\uFF09\uFF0C\u8BF7\u8FD4\u56DE Telegram \u91CD\u65B0\u53D1\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5',
+        'code_invalid_or_expired': '\u9A8C\u8BC1\u94FE\u63A5\u5DF2\u8FC7\u671F\uFF08\u7EA6 {{VERIFY_EXPIRE_MINUTES}} \u5206\u949F\uFF09\uFF0C\u8BF7\u8FD4\u56DE Telegram \u91CD\u65B0\u53D1\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5',
         'server_not_configured': '\u670D\u52A1\u5668\u672A\u5B8C\u6210\u914D\u7F6E\uFF0C\u8BF7\u8054\u7CFB\u7BA1\u7406\u5458'
       };
       var errMsg = errMap[data.error] || ('\u9A8C\u8BC1\u5931\u8D25: ' + (data.detail || data.error || '\u672A\u77E5\u9519\u8BEF'));
@@ -4800,8 +4835,59 @@ setTimeout(function() {
 </script>
 </body>
 </html>`;
-function renderVerifyPage({ siteKey, code, userId, workerUrl }) {
-  return VERIFY_PAGE_HTML.replace(/{{SITE_KEY}}/g, escapeHtml(siteKey)).replace(/{{CODE}}/g, escapeHtml(code)).replace(/{{USER_ID}}/g, escapeHtml(userId)).replace(/{{WORKER_URL}}/g, escapeHtml(workerUrl));
+function renderVerifyPage({ siteKey, code, userId, workerUrl, verifyExpireMinutes }) {
+  const expireMinutes = Number(verifyExpireMinutes) > 0 ? Math.round(Number(verifyExpireMinutes)) : 10;
+  return VERIFY_PAGE_HTML.replace(/{{SITE_KEY}}/g, escapeHtml(siteKey)).replace(/{{CODE}}/g, escapeHtml(code)).replace(/{{USER_ID}}/g, escapeHtml(userId)).replace(/{{WORKER_URL}}/g, escapeHtml(workerUrl)).replace(/{{VERIFY_EXPIRE_MINUTES}}/g, String(expireMinutes));
+}
+var VERIFY_ERROR_PAGE_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<title>\u4EBA\u673A\u9A8C\u8BC1</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#f0f2f5;--card:#ffffff;--text:#1a1a1a;--sub:#5b6472;--muted:#9aa3af;
+  --accent:#0088cc;--border:#e4e7ec;
+  --error-bg:#fdecec;--error-text:#b42318;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f172a;--card:#1e293b;--text:#f1f5f9;--sub:#94a3b8;--muted:#64748b;
+    --accent:#38bdf8;--border:#334155;
+    --error-bg:#3b1212;--error-text:#fca5a5;
+  }
+}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px;color:var(--text)}
+.card{background:var(--card);border-radius:20px;padding:36px 24px 28px;max-width:400px;width:100%;text-align:center;box-shadow:0 4px 24px rgba(15,23,42,0.08);border:1px solid var(--border)}
+.icon{font-size:52px;margin-bottom:14px}
+h2{color:var(--text);margin-bottom:8px;font-size:20px;font-weight:600}
+p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
+.error{display:inline-flex;align-items:center;gap:7px;font-size:13px;line-height:1.5;color:var(--error-text);margin-top:14px;padding:9px 16px;border-radius:999px;background:var(--error-bg);border:1px solid transparent}
+#back-btn{display:inline-block;margin:20px auto 0;background:var(--accent);color:#fff;border:none;padding:13px 28px;border-radius:12px;font-size:16px;text-decoration:none;font-weight:600;transition:opacity .2s,transform .1s;box-shadow:0 2px 8px rgba(0,136,204,0.3)}
+#back-btn:hover{opacity:.92}
+#back-btn:active{transform:scale(.98)}
+.footer{margin-top:22px;font-size:11px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">\u26A0\uFE0F</div>
+  <h2>\u9A8C\u8BC1\u4E0D\u53EF\u7528</h2>
+  <p class="desc">{{DESC}}</p>
+  <div class="error">\u274C \u65E0\u6CD5\u7EE7\u7EED\u9A8C\u8BC1</div>
+  <a id="back-btn" href="tg://resolve">\u{1F4F1} \u8FD4\u56DE Telegram</a>
+  <div class="footer">\u8BF7\u8FD4\u56DE Telegram \u540E\u5411\u673A\u5668\u4EBA\u91CD\u65B0\u53D1\u9001\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5</div>
+</div>
+</body>
+</html>`;
+function renderVerifyErrorPage({ message = "\u9A8C\u8BC1\u94FE\u63A5\u65E0\u6548\u6216\u5DF2\u5931\u6548\u3002", hint = "" } = {}) {
+  const desc = [escapeHtml(message), escapeHtml(hint)].filter(Boolean).join("<br>");
+  return VERIFY_ERROR_PAGE_HTML.replace(/{{DESC}}/g, desc);
 }
 
 // worker.js
@@ -4849,7 +4935,7 @@ var CONFIG = {
   ALERT_THROTTLE_MS: 6e4
   // 管理告警节流：同类型 60 秒内最多一条
 };
-var GATEWAY_VERSION = "1.0.4";
+var GATEWAY_VERSION = "1.0.7";
 var threadHealthCache = /* @__PURE__ */ new Map();
 var topicCreateInFlight = /* @__PURE__ */ new Map();
 var adminStatusCache = /* @__PURE__ */ new Map();
@@ -4944,7 +5030,6 @@ var mediaGroup = createMediaGroupModule({
   config: CONFIG,
   tgCall,
   safeGetJSON,
-  getAllKeys,
   logger: Logger
 });
 var adminHandlers = createAdminCommandHandlers({
@@ -5467,10 +5552,16 @@ async function spamCheck(msg, userId, env) {
   };
 }
 var adminAlertThrottle = createThrottle({ windowMs: CONFIG.ALERT_THROTTLE_MS });
+var adminAlertSuppressedCounts = /* @__PURE__ */ new Map();
 async function notifyAdmin(env, alertType, message, threadId, parseMode = "HTML") {
   if (!adminAlertThrottle(alertType)) {
-    Logger.debug("admin_alert_throttled", { alertType });
+    adminAlertSuppressedCounts.set(alertType, (adminAlertSuppressedCounts.get(alertType) || 0) + 1);
     return;
+  }
+  const suppressed = adminAlertSuppressedCounts.get(alertType) || 0;
+  if (suppressed > 0) {
+    adminAlertSuppressedCounts.delete(alertType);
+    Logger.warn("admin_alert_burst_summary", { alertType, suppressedCount: suppressed });
   }
   Logger.warn("admin_alert", { alertType, messageLength: message.length });
   const body = threadId ? { message_thread_id: threadId } : {};
@@ -5509,6 +5600,11 @@ async function handleSpamMessage(env, userId, msg, spamResult, threadId, ctx) {
     ctx.waitUntil(updateSpamStats(env, spamResult.reasons));
   }
   if (CONFIG.SPAM_NOTIFY_ADMIN && !CONFIG.SPAM_SILENCE_MODE) {
+    let notifyThreadId = threadId;
+    if (!notifyThreadId) {
+      const rec = await safeGetJSON(env, `user:${userId}`, null);
+      notifyThreadId = rec?.thread_id || null;
+    }
     const reasonText = spamResult.reasons.map((r) => {
       switch (r) {
         case "keyword":
@@ -5521,10 +5617,10 @@ async function handleSpamMessage(env, userId, msg, spamResult, threadId, ctx) {
           return escapeHtml(String(r));
       }
     }).join("\n");
-    const body = threadId ? { message_thread_id: threadId } : {};
+    const body = notifyThreadId ? { message_thread_id: notifyThreadId } : {};
     await tgCall(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
-      text: ADMIN_COPY.spamIntercepted(escapeHtml(String(userId)), reasonText, { threadId }),
+      text: ADMIN_COPY.spamIntercepted(escapeHtml(String(userId)), reasonText, { threadId: notifyThreadId }),
       parse_mode: "HTML",
       ...body
     });
@@ -5561,10 +5657,13 @@ var legacyApp = {
         const userId = url.searchParams.get("uid");
         const siteKey = (env.TURNSTILE_SITE_KEY || "").toString().trim();
         if (!code || !userId || !siteKey) {
-          return new Response(
-            '<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><h2>\u274C \u53C2\u6570\u65E0\u6548</h2><p>\u7F3A\u5C11\u9A8C\u8BC1\u4FE1\u606F\u6216\u7CFB\u7EDF\u672A\u914D\u7F6E Turnstile\u3002</p></body></html>',
-            { headers: { "Content-Type": "text/html; charset=utf-8" } }
-          );
+          const hint = siteKey ? "\u8BF7\u8FD4\u56DE Telegram \u540E\u5411\u673A\u5668\u4EBA\u91CD\u65B0\u53D1\u9001\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5\u3002" : "\u7BA1\u7406\u5458\u5C1A\u672A\u914D\u7F6E TURNSTILE_SITE_KEY\uFF0C\u53EF\u6682\u65F6\u6539\u7528\u672C\u5730\u9898\u5E93\u9A8C\u8BC1\u3002";
+          return new Response(renderVerifyErrorPage({
+            message: "\u9A8C\u8BC1\u94FE\u63A5\u7F3A\u5C11\u5FC5\u8981\u53C2\u6570\u6216\u7CFB\u7EDF\u672A\u914D\u7F6E Turnstile\u3002",
+            hint
+          }), {
+            headers: { "Content-Type": "text/html; charset=utf-8" }
+          });
         }
         const workerUrl = url.origin;
         const csp = [
@@ -5581,7 +5680,14 @@ var legacyApp = {
           "frame-ancestors 'none'"
         ].join("; ");
         return new Response(
-          renderVerifyPage({ siteKey, code, userId, workerUrl }),
+          renderVerifyPage({
+            siteKey,
+            code,
+            userId,
+            workerUrl,
+            // 过期提示分钟数对齐 TURNSTILE_VERIFY_TTL，避免页面文案与后端有效期漂移
+            verifyExpireMinutes: CONFIG.TURNSTILE_VERIFY_TTL / 60
+          }),
           { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": csp } }
         );
       }
@@ -5722,10 +5828,15 @@ var legacyApp = {
               "\u{1F44B} <b>\u79C1\u804A\u7F51\u5173</b>",
               "",
               "\u76F4\u63A5\u53D1\u9001\u6587\u5B57 / \u56FE\u7247 / \u6587\u4EF6\u5373\u53EF\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
-              "\u9996\u6B21\u4F7F\u7528\u53EF\u80FD\u9700\u8981\u4EBA\u673A\u9A8C\u8BC1\uFF08\u9898\u76EE\u6309\u94AE\u6216\u7F51\u9875\u9A8C\u8BC1\uFF09\u3002",
-              "\u82E5\u88AB\u9759\u97F3\u6216\u5C01\u7981\uFF0C\u4F1A\u6536\u5230\u5355\u72EC\u901A\u77E5\u3002",
               "",
-              "<b>\u5E38\u7528</b>",
+              "<b>\u5E38\u89C1\u95EE\u9898</b>",
+              "\u2022 \u63D0\u793A\u300C\u4EBA\u673A\u9A8C\u8BC1\u300D\u2014 \u70B9\u6309\u94AE\u7B54\u9898\u6216\u6253\u5F00\u7F51\u9875\u5B8C\u6210\uFF0C\u7B54\u5BF9\u540E\u6D88\u606F\u81EA\u52A8\u9001\u8FBE",
+              "\u2022 \u9A8C\u8BC1\u94FE\u63A5\u8FC7\u671F \u2014 \u91CD\u65B0\u53D1\u4E00\u6761\u6D88\u606F\u5373\u53EF\u83B7\u53D6\u65B0\u94FE\u63A5",
+              "\u2022 \u63D0\u793A\u300C\u5305\u542B\u8FDD\u89C4\u5185\u5BB9\u300D\u2014 \u4FEE\u6539\u63AA\u8F9E\u540E\u91CD\u65B0\u53D1\u9001",
+              "\u2022 \u63D0\u793A\u300C\u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\u300D\u2014 \u8BF7\u7A0D\u7B49\u7EA6 1 \u5206\u949F\u518D\u53D1",
+              "\u2022 \u88AB\u9759\u97F3\u6216\u5C01\u7981 \u2014 \u4F1A\u6536\u5230\u5355\u72EC\u901A\u77E5\uFF0C\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406",
+              "",
+              "<b>\u547D\u4EE4</b>",
               "\u2022 /start \u2014 \u5F00\u59CB\u6216\u91CD\u65B0\u9A8C\u8BC1",
               "\u2022 /help \u2014 \u672C\u8BF4\u660E",
               "",

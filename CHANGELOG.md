@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### 打磨优化
+
+- **验证体验**：答题验证通过后题目消息清空按钮（原残留可点击选项，再点只会提示「已过期」）；验证链接过期提示分钟数改为由 `TURNSTILE_VERIFY_TTL` 注入，消除页面文案与后端有效期漂移。
+- **验证页 UI**：`/verify` 缺参/未配置错误页复用验证页视觉语言（暗色模式 + 返回 Telegram 按钮），替代裸 HTML；Turnstile 组件主题移除硬编码 light，由脚本按系统偏好设置并随 `prefers-color-scheme` 实时重建。
+- **日志卫生**：`verification_passed` 仅记录选中索引，正确答案文本不再落入日志；告警节流改为窗口内丢弃计数汇总输出（`admin_alert_burst_summary`），消除风暴期逐条 DEBUG 噪声。
+- **通知文案**：垃圾消息告警反查用户话题，有话题时发送到对应 Topic 且提示「已发送到该用户话题」（原恒提示「尚无话题」与实际不符）；私聊 `/help` 改为常见问题 FAQ（验证/过期/违规/限流/静音封禁指引）。
+- **性能**：`flushExpiredMediaGroups` 由全量分页扫描（上限 20 页 × 1000 key）收敛为单页 100 条（媒体组 key 自带 60s TTL，残留极少）；`createD1Storage` 按 db 绑定弱引用缓存实例，避免每请求多次闭包实例化。
+
 ### 工程优化
 
 - 消除 `worker.js` 与 `src/utils.js` 重复的 10 个纯函数定义，统一 import（单文件部署仍由 esbuild bundle 完成）。

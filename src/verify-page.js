@@ -60,7 +60,7 @@ p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
   <h2>人机验证</h2>
   <p class="desc">请完成下方验证以确认您不是机器人。<br>验证通过后您的消息将自动送达。</p>
   <div class="turnstile-container">
-    <div class="cf-turnstile" data-sitekey="{{SITE_KEY}}" data-callback="onTurnstileSuccess" data-error-callback="onTurnstileError" data-theme="light"></div>
+    <div class="cf-turnstile" data-sitekey="{{SITE_KEY}}" data-callback="onTurnstileSuccess" data-error-callback="onTurnstileError"></div>
   </div>
   <div id="status" aria-live="polite"></div>
   <a id="back-btn" href="tg://resolve">📱 返回 Telegram</a>
@@ -69,11 +69,33 @@ p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
   </div>
 </div>
 <script>
-// Turnstile 组件主题跟随系统偏好（需在 widget 渲染前设置）
+// Turnstile 组件主题跟随系统偏好（需在 widget 渲染前设置，并随系统切换实时重建）
 (function(){
-  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  var mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
   var el = document.querySelector('.cf-turnstile');
-  if (el && dark) { el.setAttribute('data-theme', 'dark'); }
+  if (!mq) return;
+  function applyTheme() {
+    var theme = mq.matches ? 'dark' : 'light';
+    if (el) el.setAttribute('data-theme', theme);
+    // 已验证流程开始后不再重建，避免打断用户操作
+    if (window.turnstile && !submitted) {
+      try {
+        window.turnstile.remove(el);
+        window.turnstile.render(el, {
+          sitekey: el.getAttribute('data-sitekey'),
+          callback: el.getAttribute('data-callback'),
+          'error-callback': el.getAttribute('data-error-callback'),
+          theme: theme
+        });
+      } catch (e) { /* 重建失败时保持现状，不阻塞页面 */ }
+    }
+  }
+  applyTheme();
+  if (mq.addEventListener) {
+    mq.addEventListener('change', applyTheme);
+  } else if (mq.addListener) { // 旧 Safari
+    mq.addListener(applyTheme);
+  }
 })();
 var submitted = false;
 function showStatus(msg, cls) {
@@ -116,7 +138,7 @@ function onTurnstileSuccess(token) {
     } else {
       var errMap = {
         'turnstile_failed': '人机验证未通过，请刷新页面重试',
-        'code_invalid_or_expired': '验证链接已过期（约 10 分钟），请返回 Telegram 重新发消息获取新链接',
+        'code_invalid_or_expired': '验证链接已过期（约 {{VERIFY_EXPIRE_MINUTES}} 分钟），请返回 Telegram 重新发消息获取新链接',
         'server_not_configured': '服务器未完成配置，请联系管理员'
       };
       var errMsg = errMap[data.error] || ('验证失败: ' + (data.detail || data.error || '未知错误'));
@@ -166,13 +188,76 @@ setTimeout(function() {
 
 /**
  * 渲染验证页：替换模板变量并做 HTML 转义。
- * @param {{siteKey:string, code:string, userId:string, workerUrl:string}} params
+ * @param {{siteKey:string, code:string, userId:string, workerUrl:string, verifyExpireMinutes?:number}} params
  * @returns {string} 完整 HTML 页面
  */
-export function renderVerifyPage({ siteKey, code, userId, workerUrl }) {
+export function renderVerifyPage({ siteKey, code, userId, workerUrl, verifyExpireMinutes }) {
+  // 过期提示分钟数由调用方按 TURNSTILE_VERIFY_TTL 换算注入，避免跨文件漂移
+  const expireMinutes = Number(verifyExpireMinutes) > 0
+    ? Math.round(Number(verifyExpireMinutes))
+    : 10;
   return VERIFY_PAGE_HTML
     .replace(/{{SITE_KEY}}/g, escapeHtml(siteKey))
     .replace(/{{CODE}}/g, escapeHtml(code))
     .replace(/{{USER_ID}}/g, escapeHtml(userId))
-    .replace(/{{WORKER_URL}}/g, escapeHtml(workerUrl));
+    .replace(/{{WORKER_URL}}/g, escapeHtml(workerUrl))
+    .replace(/{{VERIFY_EXPIRE_MINUTES}}/g, String(expireMinutes));
+}
+
+// 验证页错误提示（缺参/未配置等场景）：与验证页共用视觉语言，避免裸 HTML 与风格割裂
+const VERIFY_ERROR_PAGE_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<title>人机验证</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#f0f2f5;--card:#ffffff;--text:#1a1a1a;--sub:#5b6472;--muted:#9aa3af;
+  --accent:#0088cc;--border:#e4e7ec;
+  --error-bg:#fdecec;--error-text:#b42318;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f172a;--card:#1e293b;--text:#f1f5f9;--sub:#94a3b8;--muted:#64748b;
+    --accent:#38bdf8;--border:#334155;
+    --error-bg:#3b1212;--error-text:#fca5a5;
+  }
+}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px;color:var(--text)}
+.card{background:var(--card);border-radius:20px;padding:36px 24px 28px;max-width:400px;width:100%;text-align:center;box-shadow:0 4px 24px rgba(15,23,42,0.08);border:1px solid var(--border)}
+.icon{font-size:52px;margin-bottom:14px}
+h2{color:var(--text);margin-bottom:8px;font-size:20px;font-weight:600}
+p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
+.error{display:inline-flex;align-items:center;gap:7px;font-size:13px;line-height:1.5;color:var(--error-text);margin-top:14px;padding:9px 16px;border-radius:999px;background:var(--error-bg);border:1px solid transparent}
+#back-btn{display:inline-block;margin:20px auto 0;background:var(--accent);color:#fff;border:none;padding:13px 28px;border-radius:12px;font-size:16px;text-decoration:none;font-weight:600;transition:opacity .2s,transform .1s;box-shadow:0 2px 8px rgba(0,136,204,0.3)}
+#back-btn:hover{opacity:.92}
+#back-btn:active{transform:scale(.98)}
+.footer{margin-top:22px;font-size:11px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">⚠️</div>
+  <h2>验证不可用</h2>
+  <p class="desc">{{DESC}}</p>
+  <div class="error">❌ 无法继续验证</div>
+  <a id="back-btn" href="tg://resolve">📱 返回 Telegram</a>
+  <div class="footer">请返回 Telegram 后向机器人重新发送消息获取新链接</div>
+</div>
+</body>
+</html>`;
+
+/**
+ * 渲染验证错误页：链接缺参、验证未配置等场景的统一降级提示。
+ * @param {{message?:string, hint?:string}} [opts] - message 为原因说明，hint 为补充引导
+ * @returns {string} 完整 HTML 页面
+ */
+export function renderVerifyErrorPage({ message = '验证链接无效或已失效。', hint = '' } = {}) {
+  const desc = [escapeHtml(message), escapeHtml(hint)].filter(Boolean).join('<br>');
+  return VERIFY_ERROR_PAGE_HTML.replace(/{{DESC}}/g, desc);
 }

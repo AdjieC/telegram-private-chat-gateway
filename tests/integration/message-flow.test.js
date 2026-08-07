@@ -169,6 +169,10 @@ describe('主消息链路（worker.fetch 全链路）', () => {
       message_id: 101,
       message_thread_id: 88,
     });
+    // 验证成功后题目消息应清空答题按钮，避免残留可点击选项
+    const successEdit = telegram.calls.find(c => c.method === 'editMessageText');
+    expect(successEdit).toBeTruthy();
+    expect(successEdit.body.reply_markup).toEqual({ inline_keyboard: [] });
     expect(telegram.calls.some(c => c.method === 'createForumTopic')).toBe(true);
     expect(await env.TOPIC_MAP.get(`thread:88`)).toBe(String(userId));
 
@@ -378,6 +382,9 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     expect(telegram.calls.filter(c => c.method === 'forwardMessage')).toHaveLength(2);
     const spamNotice = telegram.calls.find(c => c.method === 'sendMessage' && c.body.chat_id === SUPERGROUP_ID);
     expect(spamNotice.body.text).toContain('骚扰');
+    // 用户已有话题：告警应发到该话题而非 General，提示文案与实际一致
+    expect(spamNotice.body.message_thread_id).toBe(88);
+    expect(spamNotice.body.text).toContain('已发送到该用户话题');
     expect(await env.TOPIC_MAP.get('stats:spam:total')).toBe('1');
   });
 });

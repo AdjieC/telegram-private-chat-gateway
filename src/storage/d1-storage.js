@@ -22,7 +22,22 @@ function storageValue(key, value) {
   return value ?? null;
 }
 
+// 同一 db 绑定在实例生命周期内复用同一 storage 对象，避免每个请求多次闭包实例化
+const d1StorageCache = new WeakMap();
+
 export function createD1Storage(db) {
+  if (db && (typeof db === 'object' || typeof db === 'function')) {
+    const cached = d1StorageCache.get(db);
+    if (cached) return cached;
+  }
+  const storage = buildD1Storage(db);
+  if (db && (typeof db === 'object' || typeof db === 'function')) {
+    d1StorageCache.set(db, storage);
+  }
+  return storage;
+}
+
+function buildD1Storage(db) {
   function mapUser(row) {
     if (!row) return null;
     return {

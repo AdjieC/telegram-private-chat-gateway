@@ -12,7 +12,6 @@ export function createMediaGroupModule(deps) {
     config,
     tgCall,
     safeGetJSON,
-    getAllKeys,
     logger,
   } = deps;
 
@@ -91,11 +90,12 @@ export function createMediaGroupModule(deps) {
   // 实现媒体组清理
   async function flushExpiredMediaGroups(env, now) {
     try {
-      const prefix = "mg:";
-      const allKeys = await getAllKeys(env, prefix, 20);
+      // 媒体组 key 自带 60s TTL，过期残留极少；单页 100 条足够覆盖，
+      // 避免每次消息都在 waitUntil 里全量分页扫描（原上限 20 页 × 1000 key）。
+      const result = await env.TOPIC_MAP.list({ prefix: 'mg:', limit: 100 });
       let deletedCount = 0;
 
-      for (const { name } of allKeys) {
+      for (const { name } of result.keys || []) {
         const rec = await safeGetJSON(env, name, null);
         // 清理阈值与 KV 记录 TTL 保持一致（超过 MEDIA_GROUP_EXPIRE_SECONDS 视为过期残留）
         if (rec && rec.last_ts && (now - rec.last_ts > config.MEDIA_GROUP_EXPIRE_SECONDS * 1000)) {
