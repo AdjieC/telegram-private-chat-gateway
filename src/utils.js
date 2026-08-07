@@ -182,3 +182,21 @@ export function generateVerifyCode() {
   crypto.getRandomValues(bytes);
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
+
+/**
+ * 简易节流器：同一 key 在 windowMs 窗口内只放行一次。
+ * 用于管理告警等高频路径，防止故障期间告警风暴刷屏。
+ * @param {{windowMs?:number}} [opts]
+ * @returns {(key:string, now?:number) => boolean} 返回 true 表示本次放行
+ */
+export function createThrottle({ windowMs = 60000 } = {}) {
+  const lastSentAt = new Map();
+  return (key, now = Date.now()) => {
+    const k = String(key);
+    const prev = lastSentAt.get(k);
+    // prev 未记录表示从未发送过，直接放行（避免窗口小于 now 起始值时的误判）
+    if (prev !== undefined && now - prev < windowMs) return false;
+    lastSentAt.set(k, now);
+    return true;
+  };
+}

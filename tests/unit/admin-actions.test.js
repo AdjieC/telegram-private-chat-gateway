@@ -4,6 +4,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAdminActions } from '../../src/admin-actions.js';
+import { SEP_LINE, formatUserStatusChips } from '../../src/admin-ui-format.js';
 import { createD1Storage } from '../../src/storage/d1-storage.js';
 import { ensureMigrations } from '../../src/storage/migrations.js';
 import { createMockEnv } from '../helpers/mock-env.js';
@@ -28,6 +29,8 @@ function createActions(overrides = {}) {
       try { return JSON.parse(raw); } catch { return fallback; }
     },
     escapeHtml: (s) => String(s),
+    SEP_LINE,
+    formatUserStatusChips,
     buildUserActionKeyboard: () => ({ inline_keyboard: [] }),
     createD1Storage,
     setPersistentTrust: vi.fn(async () => {}),

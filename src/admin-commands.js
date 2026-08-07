@@ -19,6 +19,7 @@ import {
   formatRelativeTime,
   formatTimeBoth,
   statusChip,
+  SEP_LINE,
   buildSysinfoKeyboard,
   buildUserJumpKeyboard,
   formatRankingBlock,
@@ -182,7 +183,7 @@ async function handleHelpCommand(env, threadId, senderId = null) {
 async function handleMenuCommand(env, threadId, senderId) {
   const text = [
     `🏠 <b>管理菜单</b> · v${GATEWAY_VERSION}`,
-    '────────────',
+    SEP_LINE,
     '点下方按钮即可，无需记忆命令。',
     '',
     '📊 今日统计 · 🔥 活跃排行（CST）',
@@ -278,7 +279,7 @@ async function renderOverviewStatsSection(env, page) {
 
   lines.push(`🖥 <b>系统 · ${page === 'stats' ? '今日统计' : '概览'}</b>`);
   lines.push(`<code>v${GATEWAY_VERSION}</code>`);
-  lines.push('────────────────');
+  lines.push(SEP_LINE);
   lines.push(`${statusChip(true, 'Worker 运行中')}`);
   lines.push(`${statusChip(hasKv, 'KV 已绑定', 'KV 缺失')} · ${statusChip(hasD1, 'D1 已绑定', 'D1 缺失')}`);
   lines.push(`验证: ${turnstileOn ? '🛡 Turnstile' : '📝 本地题库'} · Owner: ${
@@ -413,7 +414,7 @@ async function renderStoragePage(env) {
   const lines = [];
   lines.push('🗄 <b>系统 · 存储</b>');
   lines.push(`<code>v${GATEWAY_VERSION}</code>`);
-  lines.push('────────────────');
+  lines.push(SEP_LINE);
   if (hasD1) {
     try {
       const stats = await createD1Storage(env.TG_BOT_DB).getSystemStats();
@@ -447,7 +448,7 @@ async function renderErrorsPage(env) {
   const lines = [];
   lines.push('⚠️ <b>系统 · 最近错误</b>');
   lines.push(`<code>v${GATEWAY_VERSION}</code>`);
-  lines.push('────────────────');
+  lines.push(SEP_LINE);
   const top = await collectRecentErrors(env);
   if (!top.length) {
     lines.push('✨ 暂无错误记录');
@@ -642,7 +643,7 @@ async function handleNotesCommand(env, threadId, queryText = '') {
   const lines = [
     `🔎 <b>备注搜索</b>${q ? ` · 「${escapeHtml(q)}」` : ' · 最近'}`,
     `共 ${matches.length} 条${truncated ? '（已截断，可加关键词缩小）' : ''}`,
-    '────────────────',
+    SEP_LINE,
   ];
   const jumpUsers = [];
   for (const m of matches) {
@@ -684,7 +685,7 @@ async function handleWhoamiCommand(env, threadId, senderId) {
   }[member] || member;
   const text = [
     '🪪 <b>Whoami</b>',
-    '────────────────',
+    SEP_LINE,
     `UID: <code>${senderId}</code>`,
     `群身份: <code>${escapeHtml(member)}</code> · ${escapeHtml(memberLabel)}`,
     `管理指令: ${admin ? '✅ 可用' : '❌ 不可用'}`,

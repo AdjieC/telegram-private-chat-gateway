@@ -19,6 +19,8 @@ import { createMediaGroupModule } from './src/media-group.js';
 import { bumpDailyStat } from './src/daily-stats.js';
 import {
   escapeHtml,
+  SEP_LINE,
+  formatUserStatusChips,
   buildUserActionKeyboard,
   buildBanConfirmKeyboard,
   buildCloseConfirmKeyboard,
@@ -27,6 +29,7 @@ import {
 } from './src/admin-ui-format.js';
 import { createAdminCommandHandlers } from './src/admin-commands.js';
 import { VERIFY_COPY } from './src/verify-copy.js';
+import { renderVerifyPage } from './src/verify-page.js';
 import { USER_COPY, ADMIN_COPY } from './src/user-copy.js';
 import {
   containsLink,
@@ -38,6 +41,7 @@ import {
   isTestMessageInvalid,
   parseSpamKeywords,
   cleanProfileText,
+  createThrottle,
 } from './src/utils.js';
 
 // Telegram Private Chat Gateway — Cloudflare Workers 私聊安全接入与双向会话网关
@@ -71,11 +75,12 @@ const CONFIG = {
   SPAM_MESSAGE_HASH_TTL: 3600,          // 消息去重 hash 缓存 1 小时
   SPAM_REPEAT_MESSAGE_LIMIT: 3,         // 相同内容重复次数阈值
   SPAM_NOTIFY_ADMIN: true,              // 是否通知管理员有骚扰消息
-  SPAM_SILENCE_MODE: false              // 静默丢弃模式（不通知管理员）
+  SPAM_SILENCE_MODE: false,             // 静默丢弃模式（不通知管理员）
+  ALERT_THROTTLE_MS: 60000              // 管理告警节流：同类型 60 秒内最多一条
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.0.0';
+const GATEWAY_VERSION = '1.0.4';
 
 // 线程健康检查缓存，减少频繁探测请求
 const threadHealthCache = new Map();
@@ -153,6 +158,8 @@ const adminActions = createAdminActions({
   tgCall,
   safeGetJSON,
   escapeHtml,
+  SEP_LINE,
+  formatUserStatusChips,
   buildUserActionKeyboard,
   createD1Storage,
   setPersistentTrust,
@@ -844,15 +851,23 @@ async function spamCheck(msg, userId, env) {
   };
 }
 
+// 管理告警节流：同类型告警在窗口内只发一条，避免故障期间告警风暴刷屏
+const adminAlertThrottle = createThrottle({ windowMs: CONFIG.ALERT_THROTTLE_MS });
+
 /**
  * 统一管理员告警通知
  * 用于关键异常（转发失败、KV 异常等）向管理员发送即时通知
  * @param {object} env - 环境变量
- * @param {string} alertType - 告警类型标识
- * @param {string} message - 告警内容（Markdown 格式）
+ * @param {string} alertType - 告警类型标识（同时作为节流 key）
+ * @param {string} message - 告警内容（默认 HTML 格式，parseMode 可覆盖）
  * @param {number} [threadId] - 可选，发送到指定话题
+ * @param {'HTML'|'Markdown'|'MarkdownV2'|''} [parseMode] - 解析模式，默认 HTML
  */
 async function notifyAdmin(env, alertType, message, threadId, parseMode = 'HTML') {
+  if (!adminAlertThrottle(alertType)) {
+    Logger.debug('admin_alert_throttled', { alertType });
+    return;
+  }
   Logger.warn('admin_alert', { alertType, messageLength: message.length });
 
   const body = threadId ? { message_thread_id: threadId } : {};
@@ -925,132 +940,14 @@ async function handleSpamMessage(env, userId, msg, spamResult, threadId, ctx) {
 
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
-      text: ADMIN_COPY.spamIntercepted(escapeHtml(String(userId)), reasonText),
+      text: ADMIN_COPY.spamIntercepted(escapeHtml(String(userId)), reasonText, { threadId }),
       parse_mode: 'HTML',
       ...body
     });
   }
 }
 
-// escapeHtml 由 src/admin-ui-format.js 提供
-
-// --- PR #12: Turnstile 验证页面 HTML 模板 ---
-// 由 Worker 的 GET /verify 端点渲染，用户点击 bot 按钮后跳转到此页面
-// 模板变量：{{SITE_KEY}} {{CODE}} {{USER_ID}} {{WORKER_URL}}
-const VERIFY_PAGE_HTML = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>人机验证</title>
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f5;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px}
-.card{background:#fff;border-radius:16px;padding:32px 24px;max-width:400px;width:100%;text-align:center;box-shadow:0 2px 16px rgba(0,0,0,0.08)}
-.icon{font-size:48px;margin-bottom:12px}
-h2{color:#1a1a1a;margin-bottom:8px;font-size:20px}
-p.desc{color:#666;font-size:14px;margin-bottom:24px;line-height:1.6}
-.turnstile-container{display:flex;justify-content:center;margin-bottom:20px;min-height:65px}
-#status{font-size:13px;color:#999;margin-top:12px;min-height:20px}
-.success{color:#22c55e}
-.error{color:#ef4444}
-.footer{margin-top:20px;font-size:11px;color:#bbb}
-.footer span{font-family:monospace;color:#999}
-</style>
-</head>
-<body>
-<div class="card">
-  <div class="icon">🛡️</div>
-  <h2>人机验证</h2>
-  <p class="desc">请完成下方验证以确认您不是机器人。<br>验证通过后您的消息将自动送达。</p>
-  <div class="turnstile-container">
-    <div class="cf-turnstile" data-sitekey="{{SITE_KEY}}" data-callback="onTurnstileSuccess" data-error-callback="onTurnstileError" data-theme="light"></div>
-  </div>
-  <div id="status">正在加载验证组件...</div>
-  <a id="back-btn" href="tg://resolve" style="display:none;margin-top:16px;background:#0088cc;color:#fff;border:none;padding:12px 24px;border-radius:8px;font-size:16px;text-decoration:none;">📱 返回 Telegram</a>
-  <div class="footer">
-    User: <span>{{USER_ID}}</span> · Code: <span>{{CODE}}</span>
-  </div>
-</div>
-<script>
-var submitted = false;
-function showStatus(msg, cls) {
-  var el = document.getElementById('status');
-  el.textContent = msg;
-  el.className = cls || '';
-}
-function onTurnstileSuccess(token) {
-  if (submitted) return;
-  submitted = true;
-  showStatus('✅ 验证通过，正在通知机器人…', 'success');
-  fetch('{{WORKER_URL}}/verify-callback', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: token, code: '{{CODE}}', userId: '{{USER_ID}}' })
-  })
-  .then(function(r) { return r.json(); })
-  .then(function(data) {
-    if (data.success) {
-      var msg = '✅ 验证成功！请返回 Telegram 继续对话。';
-      if (data.pendingCount > 0) {
-        msg += '（' + data.pendingCount + ' 条消息将于数秒内送达）';
-      }
-      showStatus(msg, 'success');
-      document.querySelector('.desc').textContent = '验证完成，请返回 Telegram 查看机器人消息。';
-      // 显示返回 Telegram 按钮
-      var btn = document.getElementById('back-btn');
-      if (btn) {
-        btn.style.display = 'inline-block';
-      }
-    } else {
-      var errMap = {
-        'turnstile_failed': '人机验证未通过，请刷新页面重试',
-        'code_invalid_or_expired': '验证链接已过期（约 10 分钟），请返回 Telegram 重新发消息获取新链接',
-        'server_not_configured': '服务器未完成配置，请联系管理员'
-      };
-      var errMsg = errMap[data.error] || ('验证失败: ' + (data.detail || data.error || '未知错误'));
-      showStatus(errMsg, 'error');
-      submitted = false;
-      if (window.turnstile) {
-        window.turnstile.reset();
-      }
-    }
-  })
-  .catch(function(e) {
-    showStatus('❌ 网络连接失败，请检查网络后刷新页面重试', 'error');
-    submitted = false;
-    if (window.turnstile) {
-      window.turnstile.reset();
-    }
-  });
-}
-function onTurnstileError(errorCode) {
-  // Turnstile 客户端错误码：https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/
-  var code = (errorCode == null || errorCode === '') ? '' : String(errorCode);
-  var hint = '';
-  if (code === '110200') {
-    hint = '（域名未授权：请在 Cloudflare Turnstile → Hostname 中添加当前 Worker 域名，如 xxx.workers.dev）';
-  } else if (code === '110110') {
-    hint = '（Site Key 无效：请检查 Dashboard 中的 TURNSTILE_SITE_KEY）';
-  } else if (code === '110600') {
-    hint = '（挑战超时：请刷新页面重试；若在 Telegram 内置浏览器失败，可改用系统浏览器打开链接）';
-  } else if (code === '300030' || code === '300031') {
-    hint = '（组件初始化失败：多为 CSP/网络拦截 challenges.cloudflare.com）';
-  } else if (!code) {
-    hint = '（无法加载 challenges.cloudflare.com：请检查网络/代理/地区访问）';
-  }
-  showStatus('⚠️ 验证组件失败' + (code ? ' [' + code + ']' : '') + '，请刷新重试' + hint, 'error');
-}
-// 脚本长时间未就绪时给出提示（区分脚本被墙与 widget 配置错误）
-setTimeout(function() {
-  if (!window.turnstile && !submitted) {
-    showStatus('⚠️ 未能加载 Turnstile 脚本（challenges.cloudflare.com）。请检查网络，或让管理员暂时关闭 TURNSTILE_* 变量以使用本地题库验证。', 'error');
-  }
-}, 8000);
-</script>
-</body>
-</html>`;
+// Turnstile 验证页面模板与渲染函数见 src/verify-page.js（独立模块便于单测）
 
 const legacyApp = {
   /**
@@ -1123,11 +1020,7 @@ const legacyApp = {
           "frame-ancestors 'none'",
         ].join('; ');
 
-        return new Response(VERIFY_PAGE_HTML
-          .replace(/{{SITE_KEY}}/g, escapeHtml(siteKey))
-          .replace(/{{CODE}}/g, escapeHtml(code))
-          .replace(/{{USER_ID}}/g, escapeHtml(userId))
-          .replace(/{{WORKER_URL}}/g, escapeHtml(workerUrl)),
+        return new Response(renderVerifyPage({ siteKey, code, userId, workerUrl }),
           { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': csp } }
         );
       }

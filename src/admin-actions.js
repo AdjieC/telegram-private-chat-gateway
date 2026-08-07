@@ -20,6 +20,8 @@ export function createAdminActions(deps) {
     tgCall,
     safeGetJSON,
     escapeHtml,
+    SEP_LINE,
+    formatUserStatusChips,
     formatTimeBoth,
     buildUserActionKeyboard,
     createD1Storage,
@@ -52,10 +54,10 @@ export function createAdminActions(deps) {
     }
     const text = [
       '🎛 <b>用户面板</b>',
-      '────────────────',
+      SEP_LINE,
       `👤 ${name} · ${un}`,
       `UID <code>${userId}</code>`,
-      `状态  封禁:${ban ? '🚫 是' : '否'} · 静音:${muted ? '🔇 是' : '否'} · 关闭:${rec?.closed ? '🔒 是' : '否'}`,
+      `状态  ${formatUserStatusChips({ banned: Boolean(ban), muted: Boolean(muted), closed: Boolean(rec?.closed) })}`,
       d1Status ? `D1: <code>${escapeHtml(d1Status)}</code>` : '',
       lastMsgLine,
       note

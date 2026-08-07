@@ -8,6 +8,8 @@
 
 - 消除 `worker.js` 与 `src/utils.js` 重复的 10 个纯函数定义，统一 import（单文件部署仍由 esbuild bundle 完成）。
 - `tgCall` 缓存 Telegram 客户端实例，避免每条消息重复创建（并发复用同一 botToken/apiBase 的 client）。
+- **管理告警节流**：同类型告警 60 秒内只发一条（新增 `ALERT_THROTTLE_MS` 内部常量，默认 60000ms），故障期不再告警刷屏；`notifyAdmin` JSDoc 修正为 HTML 默认解析模式。
+- **Turnstile 验证页抽取独立模块** `src/verify-page.js`（模板 + 渲染函数），页面渲染可单测；`worker.js` 不再内嵌约 120 行 HTML 模板。
 - 提取 `forwardPendingMessageIds` 公共函数，统一本地题库与 Turnstile 回调的待处理消息转发（去重 + 并发 3 + 送达通知）。
 - 管理确认回调抽离 `confirmAsk` / `confirmCancel`，消除封禁/关闭/重置 6 处重复块。
 - 提取 `readKvBlockedWords`，`/addword` `/delword` `/listwords` 共用 KV 词库读取。
@@ -60,6 +62,13 @@
 - 验证限流提示入 `VERIFY_COPY`，窗口秒数常量化（300s ↔「5 分钟」）防止文案与配置漂移；自动送达失败提示集中。
 - 答错提示追加判断改为引用提示常量本身，消除「回答不正确」魔法字符串，文案调整不再破坏幂等逻辑。
 - 验证日志不再记录题目文本，日志去敏边界收紧。
+- **Turnstile 验证页 UI 升级**：暗色模式跟随系统偏好（`prefers-color-scheme`）、加载动画、成功/失败状态胶囊样式、`aria-live` 无障碍提示；Turnstile 组件主题与系统同步。
+- **管理看板时间 CST 化**：`formatTimeBoth` 绝对时间由 UTC 改为中国时间（`formatCstTime`，CST UTC+8），与日切/热力口径一致。
+- **编辑通知防超长**：用户/管理员编辑消息通知单侧截断（`EDIT_SNIPPET_LIMIT` 1500 字符 + 省略号），避免超过 Telegram 4096 上限导致通知静默失败。
+- **策略原因中文映射**：`userEditBlocked` 由英文原因码改为可读中文（命中屏蔽词或规则 / 用户已封禁 / 会话已关闭 / 需要重新验证等），未知码保留原值便于排障。
+- **分隔线统一**：管理菜单 / 看板 / 用户面板分隔线统一为 `SEP_LINE` 常量，消除 12/16 字符不一致。
+- **用户面板状态 chips**：只列出生效的受限状态（🚫 已封禁 / 🔇 已静音 / 🔒 已关闭），无限制时显示「✅ 状态正常」。
+- **spam 拦截通知定位引导**：已建话题时引导本话题 `/panel` 操作，无话题时引导 `/find UID` 定位用户。
 
 ### 文档与发布
 

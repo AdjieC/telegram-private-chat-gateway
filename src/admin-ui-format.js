@@ -26,10 +26,24 @@ export function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+/** 管理消息统一分隔线（菜单/看板/用户面板共用，避免各处长度不一致） */
+export const SEP_LINE = '────────────────';
+
 export function formatSysTime(ts) {
   if (ts == null || ts === '' || Number(ts) <= 0) return '无';
   try {
     return new Date(Number(ts)).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
+  } catch {
+    return String(ts);
+  }
+}
+
+/** CST（运维时区）绝对时间，管理看板统一展示用 */
+export function formatCstTime(ts) {
+  if (ts == null || ts === '' || Number(ts) <= 0) return '无';
+  try {
+    const shifted = new Date(Number(ts) + OPS_TZ_OFFSET_HOURS * 3600_000);
+    return `${shifted.toISOString().slice(0, 19).replace('T', ' ')} CST`;
   } catch {
     return String(ts);
   }
@@ -54,11 +68,20 @@ export function formatRelativeTime(ts, now = Date.now()) {
 
 export function formatTimeBoth(ts, now = Date.now()) {
   if (ts == null || Number(ts) <= 0) return '无';
-  return `${formatRelativeTime(ts, now)} · <code>${formatSysTime(ts)}</code>`;
+  return `${formatRelativeTime(ts, now)} · <code>${formatCstTime(ts)}</code>`;
 }
 
 export function statusChip(ok, okText = '正常', badText = '异常') {
   return ok ? `🟢 ${okText}` : `🔴 ${badText}`;
+}
+
+/** 用户状态 chips：只列出生效的受限状态，无限制时显示正常 */
+export function formatUserStatusChips({ banned, muted, closed } = {}) {
+  const chips = [];
+  if (banned) chips.push('🚫 已封禁');
+  if (muted) chips.push('🔇 已静音');
+  if (closed) chips.push('🔒 已关闭');
+  return chips.length ? chips.join(' · ') : '✅ 状态正常';
 }
 
 export function buildUserActionKeyboard(userId) {

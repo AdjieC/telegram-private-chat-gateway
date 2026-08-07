@@ -11,6 +11,10 @@ import {
   buildCloseConfirmKeyboard,
   buildResetConfirmKeyboard,
   formatEmptyActivityHints,
+  formatCstTime,
+  formatTimeBoth,
+  SEP_LINE,
+  formatUserStatusChips,
 } from '../../src/admin-ui-format.js';
 
 describe('admin-ui-format', () => {
@@ -80,5 +84,36 @@ describe('admin-ui-format', () => {
     const hints = formatEmptyActivityHints().join('\n');
     expect(hints).toMatch(/CST/);
     expect(hints).toMatch(/find/);
+  });
+
+  it('formatCstTime 按 UTC+8 展示绝对时间', () => {
+    // 2026-08-07 00:00:00 UTC → CST 08:00:00
+    const ts = Date.UTC(2026, 7, 7, 0, 0, 0);
+    expect(formatCstTime(ts)).toBe('2026-08-07 08:00:00 CST');
+    expect(formatCstTime(null)).toBe('无');
+    expect(formatCstTime(0)).toBe('无');
+  });
+
+  it('formatTimeBoth 组合相对时间与 CST 绝对时间', () => {
+    const now = Date.UTC(2026, 7, 7, 12, 0, 0);
+    const ts = now - 30 * 60 * 1000; // 30 分钟前
+    const out = formatTimeBoth(ts, now);
+    expect(out).toMatch(/30 分钟前/);
+    expect(out).toMatch(/CST/);
+    expect(out).toMatch(/<code>/);
+  });
+
+  it('SEP_LINE 为统一长度分隔线', () => {
+    expect(SEP_LINE.length).toBeGreaterThan(10);
+    expect(SEP_LINE).toMatch(/^─+$/);
+  });
+
+  it('formatUserStatusChips 只列出生效的受限状态', () => {
+    expect(formatUserStatusChips({ banned: true })).toContain('已封禁');
+    expect(formatUserStatusChips({ banned: true })).not.toContain('已静音');
+    expect(formatUserStatusChips({ muted: true, closed: true })).toContain('已静音');
+    expect(formatUserStatusChips({ muted: true, closed: true })).toContain('已关闭');
+    expect(formatUserStatusChips({})).toBe('✅ 状态正常');
+    expect(formatUserStatusChips({ banned: false, muted: false, closed: false })).toBe('✅ 状态正常');
   });
 });

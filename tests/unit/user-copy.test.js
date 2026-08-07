@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { USER_COPY, ADMIN_COPY } from '../../src/user-copy.js';
+import {
+  USER_COPY,
+  ADMIN_COPY,
+  EDIT_SNIPPET_LIMIT,
+  truncateText,
+  policyReasonLabel,
+} from '../../src/user-copy.js';
 
 describe('user-copy', () => {
   it('用户侧拦截/限流文案齐全', () => {
@@ -17,6 +23,10 @@ describe('user-copy', () => {
     const spam = ADMIN_COPY.spamIntercepted('1', '🔑 x');
     expect(spam).toMatch(/<b>/);
     expect(spam).toMatch(/code/);
+    // 无话题时引导用 /find 定位，有话题时引导用 /panel
+    expect(spam).toContain('/find UID');
+    expect(ADMIN_COPY.spamIntercepted('1', '🔑 x', { threadId: 88 })).toContain('/panel');
+    expect(ADMIN_COPY.spamIntercepted('1', '🔑 x', { threadId: 88 })).not.toContain('/find');
     const fwd = ADMIN_COPY.forwardTotalFail('1', '2', 'a', 'b');
     expect(fwd).toMatch(/转发完全失败/);
     expect(ADMIN_COPY.wordUsageAdd).toMatch(/addword/);
@@ -27,8 +37,22 @@ describe('user-copy', () => {
     expect(USER_COPY.adminEditedReply('旧', '新')).toContain('新内容');
     expect(ADMIN_COPY.userEditedMessage('旧', '新')).toContain('用户修改了消息');
     expect(ADMIN_COPY.userEditedMessage('旧', '新')).toContain('新内容');
-    expect(ADMIN_COPY.userEditBlocked('blocked_keyword')).toContain('blocked_keyword');
+    expect(ADMIN_COPY.userEditBlocked('blocked_keyword')).toContain('命中屏蔽词或规则');
+    expect(ADMIN_COPY.userEditBlocked('banned')).toContain('用户已封禁');
     expect(ADMIN_COPY.userEditBlocked(null)).toContain('unknown');
+    expect(policyReasonLabel('closed')).toBe('会话已关闭');
+    expect(policyReasonLabel('unknown_reason')).toBe('unknown_reason');
+  });
+
+  it('编辑通知对超长内容截断，避免超过 Telegram 消息上限', () => {
+    const longText = '长'.repeat(4000);
+    const notice = ADMIN_COPY.userEditedMessage(longText, longText);
+    expect(notice.length).toBeLessThan(4096);
+    expect(notice).toContain('…');
+    expect(truncateText('短文本')).toBe('短文本');
+    expect(truncateText(longText).length).toBe(EDIT_SNIPPET_LIMIT + 1);
+    expect(truncateText(undefined)).toBe('');
+    expect(truncateText(null)).toBe('');
   });
 
   it('管理状态操作反馈与回调 toast 文案齐全', () => {

@@ -1151,6 +1151,16 @@ function generateVerifyCode() {
   crypto.getRandomValues(bytes);
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+function createThrottle({ windowMs = 6e4 } = {}) {
+  const lastSentAt = /* @__PURE__ */ new Map();
+  return (key, now = Date.now()) => {
+    const k = String(key);
+    const prev = lastSentAt.get(k);
+    if (prev !== void 0 && now - prev < windowMs) return false;
+    lastSentAt.set(k, now);
+    return true;
+  };
+}
 
 // src/message-policy.js
 var MAX_PATTERN_LENGTH = 200;
@@ -1337,6 +1347,22 @@ function evaluateMessagePolicy({
 }
 
 // src/user-copy.js
+var EDIT_SNIPPET_LIMIT = 1500;
+function truncateText(text, limit = EDIT_SNIPPET_LIMIT) {
+  const s = String(text ?? "");
+  return s.length > limit ? `${s.slice(0, limit)}\u2026` : s;
+}
+var POLICY_REASON_LABELS = {
+  blocked_keyword: "\u547D\u4E2D\u5C4F\u853D\u8BCD\u6216\u89C4\u5219",
+  blocked_keyword_notify_only: "\u547D\u4E2D\u89C4\u5219\uFF08\u4EC5\u901A\u77E5\uFF09",
+  auto_reply: "\u89C4\u5219\u81EA\u52A8\u56DE\u590D",
+  banned: "\u7528\u6237\u5DF2\u5C01\u7981",
+  closed: "\u4F1A\u8BDD\u5DF2\u5173\u95ED",
+  verification_required: "\u9700\u8981\u91CD\u65B0\u9A8C\u8BC1"
+};
+function policyReasonLabel(reason) {
+  return POLICY_REASON_LABELS[reason] || String(reason || "unknown");
+}
 var USER_COPY = {
   rateLimited: "\u26A0\uFE0F \u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
   systemBusy: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
@@ -1351,22 +1377,23 @@ var USER_COPY = {
   unmuteUserNotify: "\u{1F50A} \u60A8\u7684\u9759\u97F3\u5DF2\u53D6\u6D88\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
   banUserNotify: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
   unbanUserNotify: "\u2705 \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u89E3\u5C01\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u4E86\u3002",
-  /** 管理员修改回复后发给用户的编辑通知（纯文本，内容来自消息快照） */
+  /** 管理员修改回复后发给用户的编辑通知（纯文本，内容来自消息快照，单侧截断防超长） */
   adminEditedReply(original, updated) {
     return `\u270F\uFE0F \u7BA1\u7406\u5458\u4FEE\u6539\u4E86\u56DE\u590D
-\u539F\u5185\u5BB9\uFF1A${original}
-\u65B0\u5185\u5BB9\uFF1A${updated}`;
+\u539F\u5185\u5BB9\uFF1A${truncateText(original)}
+\u65B0\u5185\u5BB9\uFF1A${truncateText(updated)}`;
   }
 };
 var ADMIN_COPY = {
-  spamIntercepted(userId, reasonText) {
+  spamIntercepted(userId, reasonText, { threadId } = {}) {
+    const locateHint = threadId ? "\u5DF2\u53D1\u9001\u5230\u8BE5\u7528\u6237\u8BDD\u9898\uFF0C\u53EF\u5728\u672C\u8BDD\u9898\u5185\u4F7F\u7528 <b>/panel</b> \u64CD\u4F5C\u3002" : "\u8BE5\u7528\u6237\u5C1A\u65E0\u8BDD\u9898\uFF0C\u53EF\u7528 <code>/find UID</code> \u5B9A\u4F4D\u3002";
     return [
       "\u26A0\uFE0F <b>\u68C0\u6D4B\u5230\u7591\u4F3C\u9A9A\u6270\u6D88\u606F</b>",
       "",
       `\u{1F464} \u7528\u6237: <code>${userId}</code>`,
       reasonText,
       "",
-      "\u{1F4DD} \u6D88\u606F\u5DF2\u62E6\u622A\u3002\u53EF\u5728\u7528\u6237\u8BDD\u9898\u5185\u4F7F\u7528\u9762\u677F <b>\u5C01\u7981</b>\u3002"
+      `\u{1F4DD} \u6D88\u606F\u5DF2\u62E6\u622A\u3002${locateHint}`
     ].join("\n");
   },
   forwardTotalFail(userId, threadId, fwdDesc, copyDesc) {
@@ -1400,13 +1427,13 @@ var ADMIN_COPY = {
   },
   /** 用户编辑消息被策略拦截后发给管理员的提示（纯文本，reason 为策略原因标识） */
   userEditBlocked(reason) {
-    return `\u{1F6AB} \u7528\u6237\u7F16\u8F91\u5DF2\u62E6\u622A\uFF1A${reason || "unknown"}`;
+    return `\u{1F6AB} \u7528\u6237\u7F16\u8F91\u5DF2\u62E6\u622A\uFF1A${policyReasonLabel(reason)}`;
   },
-  /** 用户编辑消息后发给管理员的变更通知（纯文本，内容来自消息快照） */
+  /** 用户编辑消息后发给管理员的变更通知（纯文本，内容来自消息快照，单侧截断防超长） */
   userEditedMessage(original, updated) {
     return `\u270F\uFE0F \u7528\u6237\u4FEE\u6539\u4E86\u6D88\u606F
-\u539F\u5185\u5BB9\uFF1A${original}
-\u65B0\u5185\u5BB9\uFF1A${updated}`;
+\u539F\u5185\u5BB9\uFF1A${truncateText(original)}
+\u65B0\u5185\u5BB9\uFF1A${truncateText(updated)}`;
   },
   /** 群内状态操作反馈（HTML） */
   mutedInGroup: "\u{1F507} <b>\u5DF2\u9759\u97F3</b>\uFF1A\u7528\u6237\u6D88\u606F\u4E0D\u518D\u8F6C\u53D1\u5230\u672C\u7FA4",
@@ -2059,6 +2086,8 @@ function createAdminActions(deps) {
     tgCall: tgCall2,
     safeGetJSON: safeGetJSON2,
     escapeHtml: escapeHtml2,
+    SEP_LINE: SEP_LINE2,
+    formatUserStatusChips: formatUserStatusChips2,
     formatTimeBoth: formatTimeBoth2,
     buildUserActionKeyboard: buildUserActionKeyboard2,
     createD1Storage: createD1Storage2,
@@ -2091,10 +2120,10 @@ function createAdminActions(deps) {
     }
     const text = [
       "\u{1F39B} <b>\u7528\u6237\u9762\u677F</b>",
-      "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+      SEP_LINE2,
       `\u{1F464} ${name} \xB7 ${un}`,
       `UID <code>${userId}</code>`,
-      `\u72B6\u6001  \u5C01\u7981:${ban2 ? "\u{1F6AB} \u662F" : "\u5426"} \xB7 \u9759\u97F3:${muted ? "\u{1F507} \u662F" : "\u5426"} \xB7 \u5173\u95ED:${rec?.closed ? "\u{1F512} \u662F" : "\u5426"}`,
+      `\u72B6\u6001  ${formatUserStatusChips2({ banned: Boolean(ban2), muted: Boolean(muted), closed: Boolean(rec?.closed) })}`,
       d1Status ? `D1: <code>${escapeHtml2(d1Status)}</code>` : "",
       lastMsgLine,
       note2 ? `\u{1F4DD} ${escapeHtml2(String(note2).slice(0, 80))}${String(note2).length > 80 ? "\u2026" : ""}` : "\u{1F4DD} \u65E0\u5907\u6CE8 \xB7 <code>/note \u5185\u5BB9</code> \u6DFB\u52A0",
@@ -2820,10 +2849,20 @@ function activitySourceLabel(source) {
 function escapeHtml(str) {
   return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
+var SEP_LINE = "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500";
 function formatSysTime(ts) {
   if (ts == null || ts === "" || Number(ts) <= 0) return "\u65E0";
   try {
     return new Date(Number(ts)).toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
+  } catch {
+    return String(ts);
+  }
+}
+function formatCstTime(ts) {
+  if (ts == null || ts === "" || Number(ts) <= 0) return "\u65E0";
+  try {
+    const shifted = new Date(Number(ts) + OPS_TZ_OFFSET_HOURS * 36e5);
+    return `${shifted.toISOString().slice(0, 19).replace("T", " ")} CST`;
   } catch {
     return String(ts);
   }
@@ -2845,10 +2884,17 @@ function formatRelativeTime(ts, now = Date.now()) {
 }
 function formatTimeBoth(ts, now = Date.now()) {
   if (ts == null || Number(ts) <= 0) return "\u65E0";
-  return `${formatRelativeTime(ts, now)} \xB7 <code>${formatSysTime(ts)}</code>`;
+  return `${formatRelativeTime(ts, now)} \xB7 <code>${formatCstTime(ts)}</code>`;
 }
 function statusChip(ok, okText = "\u6B63\u5E38", badText = "\u5F02\u5E38") {
   return ok ? `\u{1F7E2} ${okText}` : `\u{1F534} ${badText}`;
+}
+function formatUserStatusChips({ banned, muted, closed } = {}) {
+  const chips = [];
+  if (banned) chips.push("\u{1F6AB} \u5DF2\u5C01\u7981");
+  if (muted) chips.push("\u{1F507} \u5DF2\u9759\u97F3");
+  if (closed) chips.push("\u{1F512} \u5DF2\u5173\u95ED");
+  return chips.length ? chips.join(" \xB7 ") : "\u2705 \u72B6\u6001\u6B63\u5E38";
 }
 function buildUserActionKeyboard(userId) {
   const id = String(userId);
@@ -3749,7 +3795,7 @@ function createAdminCommandHandlers(deps) {
   async function handleMenuCommand(env, threadId, senderId) {
     const text = [
       `\u{1F3E0} <b>\u7BA1\u7406\u83DC\u5355</b> \xB7 v${GATEWAY_VERSION2}`,
-      "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+      SEP_LINE,
       "\u70B9\u4E0B\u65B9\u6309\u94AE\u5373\u53EF\uFF0C\u65E0\u9700\u8BB0\u5FC6\u547D\u4EE4\u3002",
       "",
       "\u{1F4CA} \u4ECA\u65E5\u7EDF\u8BA1 \xB7 \u{1F525} \u6D3B\u8DC3\u6392\u884C\uFF08CST\uFF09",
@@ -3838,7 +3884,7 @@ function createAdminCommandHandlers(deps) {
     let activity = null;
     lines.push(`\u{1F5A5} <b>\u7CFB\u7EDF \xB7 ${page === "stats" ? "\u4ECA\u65E5\u7EDF\u8BA1" : "\u6982\u89C8"}</b>`);
     lines.push(`<code>v${GATEWAY_VERSION2}</code>`);
-    lines.push("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+    lines.push(SEP_LINE);
     lines.push(`${statusChip(true, "Worker \u8FD0\u884C\u4E2D")}`);
     lines.push(`${statusChip(hasKv, "KV \u5DF2\u7ED1\u5B9A", "KV \u7F3A\u5931")} \xB7 ${statusChip(hasD1, "D1 \u5DF2\u7ED1\u5B9A", "D1 \u7F3A\u5931")}`);
     lines.push(`\u9A8C\u8BC1: ${turnstileOn ? "\u{1F6E1} Turnstile" : "\u{1F4DD} \u672C\u5730\u9898\u5E93"} \xB7 Owner: ${parseIdAllowlist2(env.OWNER_IDS).length > 0 ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E"}`);
@@ -3958,7 +4004,7 @@ function createAdminCommandHandlers(deps) {
     const lines = [];
     lines.push("\u{1F5C4} <b>\u7CFB\u7EDF \xB7 \u5B58\u50A8</b>");
     lines.push(`<code>v${GATEWAY_VERSION2}</code>`);
-    lines.push("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+    lines.push(SEP_LINE);
     if (hasD1) {
       try {
         const stats = await createD1Storage2(env.TG_BOT_DB).getSystemStats();
@@ -3990,7 +4036,7 @@ function createAdminCommandHandlers(deps) {
     const lines = [];
     lines.push("\u26A0\uFE0F <b>\u7CFB\u7EDF \xB7 \u6700\u8FD1\u9519\u8BEF</b>");
     lines.push(`<code>v${GATEWAY_VERSION2}</code>`);
-    lines.push("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+    lines.push(SEP_LINE);
     const top = await collectRecentErrors(env);
     if (!top.length) {
       lines.push("\u2728 \u6682\u65E0\u9519\u8BEF\u8BB0\u5F55");
@@ -4157,7 +4203,7 @@ function createAdminCommandHandlers(deps) {
     const lines = [
       `\u{1F50E} <b>\u5907\u6CE8\u641C\u7D22</b>${q ? ` \xB7 \u300C${escapeHtml(q)}\u300D` : " \xB7 \u6700\u8FD1"}`,
       `\u5171 ${matches.length} \u6761${truncated ? "\uFF08\u5DF2\u622A\u65AD\uFF0C\u53EF\u52A0\u5173\u952E\u8BCD\u7F29\u5C0F\uFF09" : ""}`,
-      "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+      SEP_LINE
     ];
     const jumpUsers = [];
     for (const m of matches) {
@@ -4198,7 +4244,7 @@ function createAdminCommandHandlers(deps) {
     }[member] || member;
     const text = [
       "\u{1FAAA} <b>Whoami</b>",
-      "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+      SEP_LINE,
       `UID: <code>${senderId}</code>`,
       `\u7FA4\u8EAB\u4EFD: <code>${escapeHtml(member)}</code> \xB7 ${escapeHtml(memberLabel)}`,
       `\u7BA1\u7406\u6307\u4EE4: ${admin ? "\u2705 \u53EF\u7528" : "\u274C \u4E0D\u53EF\u7528"}`,
@@ -4600,6 +4646,164 @@ function createAdminCommandHandlers(deps) {
   };
 }
 
+// src/verify-page.js
+var VERIFY_PAGE_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<title>\u4EBA\u673A\u9A8C\u8BC1</title>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#f0f2f5;--card:#ffffff;--text:#1a1a1a;--sub:#5b6472;--muted:#9aa3af;
+  --accent:#0088cc;--border:#e4e7ec;
+  --success-bg:#e8f7ee;--success-text:#0f7a45;
+  --error-bg:#fdecec;--error-text:#b42318;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f172a;--card:#1e293b;--text:#f1f5f9;--sub:#94a3b8;--muted:#64748b;
+    --accent:#38bdf8;--border:#334155;
+    --success-bg:#0b2e21;--success-text:#4ade80;
+    --error-bg:#3b1212;--error-text:#fca5a5;
+  }
+}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px;color:var(--text)}
+.card{background:var(--card);border-radius:20px;padding:36px 24px 28px;max-width:400px;width:100%;text-align:center;box-shadow:0 4px 24px rgba(15,23,42,0.08);border:1px solid var(--border)}
+.icon{font-size:52px;margin-bottom:14px}
+h2{color:var(--text);margin-bottom:8px;font-size:20px;font-weight:600}
+p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
+.turnstile-container{display:flex;justify-content:center;margin-bottom:10px;min-height:65px}
+#status{display:inline-flex;align-items:center;gap:7px;font-size:13px;line-height:1.5;color:var(--sub);margin-top:14px;padding:9px 16px;border-radius:999px;background:var(--bg);border:1px solid var(--border);min-height:38px;transition:background .2s,color .2s}
+#status.success{background:var(--success-bg);color:var(--success-text);border-color:transparent}
+#status.error{background:var(--error-bg);color:var(--error-text);border-color:transparent}
+.spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:spin .8s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+#back-btn{display:none;margin:20px auto 0;background:var(--accent);color:#fff;border:none;padding:13px 28px;border-radius:12px;font-size:16px;text-decoration:none;font-weight:600;transition:opacity .2s,transform .1s;box-shadow:0 2px 8px rgba(0,136,204,0.3)}
+#back-btn:hover{opacity:.92}
+#back-btn:active{transform:scale(.98)}
+.footer{margin-top:22px;font-size:11px;color:var(--muted)}
+.footer span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">\u{1F6E1}\uFE0F</div>
+  <h2>\u4EBA\u673A\u9A8C\u8BC1</h2>
+  <p class="desc">\u8BF7\u5B8C\u6210\u4E0B\u65B9\u9A8C\u8BC1\u4EE5\u786E\u8BA4\u60A8\u4E0D\u662F\u673A\u5668\u4EBA\u3002<br>\u9A8C\u8BC1\u901A\u8FC7\u540E\u60A8\u7684\u6D88\u606F\u5C06\u81EA\u52A8\u9001\u8FBE\u3002</p>
+  <div class="turnstile-container">
+    <div class="cf-turnstile" data-sitekey="{{SITE_KEY}}" data-callback="onTurnstileSuccess" data-error-callback="onTurnstileError" data-theme="light"></div>
+  </div>
+  <div id="status" aria-live="polite"></div>
+  <a id="back-btn" href="tg://resolve">\u{1F4F1} \u8FD4\u56DE Telegram</a>
+  <div class="footer">
+    User: <span>{{USER_ID}}</span> \xB7 Code: <span>{{CODE}}</span>
+  </div>
+</div>
+<script>
+// Turnstile \u7EC4\u4EF6\u4E3B\u9898\u8DDF\u968F\u7CFB\u7EDF\u504F\u597D\uFF08\u9700\u5728 widget \u6E32\u67D3\u524D\u8BBE\u7F6E\uFF09
+(function(){
+  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  var el = document.querySelector('.cf-turnstile');
+  if (el && dark) { el.setAttribute('data-theme', 'dark'); }
+})();
+var submitted = false;
+function showStatus(msg, cls) {
+  var el = document.getElementById('status');
+  if (!el) return;
+  el.className = cls || '';
+  el.innerHTML = '';
+  if (cls === 'loading') {
+    var sp = document.createElement('span');
+    sp.className = 'spinner';
+    el.appendChild(sp);
+  }
+  var t = document.createElement('span');
+  t.textContent = msg;
+  el.appendChild(t);
+}
+function onTurnstileSuccess(token) {
+  if (submitted) return;
+  submitted = true;
+  showStatus('\u2705 \u9A8C\u8BC1\u901A\u8FC7\uFF0C\u6B63\u5728\u901A\u77E5\u673A\u5668\u4EBA\u2026', 'loading');
+  fetch('{{WORKER_URL}}/verify-callback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: token, code: '{{CODE}}', userId: '{{USER_ID}}' })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.success) {
+      var msg = '\u2705 \u9A8C\u8BC1\u6210\u529F\uFF01\u8BF7\u8FD4\u56DE Telegram \u7EE7\u7EED\u5BF9\u8BDD\u3002';
+      if (data.pendingCount > 0) {
+        msg += '\uFF08' + data.pendingCount + ' \u6761\u6D88\u606F\u5C06\u4E8E\u6570\u79D2\u5185\u9001\u8FBE\uFF09';
+      }
+      showStatus(msg, 'success');
+      document.querySelector('.desc').textContent = '\u9A8C\u8BC1\u5B8C\u6210\uFF0C\u8BF7\u8FD4\u56DE Telegram \u67E5\u770B\u673A\u5668\u4EBA\u6D88\u606F\u3002';
+      // \u663E\u793A\u8FD4\u56DE Telegram \u6309\u94AE
+      var btn = document.getElementById('back-btn');
+      if (btn) {
+        btn.style.display = 'inline-block';
+      }
+    } else {
+      var errMap = {
+        'turnstile_failed': '\u4EBA\u673A\u9A8C\u8BC1\u672A\u901A\u8FC7\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5',
+        'code_invalid_or_expired': '\u9A8C\u8BC1\u94FE\u63A5\u5DF2\u8FC7\u671F\uFF08\u7EA6 10 \u5206\u949F\uFF09\uFF0C\u8BF7\u8FD4\u56DE Telegram \u91CD\u65B0\u53D1\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5',
+        'server_not_configured': '\u670D\u52A1\u5668\u672A\u5B8C\u6210\u914D\u7F6E\uFF0C\u8BF7\u8054\u7CFB\u7BA1\u7406\u5458'
+      };
+      var errMsg = errMap[data.error] || ('\u9A8C\u8BC1\u5931\u8D25: ' + (data.detail || data.error || '\u672A\u77E5\u9519\u8BEF'));
+      showStatus(errMsg, 'error');
+      submitted = false;
+      if (window.turnstile) {
+        window.turnstile.reset();
+      }
+    }
+  })
+  .catch(function(e) {
+    showStatus('\u274C \u7F51\u7EDC\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u540E\u5237\u65B0\u9875\u9762\u91CD\u8BD5', 'error');
+    submitted = false;
+    if (window.turnstile) {
+      window.turnstile.reset();
+    }
+  });
+}
+function onTurnstileError(errorCode) {
+  // Turnstile \u5BA2\u6237\u7AEF\u9519\u8BEF\u7801\uFF1Ahttps://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/
+  var code = (errorCode == null || errorCode === '') ? '' : String(errorCode);
+  var hint = '';
+  if (code === '110200') {
+    hint = '\uFF08\u57DF\u540D\u672A\u6388\u6743\uFF1A\u8BF7\u5728 Cloudflare Turnstile \u2192 Hostname \u4E2D\u6DFB\u52A0\u5F53\u524D Worker \u57DF\u540D\uFF0C\u5982 xxx.workers.dev\uFF09';
+  } else if (code === '110110') {
+    hint = '\uFF08Site Key \u65E0\u6548\uFF1A\u8BF7\u68C0\u67E5 Dashboard \u4E2D\u7684 TURNSTILE_SITE_KEY\uFF09';
+  } else if (code === '110600') {
+    hint = '\uFF08\u6311\u6218\u8D85\u65F6\uFF1A\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5\uFF1B\u82E5\u5728 Telegram \u5185\u7F6E\u6D4F\u89C8\u5668\u5931\u8D25\uFF0C\u53EF\u6539\u7528\u7CFB\u7EDF\u6D4F\u89C8\u5668\u6253\u5F00\u94FE\u63A5\uFF09';
+  } else if (code === '300030' || code === '300031') {
+    hint = '\uFF08\u7EC4\u4EF6\u521D\u59CB\u5316\u5931\u8D25\uFF1A\u591A\u4E3A CSP/\u7F51\u7EDC\u62E6\u622A challenges.cloudflare.com\uFF09';
+  } else if (!code) {
+    hint = '\uFF08\u65E0\u6CD5\u52A0\u8F7D challenges.cloudflare.com\uFF1A\u8BF7\u68C0\u67E5\u7F51\u7EDC/\u4EE3\u7406/\u5730\u533A\u8BBF\u95EE\uFF09';
+  }
+  showStatus('\u26A0\uFE0F \u9A8C\u8BC1\u7EC4\u4EF6\u5931\u8D25' + (code ? ' [' + code + ']' : '') + '\uFF0C\u8BF7\u5237\u65B0\u91CD\u8BD5' + hint, 'error');
+}
+// \u521D\u59CB\u52A0\u8F7D\u6001\uFF1A\u811A\u672C\u672A\u5C31\u7EEA\u65F6\u663E\u793A\u52A0\u8F7D\u52A8\u753B\uFF08\u533A\u5206\u811A\u672C\u88AB\u5899\u4E0E widget \u914D\u7F6E\u9519\u8BEF\uFF09
+showStatus('\u6B63\u5728\u52A0\u8F7D\u9A8C\u8BC1\u7EC4\u4EF6\u2026', 'loading');
+// \u811A\u672C\u957F\u65F6\u95F4\u672A\u5C31\u7EEA\u65F6\u7ED9\u51FA\u63D0\u793A\uFF08\u533A\u5206\u811A\u672C\u88AB\u5899\u4E0E widget \u914D\u7F6E\u9519\u8BEF\uFF09
+setTimeout(function() {
+  if (!window.turnstile && !submitted) {
+    showStatus('\u26A0\uFE0F \u672A\u80FD\u52A0\u8F7D Turnstile \u811A\u672C\uFF08challenges.cloudflare.com\uFF09\u3002\u8BF7\u68C0\u67E5\u7F51\u7EDC\uFF0C\u6216\u8BA9\u7BA1\u7406\u5458\u6682\u65F6\u5173\u95ED TURNSTILE_* \u53D8\u91CF\u4EE5\u4F7F\u7528\u672C\u5730\u9898\u5E93\u9A8C\u8BC1\u3002', 'error');
+  }
+}, 8000);
+</script>
+</body>
+</html>`;
+function renderVerifyPage({ siteKey, code, userId, workerUrl }) {
+  return VERIFY_PAGE_HTML.replace(/{{SITE_KEY}}/g, escapeHtml(siteKey)).replace(/{{CODE}}/g, escapeHtml(code)).replace(/{{USER_ID}}/g, escapeHtml(userId)).replace(/{{WORKER_URL}}/g, escapeHtml(workerUrl));
+}
+
 // worker.js
 var CONFIG = {
   VERIFY_ID_LENGTH: 12,
@@ -4640,10 +4844,12 @@ var CONFIG = {
   // 相同内容重复次数阈值
   SPAM_NOTIFY_ADMIN: true,
   // 是否通知管理员有骚扰消息
-  SPAM_SILENCE_MODE: false
+  SPAM_SILENCE_MODE: false,
   // 静默丢弃模式（不通知管理员）
+  ALERT_THROTTLE_MS: 6e4
+  // 管理告警节流：同类型 60 秒内最多一条
 };
-var GATEWAY_VERSION = "1.0.0";
+var GATEWAY_VERSION = "1.0.4";
 var threadHealthCache = /* @__PURE__ */ new Map();
 var topicCreateInFlight = /* @__PURE__ */ new Map();
 var adminStatusCache = /* @__PURE__ */ new Map();
@@ -4706,6 +4912,8 @@ var adminActions = createAdminActions({
   tgCall,
   safeGetJSON,
   escapeHtml,
+  SEP_LINE,
+  formatUserStatusChips,
   buildUserActionKeyboard,
   createD1Storage,
   setPersistentTrust,
@@ -5258,7 +5466,12 @@ async function spamCheck(msg, userId, env) {
     details
   };
 }
+var adminAlertThrottle = createThrottle({ windowMs: CONFIG.ALERT_THROTTLE_MS });
 async function notifyAdmin(env, alertType, message, threadId, parseMode = "HTML") {
+  if (!adminAlertThrottle(alertType)) {
+    Logger.debug("admin_alert_throttled", { alertType });
+    return;
+  }
   Logger.warn("admin_alert", { alertType, messageLength: message.length });
   const body = threadId ? { message_thread_id: threadId } : {};
   try {
@@ -5311,126 +5524,12 @@ async function handleSpamMessage(env, userId, msg, spamResult, threadId, ctx) {
     const body = threadId ? { message_thread_id: threadId } : {};
     await tgCall(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
-      text: ADMIN_COPY.spamIntercepted(escapeHtml(String(userId)), reasonText),
+      text: ADMIN_COPY.spamIntercepted(escapeHtml(String(userId)), reasonText, { threadId }),
       parse_mode: "HTML",
       ...body
     });
   }
 }
-var VERIFY_PAGE_HTML = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>\u4EBA\u673A\u9A8C\u8BC1</title>
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f5;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px}
-.card{background:#fff;border-radius:16px;padding:32px 24px;max-width:400px;width:100%;text-align:center;box-shadow:0 2px 16px rgba(0,0,0,0.08)}
-.icon{font-size:48px;margin-bottom:12px}
-h2{color:#1a1a1a;margin-bottom:8px;font-size:20px}
-p.desc{color:#666;font-size:14px;margin-bottom:24px;line-height:1.6}
-.turnstile-container{display:flex;justify-content:center;margin-bottom:20px;min-height:65px}
-#status{font-size:13px;color:#999;margin-top:12px;min-height:20px}
-.success{color:#22c55e}
-.error{color:#ef4444}
-.footer{margin-top:20px;font-size:11px;color:#bbb}
-.footer span{font-family:monospace;color:#999}
-</style>
-</head>
-<body>
-<div class="card">
-  <div class="icon">\u{1F6E1}\uFE0F</div>
-  <h2>\u4EBA\u673A\u9A8C\u8BC1</h2>
-  <p class="desc">\u8BF7\u5B8C\u6210\u4E0B\u65B9\u9A8C\u8BC1\u4EE5\u786E\u8BA4\u60A8\u4E0D\u662F\u673A\u5668\u4EBA\u3002<br>\u9A8C\u8BC1\u901A\u8FC7\u540E\u60A8\u7684\u6D88\u606F\u5C06\u81EA\u52A8\u9001\u8FBE\u3002</p>
-  <div class="turnstile-container">
-    <div class="cf-turnstile" data-sitekey="{{SITE_KEY}}" data-callback="onTurnstileSuccess" data-error-callback="onTurnstileError" data-theme="light"></div>
-  </div>
-  <div id="status">\u6B63\u5728\u52A0\u8F7D\u9A8C\u8BC1\u7EC4\u4EF6...</div>
-  <a id="back-btn" href="tg://resolve" style="display:none;margin-top:16px;background:#0088cc;color:#fff;border:none;padding:12px 24px;border-radius:8px;font-size:16px;text-decoration:none;">\u{1F4F1} \u8FD4\u56DE Telegram</a>
-  <div class="footer">
-    User: <span>{{USER_ID}}</span> \xB7 Code: <span>{{CODE}}</span>
-  </div>
-</div>
-<script>
-var submitted = false;
-function showStatus(msg, cls) {
-  var el = document.getElementById('status');
-  el.textContent = msg;
-  el.className = cls || '';
-}
-function onTurnstileSuccess(token) {
-  if (submitted) return;
-  submitted = true;
-  showStatus('\u2705 \u9A8C\u8BC1\u901A\u8FC7\uFF0C\u6B63\u5728\u901A\u77E5\u673A\u5668\u4EBA\u2026', 'success');
-  fetch('{{WORKER_URL}}/verify-callback', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: token, code: '{{CODE}}', userId: '{{USER_ID}}' })
-  })
-  .then(function(r) { return r.json(); })
-  .then(function(data) {
-    if (data.success) {
-      var msg = '\u2705 \u9A8C\u8BC1\u6210\u529F\uFF01\u8BF7\u8FD4\u56DE Telegram \u7EE7\u7EED\u5BF9\u8BDD\u3002';
-      if (data.pendingCount > 0) {
-        msg += '\uFF08' + data.pendingCount + ' \u6761\u6D88\u606F\u5C06\u4E8E\u6570\u79D2\u5185\u9001\u8FBE\uFF09';
-      }
-      showStatus(msg, 'success');
-      document.querySelector('.desc').textContent = '\u9A8C\u8BC1\u5B8C\u6210\uFF0C\u8BF7\u8FD4\u56DE Telegram \u67E5\u770B\u673A\u5668\u4EBA\u6D88\u606F\u3002';
-      // \u663E\u793A\u8FD4\u56DE Telegram \u6309\u94AE
-      var btn = document.getElementById('back-btn');
-      if (btn) {
-        btn.style.display = 'inline-block';
-      }
-    } else {
-      var errMap = {
-        'turnstile_failed': '\u4EBA\u673A\u9A8C\u8BC1\u672A\u901A\u8FC7\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5',
-        'code_invalid_or_expired': '\u9A8C\u8BC1\u94FE\u63A5\u5DF2\u8FC7\u671F\uFF08\u7EA6 10 \u5206\u949F\uFF09\uFF0C\u8BF7\u8FD4\u56DE Telegram \u91CD\u65B0\u53D1\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5',
-        'server_not_configured': '\u670D\u52A1\u5668\u672A\u5B8C\u6210\u914D\u7F6E\uFF0C\u8BF7\u8054\u7CFB\u7BA1\u7406\u5458'
-      };
-      var errMsg = errMap[data.error] || ('\u9A8C\u8BC1\u5931\u8D25: ' + (data.detail || data.error || '\u672A\u77E5\u9519\u8BEF'));
-      showStatus(errMsg, 'error');
-      submitted = false;
-      if (window.turnstile) {
-        window.turnstile.reset();
-      }
-    }
-  })
-  .catch(function(e) {
-    showStatus('\u274C \u7F51\u7EDC\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u540E\u5237\u65B0\u9875\u9762\u91CD\u8BD5', 'error');
-    submitted = false;
-    if (window.turnstile) {
-      window.turnstile.reset();
-    }
-  });
-}
-function onTurnstileError(errorCode) {
-  // Turnstile \u5BA2\u6237\u7AEF\u9519\u8BEF\u7801\uFF1Ahttps://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/
-  var code = (errorCode == null || errorCode === '') ? '' : String(errorCode);
-  var hint = '';
-  if (code === '110200') {
-    hint = '\uFF08\u57DF\u540D\u672A\u6388\u6743\uFF1A\u8BF7\u5728 Cloudflare Turnstile \u2192 Hostname \u4E2D\u6DFB\u52A0\u5F53\u524D Worker \u57DF\u540D\uFF0C\u5982 xxx.workers.dev\uFF09';
-  } else if (code === '110110') {
-    hint = '\uFF08Site Key \u65E0\u6548\uFF1A\u8BF7\u68C0\u67E5 Dashboard \u4E2D\u7684 TURNSTILE_SITE_KEY\uFF09';
-  } else if (code === '110600') {
-    hint = '\uFF08\u6311\u6218\u8D85\u65F6\uFF1A\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5\uFF1B\u82E5\u5728 Telegram \u5185\u7F6E\u6D4F\u89C8\u5668\u5931\u8D25\uFF0C\u53EF\u6539\u7528\u7CFB\u7EDF\u6D4F\u89C8\u5668\u6253\u5F00\u94FE\u63A5\uFF09';
-  } else if (code === '300030' || code === '300031') {
-    hint = '\uFF08\u7EC4\u4EF6\u521D\u59CB\u5316\u5931\u8D25\uFF1A\u591A\u4E3A CSP/\u7F51\u7EDC\u62E6\u622A challenges.cloudflare.com\uFF09';
-  } else if (!code) {
-    hint = '\uFF08\u65E0\u6CD5\u52A0\u8F7D challenges.cloudflare.com\uFF1A\u8BF7\u68C0\u67E5\u7F51\u7EDC/\u4EE3\u7406/\u5730\u533A\u8BBF\u95EE\uFF09';
-  }
-  showStatus('\u26A0\uFE0F \u9A8C\u8BC1\u7EC4\u4EF6\u5931\u8D25' + (code ? ' [' + code + ']' : '') + '\uFF0C\u8BF7\u5237\u65B0\u91CD\u8BD5' + hint, 'error');
-}
-// \u811A\u672C\u957F\u65F6\u95F4\u672A\u5C31\u7EEA\u65F6\u7ED9\u51FA\u63D0\u793A\uFF08\u533A\u5206\u811A\u672C\u88AB\u5899\u4E0E widget \u914D\u7F6E\u9519\u8BEF\uFF09
-setTimeout(function() {
-  if (!window.turnstile && !submitted) {
-    showStatus('\u26A0\uFE0F \u672A\u80FD\u52A0\u8F7D Turnstile \u811A\u672C\uFF08challenges.cloudflare.com\uFF09\u3002\u8BF7\u68C0\u67E5\u7F51\u7EDC\uFF0C\u6216\u8BA9\u7BA1\u7406\u5458\u6682\u65F6\u5173\u95ED TURNSTILE_* \u53D8\u91CF\u4EE5\u4F7F\u7528\u672C\u5730\u9898\u5E93\u9A8C\u8BC1\u3002', 'error');
-  }
-}, 8000);
-</script>
-</body>
-</html>`;
 var legacyApp = {
   /**
    * 业务层 HTTP 入口。
@@ -5482,7 +5581,7 @@ var legacyApp = {
           "frame-ancestors 'none'"
         ].join("; ");
         return new Response(
-          VERIFY_PAGE_HTML.replace(/{{SITE_KEY}}/g, escapeHtml(siteKey)).replace(/{{CODE}}/g, escapeHtml(code)).replace(/{{USER_ID}}/g, escapeHtml(userId)).replace(/{{WORKER_URL}}/g, escapeHtml(workerUrl)),
+          renderVerifyPage({ siteKey, code, userId, workerUrl }),
           { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": csp } }
         );
       }

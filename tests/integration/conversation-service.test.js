@@ -121,7 +121,7 @@ describe('会话服务（编辑消息映射/通知）', () => {
 
     expect(result.status).toBe('blocked');
     const notice = dependencies.telegram.calls('sendMessage').at(-1).body.text;
-    expect(notice).toContain('blocked_keyword');
+    expect(notice).toContain('命中屏蔽词或规则');
     expect(notice).not.toContain('违规新内容');
   });
 
@@ -178,5 +178,21 @@ describe('会话服务（编辑消息映射/通知）', () => {
     expect(snapshotMessage({ caption: '说明' })).toBe('说明');
     expect(hashContent('abc')).toBe(hashContent('abc'));
     expect(hashContent('abc')).not.toBe(hashContent('abd'));
+  });
+
+  it('超长编辑通知发送给管理员的正文不超过消息上限', async () => {
+    const dependencies = await createDependencies();
+    const longText = '内容'.repeat(3000); // 快照 5000 字内
+    await seedLink(dependencies.storage, { userId: '1', sourceMessageId: 101, text: longText });
+    const service = createConversationService(dependencies);
+
+    const result = await service.handleEditedPrivateMessage(
+      createPrivateMessage(1, 101, { text: `${longText} 修改后`, edit_date: 3000 }),
+    );
+
+    expect(result.status).toBe('notified');
+    const text = dependencies.telegram.calls('sendMessage').at(-1).body.text;
+    expect(text.length).toBeLessThan(4096);
+    expect(text).toContain('…');
   });
 });

@@ -2,6 +2,29 @@
  * 用户侧与管理侧常用文案（非验证类；验证见 verify-copy.js）
  */
 
+/** 编辑通知正文单侧截断上限：两侧合计须低于 Telegram 4096 字符消息上限 */
+export const EDIT_SNIPPET_LIMIT = 1500;
+
+/** 展示用截断：超出上限时保留前段并追加省略号 */
+export function truncateText(text, limit = EDIT_SNIPPET_LIMIT) {
+  const s = String(text ?? '');
+  return s.length > limit ? `${s.slice(0, limit)}…` : s;
+}
+
+/** 策略原因码 → 管理员可读中文（未知码保留原值便于排障） */
+export const POLICY_REASON_LABELS = {
+  blocked_keyword: '命中屏蔽词或规则',
+  blocked_keyword_notify_only: '命中规则（仅通知）',
+  auto_reply: '规则自动回复',
+  banned: '用户已封禁',
+  closed: '会话已关闭',
+  verification_required: '需要重新验证',
+};
+
+export function policyReasonLabel(reason) {
+  return POLICY_REASON_LABELS[reason] || String(reason || 'unknown');
+}
+
 export const USER_COPY = {
   rateLimited: '⚠️ 发送过于频繁，请稍后再试。',
   systemBusy: '⚠️ 系统繁忙，请稍后再试。',
@@ -21,21 +44,24 @@ export const USER_COPY = {
   banUserNotify:
     '🚫 您已被管理员封禁，暂时无法继续发送消息。如有疑问请等待管理员处理。',
   unbanUserNotify: '✅ 您已被管理员解封，可以继续发送消息了。',
-  /** 管理员修改回复后发给用户的编辑通知（纯文本，内容来自消息快照） */
+  /** 管理员修改回复后发给用户的编辑通知（纯文本，内容来自消息快照，单侧截断防超长） */
   adminEditedReply(original, updated) {
-    return `✏️ 管理员修改了回复\n原内容：${original}\n新内容：${updated}`;
+    return `✏️ 管理员修改了回复\n原内容：${truncateText(original)}\n新内容：${truncateText(updated)}`;
   },
 };
 
 export const ADMIN_COPY = {
-  spamIntercepted(userId, reasonText) {
+  spamIntercepted(userId, reasonText, { threadId } = {}) {
+    const locateHint = threadId
+      ? '已发送到该用户话题，可在本话题内使用 <b>/panel</b> 操作。'
+      : '该用户尚无话题，可用 <code>/find UID</code> 定位。';
     return [
       '⚠️ <b>检测到疑似骚扰消息</b>',
       '',
       `👤 用户: <code>${userId}</code>`,
       reasonText,
       '',
-      '📝 消息已拦截。可在用户话题内使用面板 <b>封禁</b>。',
+      `📝 消息已拦截。${locateHint}`,
     ].join('\n');
   },
   forwardTotalFail(userId, threadId, fwdDesc, copyDesc) {
@@ -67,11 +93,11 @@ export const ADMIN_COPY = {
   },
   /** 用户编辑消息被策略拦截后发给管理员的提示（纯文本，reason 为策略原因标识） */
   userEditBlocked(reason) {
-    return `🚫 用户编辑已拦截：${reason || 'unknown'}`;
+    return `🚫 用户编辑已拦截：${policyReasonLabel(reason)}`;
   },
-  /** 用户编辑消息后发给管理员的变更通知（纯文本，内容来自消息快照） */
+  /** 用户编辑消息后发给管理员的变更通知（纯文本，内容来自消息快照，单侧截断防超长） */
   userEditedMessage(original, updated) {
-    return `✏️ 用户修改了消息\n原内容：${original}\n新内容：${updated}`;
+    return `✏️ 用户修改了消息\n原内容：${truncateText(original)}\n新内容：${truncateText(updated)}`;
   },
   /** 群内状态操作反馈（HTML） */
   mutedInGroup: '🔇 <b>已静音</b>：用户消息不再转发到本群',
