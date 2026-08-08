@@ -14,10 +14,24 @@ describe('verify-page', () => {
     expect(page).not.toContain('{{CODE}}');
     expect(page).not.toContain('{{USER_ID}}');
     expect(page).not.toContain('{{WORKER_URL}}');
-    // 用户可控输入需转义，防止注入页面结构
+    // 用户可控输入需转义，防止注入页面结构（data 属性承载，不参与可见文案）
     expect(page).toContain('0x4AAAAAAA-test');
     expect(page).toContain('abc&lt;123&gt;');
     expect(page).toContain('42&amp;1');
+  });
+
+  it('页脚不直接展示用户 ID 与验证码（转为 data 属性承载）', () => {
+    expect(page).toContain('data-user-id="42&amp;1"');
+    expect(page).toContain('data-code="abc&lt;123&gt;"');
+    // 可见文案中不应出现调试风格的 User:/Code: 标签
+    expect(page).not.toContain('Code:');
+    expect(page).toContain('id="footer-status"');
+  });
+
+  it('页脚状态行随验证状态更新', () => {
+    expect(page).toContain('正在验证身份…');
+    expect(page).toContain('验证已完成，本页可关闭');
+    expect(page).toContain('验证未完成，可稍后重试');
   });
 
   it('暗色模式跟随系统偏好并提供颜色主题声明', () => {
@@ -47,6 +61,30 @@ describe('verify-page', () => {
     expect(page).toContain('cf-turnstile');
     expect(page).toContain('id="back-btn"');
     expect(page).toContain('tg://resolve');
+  });
+
+  it('返回 Telegram 按钮默认可见（加载/失败态用户也可返回，而非仅成功后才出现）', () => {
+    // 按钮不应初始隐藏：用户误入页面或验证失败时需要随时能返回 Telegram
+    expect(page).not.toContain('#back-btn{display:none}');
+    expect(page).not.toContain("btn.style.display = 'inline-block'");
+  });
+
+  it('Turnstile 错误只向用户展示友好提示，排障详情默认折叠', () => {
+    // 用户可见文案不再夹带管理员排障细节（域名授权/Site Key 等）
+    expect(page).toContain('验证组件加载失败，请刷新重试');
+    // 排障详情收敛到可折叠容器，仅管理员排障时展开；错误码映射仍保留
+    expect(page).toContain('id="tech-detail"');
+    expect(page).toContain('<details');
+    expect(page).toContain('110200');
+    expect(page).toContain('110110');
+    expect(page).toContain('110600');
+    // 部署术语只允许出现在折叠的技术详情里，不得出现在用户可见主文案中
+    expect(page.indexOf('Hostname')).toBeGreaterThan(page.indexOf('id="tech-detail"'));
+  });
+
+  it('页面标题随验证状态更新，便于多标签页识别', () => {
+    expect(page).toContain("'✅ 验证成功'");
+    expect(page).toContain("'❌ 验证失败'");
   });
 
   it('过期提示分钟数由参数注入且缺省兜底为 10', () => {

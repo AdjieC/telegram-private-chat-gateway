@@ -16,7 +16,7 @@ export const VERIFY_COPY = {
 
   /** 验证请求触发速率限制（minutes 由调用方按窗口秒数换算，保持口径一致） */
   verifyRateLimited(minutes) {
-    return `⚠️ 验证请求过于频繁，请${minutes}分钟后再试。`;
+    return `⚠️ 验证请求过于频繁，请约 ${minutes} 分钟后再试。`;
   },
 
   /** callback toast / alert */

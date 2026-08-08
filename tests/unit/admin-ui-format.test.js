@@ -62,6 +62,28 @@ describe('admin-ui-format', () => {
     expect(kb.inline_keyboard[0][0].callback_data).toBe('adm:u:panel:1');
   });
 
+  it('跳转键盘超长用户名截断并带省略号', () => {
+    const longName = '这是一个非常非常长的用户名字符串用于测试截断行为';
+    const kb = buildUserJumpKeyboard([
+      { userId: '1', firstName: longName },
+    ], { includeMenu: false });
+    const label = kb.inline_keyboard[0][0].text;
+    expect(label).toContain('…');
+    expect(label.length).toBeLessThan(longName.length + 3);
+  });
+
+  it('formatRankingBlock 标注封禁/关闭状态徽标', () => {
+    const lines = formatRankingBlock([
+      { userId: '1', firstName: '被封', status: 'banned', count: 3 },
+      { userId: '2', firstName: '被关', status: 'closed', count: 1 },
+    ]);
+    const joined = lines.join('\n');
+    expect(joined).toContain('🚫');
+    expect(joined).toContain('🔒');
+    expect(joined).toContain('被封');
+    expect(joined).toContain('被关');
+  });
+
   it('封禁确认键盘', () => {
     const flat = buildBanConfirmKeyboard('99').inline_keyboard.flat().map(b => b.callback_data);
     expect(flat).toContain('adm:u:banok:99');

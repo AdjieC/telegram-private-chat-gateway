@@ -16,6 +16,21 @@ export function cleanProfileText(value) {
     .trim();
 }
 
+/**
+ * HTML 转义：验证页模板与管理消息共用，防止用户可控内容注入页面/消息结构。
+ * 定义在纯函数基座模块，避免页面模块反向依赖管理 UI 模块。
+ * @param {*} str - 原始值（非字符串会被转为字符串）
+ * @returns {string}
+ */
+export function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 
 /**
  * 检查文本是否包含屏蔽词

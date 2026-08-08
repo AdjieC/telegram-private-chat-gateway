@@ -8,7 +8,7 @@
  * - 状态提示为胶囊样式，区分加载中 / 成功 / 失败三种状态
  * - 无障碍：状态区 aria-live，按钮可聚焦
  */
-import { escapeHtml } from './admin-ui-format.js';
+import { escapeHtml } from './utils.js';
 
 // 两个验证页面共用的基础样式（暗色模式、卡片、按钮、页脚），避免两套模板各自维护导致漂移
 const VERIFY_SHARED_STYLE = `
@@ -55,7 +55,9 @@ const VERIFY_PAGE_HTML = `<!DOCTYPE html>
 #status.error{background:var(--error-bg);color:var(--error-text);border-color:transparent}
 .spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:spin .8s linear infinite;flex:none}
 @keyframes spin{to{transform:rotate(360deg)}}
-#back-btn{display:none}
+#tech-wrap{margin-top:18px;text-align:left;font-size:12px;color:var(--muted)}
+#tech-wrap summary{cursor:pointer;user-select:none;color:var(--sub)}
+#tech-detail{white-space:pre-wrap;word-break:break-all;margin-top:6px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .footer span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
 </style>
 </head>
@@ -69,8 +71,12 @@ const VERIFY_PAGE_HTML = `<!DOCTYPE html>
   </div>
   <div id="status" aria-live="polite"></div>
   <a id="back-btn" href="tg://resolve">📱 返回 Telegram</a>
-  <div class="footer">
-    User: <span>{{USER_ID}}</span> · Code: <span>{{CODE}}</span>
+  <details id="tech-wrap" hidden>
+    <summary>技术详情（排障用）</summary>
+    <div id="tech-detail"></div>
+  </details>
+  <div class="footer" data-user-id="{{USER_ID}}" data-code="{{CODE}}">
+    <span id="footer-status">私聊网关 · 人机验证</span>
   </div>
 </div>
 <script>
@@ -103,6 +109,10 @@ const VERIFY_PAGE_HTML = `<!DOCTYPE html>
   }
 })();
 var submitted = false;
+function updateFooter(status) {
+  var el = document.getElementById('footer-status');
+  if (el) el.textContent = status;
+}
 function showStatus(msg, cls) {
   var el = document.getElementById('status');
   if (!el) return;
@@ -116,6 +126,12 @@ function showStatus(msg, cls) {
   var t = document.createElement('span');
   t.textContent = msg;
   el.appendChild(t);
+  // 页面标题随状态更新，便于多标签页/后台排障识别
+  var titles = { loading: '人机验证中', success: '✅ 验证成功', error: '❌ 验证失败' };
+  if (titles[cls]) document.title = titles[cls];
+  // 页脚状态行同步，给用户一个「本页可关闭」的明确信号
+  var footers = { loading: '正在验证身份…', success: '验证已完成，本页可关闭', error: '验证未完成，可稍后重试' };
+  if (footers[cls]) updateFooter(footers[cls]);
 }
 function onTurnstileSuccess(token) {
   if (submitted) return;
@@ -135,11 +151,6 @@ function onTurnstileSuccess(token) {
       }
       showStatus(msg, 'success');
       document.querySelector('.desc').textContent = '验证完成，请返回 Telegram 查看机器人消息。';
-      // 显示返回 Telegram 按钮
-      var btn = document.getElementById('back-btn');
-      if (btn) {
-        btn.style.display = 'inline-block';
-      }
     } else {
       var errMap = {
         'turnstile_failed': '人机验证未通过，请刷新页面重试',
@@ -163,21 +174,29 @@ function onTurnstileSuccess(token) {
   });
 }
 function onTurnstileError(errorCode) {
+  // 用户侧只展示友好提示；管理员排障所需的错误码与修复建议折叠在「技术详情」中，
+  // 避免向普通用户暴露部署细节（域名授权、Site Key 等）。
   // Turnstile 客户端错误码：https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/
   var code = (errorCode == null || errorCode === '') ? '' : String(errorCode);
   var hint = '';
   if (code === '110200') {
-    hint = '（域名未授权：请在 Cloudflare Turnstile → Hostname 中添加当前 Worker 域名，如 xxx.workers.dev）';
+    hint = '域名未授权：请在 Cloudflare Turnstile → Hostname 中添加当前 Worker 域名，如 xxx.workers.dev';
   } else if (code === '110110') {
-    hint = '（Site Key 无效：请检查 Dashboard 中的 TURNSTILE_SITE_KEY）';
+    hint = 'Site Key 无效：请检查 Dashboard 中的 TURNSTILE_SITE_KEY';
   } else if (code === '110600') {
-    hint = '（挑战超时：请刷新页面重试；若在 Telegram 内置浏览器失败，可改用系统浏览器打开链接）';
+    hint = '挑战超时：请刷新页面重试；若在 Telegram 内置浏览器失败，可改用系统浏览器打开链接';
   } else if (code === '300030' || code === '300031') {
-    hint = '（组件初始化失败：多为 CSP/网络拦截 challenges.cloudflare.com）';
+    hint = '组件初始化失败：多为 CSP/网络拦截 challenges.cloudflare.com';
   } else if (!code) {
-    hint = '（无法加载 challenges.cloudflare.com：请检查网络/代理/地区访问）';
+    hint = '无法加载 challenges.cloudflare.com：请检查网络/代理/地区访问';
   }
-  showStatus('⚠️ 验证组件失败' + (code ? ' [' + code + ']' : '') + '，请刷新重试' + hint, 'error');
+  showStatus('⚠️ 验证组件加载失败，请刷新重试；若多次失败，请返回 Telegram 重新获取链接。', 'error');
+  var wrap = document.getElementById('tech-wrap');
+  var detailEl = document.getElementById('tech-detail');
+  if (wrap && detailEl) {
+    detailEl.textContent = (code ? '错误码: ' + code + '\n' : '') + (hint || '未知错误');
+    wrap.hidden = false;
+  }
 }
 // 初始加载态：脚本未就绪时显示加载动画（区分脚本被墙与 widget 配置错误）
 showStatus('正在加载验证组件…', 'loading');

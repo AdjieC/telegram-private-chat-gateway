@@ -1096,6 +1096,9 @@ var defaultApp = createApp();
 function cleanProfileText(value) {
   return String(value ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();
 }
+function escapeHtml(str) {
+  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 function extractMessageText(message) {
   if (!message || typeof message !== "object") return "";
   return [message.text, message.caption].filter((value) => typeof value === "string" && value.trim().length > 0).join(" ").trim();
@@ -1388,7 +1391,7 @@ function policyReasonLabel(reason) {
 var USER_COPY = {
   /** 消息发送限流（minutes 由调用方按 RATE_LIMIT_WINDOW 换算，与验证限流口径一致，防文案漂移） */
   rateLimited(minutes) {
-    return `\u26A0\uFE0F \u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7EA6 ${minutes} \u5206\u949F\u540E\u518D\u8BD5\u3002`;
+    return `\u26A0\uFE0F \u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\uFF0C\u672C\u6B21\u6D88\u606F\u672A\u9001\u8FBE\uFF0C\u8BF7\u7EA6 ${minutes} \u5206\u949F\u540E\u518D\u8BD5\u3002`;
   },
   systemBusy: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
   bannedHourly: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
@@ -2723,7 +2726,7 @@ ${question}
   buttonTurnstile: "\u{1F510} \u70B9\u51FB\u9A8C\u8BC1",
   /** 验证请求触发速率限制（minutes 由调用方按窗口秒数换算，保持口径一致） */
   verifyRateLimited(minutes) {
-    return `\u26A0\uFE0F \u9A8C\u8BC1\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7${minutes}\u5206\u949F\u540E\u518D\u8BD5\u3002`;
+    return `\u26A0\uFE0F \u9A8C\u8BC1\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7EA6 ${minutes} \u5206\u949F\u540E\u518D\u8BD5\u3002`;
   },
   /** callback toast / alert */
   expired: "\u274C \u9A8C\u8BC1\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u53D1\u4E00\u6761\u6D88\u606F",
@@ -2881,9 +2884,6 @@ function activitySourceLabel(source) {
 }
 
 // src/admin-ui-format.js
-function escapeHtml(str) {
-  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
 var SEP_LINE = "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500";
 function formatSysTime(ts) {
   if (ts == null || ts === "" || Number(ts) <= 0) return "\u65E0";
@@ -2979,13 +2979,17 @@ function buildSysinfoKeyboard(page = "overview") {
     ]
   };
 }
+function truncateLabel(text, maxLen) {
+  const s = String(text ?? "");
+  return s.length > maxLen ? `${s.slice(0, maxLen - 1)}\u2026` : s;
+}
 function buildUserJumpKeyboard(users, { includeMenu = true, columns = 2 } = {}) {
   const cols = Math.min(Math.max(Number(columns) || 2, 1), 3);
   const list = (users || []).slice(0, 8);
   const rows = [];
   for (let i = 0; i < list.length; i += cols) {
     const chunk = list.slice(i, i + cols).map((u) => {
-      const label = displayUserLabel2(u).slice(0, cols === 1 ? 24 : 14);
+      const label = truncateLabel(displayUserLabel2(u), cols === 1 ? 24 : 14);
       return {
         text: `\u{1F464} ${label}`,
         callback_data: `adm:u:panel:${u.userId}`
@@ -3001,6 +3005,11 @@ function buildUserJumpKeyboard(users, { includeMenu = true, columns = 2 } = {}) 
   }
   return { inline_keyboard: rows };
 }
+function statusBadge(status) {
+  if (status === "banned") return " \u{1F6AB}";
+  if (status === "closed") return " \u{1F512}";
+  return "";
+}
 function formatRankingBlock(rankingUsers, { withCount = true, now = Date.now() } = {}) {
   if (!rankingUsers?.length) {
     return ["\u6682\u65E0\u4ECA\u65E5\u6D3B\u8DC3\u7528\u6237", ...formatEmptyActivityHints()];
@@ -3012,8 +3021,7 @@ function formatRankingBlock(rankingUsers, { withCount = true, now = Date.now() }
     const un = shouldAppendUsername(u, label) ? ` @${escapeHtml(u.username)}` : "";
     const cnt = withCount && u.count != null ? ` \xB7 <b>${u.count}</b> \u6761` : "";
     const when = u.lastMessageAt && u.count == null ? ` \xB7 ${formatRelativeTime(u.lastMessageAt, now)}` : "";
-    const badge = u.status === "banned" ? " \u{1F6AB}" : u.status === "closed" ? " \u{1F512}" : "";
-    lines.push(`${rankMedal(i)} ${name}${un}${cnt}${when}${badge}`);
+    lines.push(`${rankMedal(i)} ${name}${un}${cnt}${when}${statusBadge(u.status)}`);
     lines.push(`   <code>${escapeHtml(u.userId)}</code>${u.topicId ? ` \xB7 T${escapeHtml(u.topicId)}` : ""}`);
   });
   return lines;
@@ -3635,6 +3643,152 @@ function createMediaGroupModule(deps) {
     handleMediaGroup,
     extractMedia,
     flushExpiredMediaGroups
+  };
+}
+
+// src/spam.js
+var MESSAGE_HASH_MAX_ENTRIES = 5e3;
+function createSpamModule(deps) {
+  const {
+    config,
+    logger,
+    escapeHtml: escapeHtml2,
+    adminCopy,
+    safeGetJSON: safeGetJSON2,
+    tgCall: tgCall2,
+    getVerificationTimestamp,
+    setBoundedCache: setBoundedCache2
+  } = deps;
+  let spamKeywordsCache = null;
+  const messageHashCache = /* @__PURE__ */ new Map();
+  function getSpamKeywords(env) {
+    if (spamKeywordsCache) return spamKeywordsCache;
+    const raw = (env.SPAM_KEYWORDS || "").toString().trim();
+    spamKeywordsCache = parseSpamKeywords(raw);
+    if (spamKeywordsCache.length > 0) {
+      logger.info("spam_keywords_loaded", { count: spamKeywordsCache.length });
+    }
+    return spamKeywordsCache;
+  }
+  async function detectRepeatMessage(userId, msg) {
+    const hash = computeMessageHash(msg);
+    if (!hash) return { isRepeat: false, count: 0 };
+    const cacheKey = `msghash:${userId}:${hash}`;
+    const now = Date.now();
+    const cached = messageHashCache.get(cacheKey);
+    if (cached && now - cached.ts > config.SPAM_MESSAGE_HASH_TTL * 1e3) {
+      messageHashCache.delete(cacheKey);
+      const count2 = 1;
+      setBoundedCache2(messageHashCache, cacheKey, { count: count2, ts: now }, MESSAGE_HASH_MAX_ENTRIES);
+      return { isRepeat: false, count: count2 };
+    }
+    const count = (cached?.count || 0) + 1;
+    setBoundedCache2(messageHashCache, cacheKey, { count, ts: now }, MESSAGE_HASH_MAX_ENTRIES);
+    if (count >= config.SPAM_REPEAT_MESSAGE_LIMIT) {
+      return { isRepeat: true, count };
+    }
+    return { isRepeat: false, count };
+  }
+  function pruneMessageHashCache2(now) {
+    const ttl = config.SPAM_MESSAGE_HASH_TTL * 1e3;
+    for (const [key, value] of messageHashCache) {
+      if (now - value.ts > ttl) {
+        messageHashCache.delete(key);
+      }
+    }
+  }
+  async function spamCheck2(msg, userId, env) {
+    const reasons = [];
+    const details = {};
+    const text = buildSpamCheckText(msg).trim();
+    const keywords = getSpamKeywords(env);
+    const keywordResult = detectSpamKeywords(text, keywords);
+    if (keywordResult.isSpam) {
+      reasons.push("keyword");
+      details.keyword = keywordResult.matchedWord;
+    }
+    if (containsLink(text)) {
+      const verifyTs = await getVerificationTimestamp(env, userId);
+      if (!verifyTs) {
+        reasons.push("new_user_link");
+        details.linkBlockRemainingHours = Math.ceil(config.NEW_USER_LINK_BLOCK_SECONDS / 3600);
+      } else {
+        const elapsed = (Date.now() - parseInt(verifyTs)) / 1e3;
+        if (elapsed < config.NEW_USER_LINK_BLOCK_SECONDS) {
+          const remainingHours = Math.ceil((config.NEW_USER_LINK_BLOCK_SECONDS - elapsed) / 3600);
+          reasons.push("new_user_link");
+          details.linkBlockRemainingHours = remainingHours;
+        }
+      }
+    }
+    const repeatResult = await detectRepeatMessage(userId, msg);
+    if (repeatResult.isRepeat) {
+      reasons.push("repeat_message");
+      details.repeatCount = repeatResult.count;
+    }
+    return {
+      isSpam: reasons.length > 0,
+      reasons,
+      details
+    };
+  }
+  async function updateSpamStats(env, reasons) {
+    try {
+      await Promise.all((reasons || []).map(async (reason) => {
+        const countKey = `stats:spam:${reason}`;
+        const current = parseInt(await env.TOPIC_MAP.get(countKey) || "0");
+        await env.TOPIC_MAP.put(countKey, String(current + 1), { expirationTtl: 2592e3 });
+      }));
+      const totalKey = "stats:spam:total";
+      const total = parseInt(await env.TOPIC_MAP.get(totalKey) || "0");
+      await env.TOPIC_MAP.put(totalKey, String(total + 1), { expirationTtl: 2592e3 });
+    } catch (e) {
+      logger.warn("spam_stats_update_failed", { error: e.message });
+    }
+  }
+  async function handleSpamMessage2(env, userId, msg, spamResult, threadId, ctx) {
+    logger.warn("spam_detected", {
+      userId,
+      reasons: spamResult.reasons,
+      details: spamResult.details
+    });
+    if (ctx?.waitUntil) {
+      ctx.waitUntil(updateSpamStats(env, spamResult.reasons));
+    }
+    if (config.SPAM_NOTIFY_ADMIN && !config.SPAM_SILENCE_MODE) {
+      let notifyThreadId = threadId;
+      if (!notifyThreadId) {
+        const rec = await safeGetJSON2(env, `user:${userId}`, null);
+        notifyThreadId = rec?.thread_id || null;
+      }
+      const reasonText = spamResult.reasons.map((r) => {
+        switch (r) {
+          case "keyword":
+            return `\u{1F511} \u5173\u952E\u8BCD: <code>${escapeHtml2(spamResult.details.keyword)}</code>`;
+          case "new_user_link":
+            return `\u{1F517} \u65B0\u7528\u6237\u94FE\u63A5 (\u5269\u4F59 ${spamResult.details.linkBlockRemainingHours}h)`;
+          case "repeat_message":
+            return `\u{1F504} \u91CD\u590D\u6D88\u606F (${spamResult.details.repeatCount}\u6B21)`;
+          default:
+            return escapeHtml2(String(r));
+        }
+      }).join("\n");
+      const body = notifyThreadId ? { message_thread_id: notifyThreadId } : {};
+      await tgCall2(env, "sendMessage", {
+        chat_id: env.SUPERGROUP_ID,
+        text: adminCopy.spamIntercepted(escapeHtml2(String(userId)), reasonText, { threadId: notifyThreadId }),
+        parse_mode: "HTML",
+        ...body
+      });
+    }
+  }
+  return {
+    getSpamKeywords,
+    detectRepeatMessage,
+    pruneMessageHashCache: pruneMessageHashCache2,
+    spamCheck: spamCheck2,
+    updateSpamStats,
+    handleSpamMessage: handleSpamMessage2
   };
 }
 
@@ -4746,7 +4900,9 @@ var VERIFY_PAGE_HTML = `<!DOCTYPE html>
 #status.error{background:var(--error-bg);color:var(--error-text);border-color:transparent}
 .spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:spin .8s linear infinite;flex:none}
 @keyframes spin{to{transform:rotate(360deg)}}
-#back-btn{display:none}
+#tech-wrap{margin-top:18px;text-align:left;font-size:12px;color:var(--muted)}
+#tech-wrap summary{cursor:pointer;user-select:none;color:var(--sub)}
+#tech-detail{white-space:pre-wrap;word-break:break-all;margin-top:6px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .footer span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
 </style>
 </head>
@@ -4760,8 +4916,12 @@ var VERIFY_PAGE_HTML = `<!DOCTYPE html>
   </div>
   <div id="status" aria-live="polite"></div>
   <a id="back-btn" href="tg://resolve">\u{1F4F1} \u8FD4\u56DE Telegram</a>
-  <div class="footer">
-    User: <span>{{USER_ID}}</span> \xB7 Code: <span>{{CODE}}</span>
+  <details id="tech-wrap" hidden>
+    <summary>\u6280\u672F\u8BE6\u60C5\uFF08\u6392\u969C\u7528\uFF09</summary>
+    <div id="tech-detail"></div>
+  </details>
+  <div class="footer" data-user-id="{{USER_ID}}" data-code="{{CODE}}">
+    <span id="footer-status">\u79C1\u804A\u7F51\u5173 \xB7 \u4EBA\u673A\u9A8C\u8BC1</span>
   </div>
 </div>
 <script>
@@ -4794,6 +4954,10 @@ var VERIFY_PAGE_HTML = `<!DOCTYPE html>
   }
 })();
 var submitted = false;
+function updateFooter(status) {
+  var el = document.getElementById('footer-status');
+  if (el) el.textContent = status;
+}
 function showStatus(msg, cls) {
   var el = document.getElementById('status');
   if (!el) return;
@@ -4807,6 +4971,12 @@ function showStatus(msg, cls) {
   var t = document.createElement('span');
   t.textContent = msg;
   el.appendChild(t);
+  // \u9875\u9762\u6807\u9898\u968F\u72B6\u6001\u66F4\u65B0\uFF0C\u4FBF\u4E8E\u591A\u6807\u7B7E\u9875/\u540E\u53F0\u6392\u969C\u8BC6\u522B
+  var titles = { loading: '\u4EBA\u673A\u9A8C\u8BC1\u4E2D', success: '\u2705 \u9A8C\u8BC1\u6210\u529F', error: '\u274C \u9A8C\u8BC1\u5931\u8D25' };
+  if (titles[cls]) document.title = titles[cls];
+  // \u9875\u811A\u72B6\u6001\u884C\u540C\u6B65\uFF0C\u7ED9\u7528\u6237\u4E00\u4E2A\u300C\u672C\u9875\u53EF\u5173\u95ED\u300D\u7684\u660E\u786E\u4FE1\u53F7
+  var footers = { loading: '\u6B63\u5728\u9A8C\u8BC1\u8EAB\u4EFD\u2026', success: '\u9A8C\u8BC1\u5DF2\u5B8C\u6210\uFF0C\u672C\u9875\u53EF\u5173\u95ED', error: '\u9A8C\u8BC1\u672A\u5B8C\u6210\uFF0C\u53EF\u7A0D\u540E\u91CD\u8BD5' };
+  if (footers[cls]) updateFooter(footers[cls]);
 }
 function onTurnstileSuccess(token) {
   if (submitted) return;
@@ -4826,11 +4996,6 @@ function onTurnstileSuccess(token) {
       }
       showStatus(msg, 'success');
       document.querySelector('.desc').textContent = '\u9A8C\u8BC1\u5B8C\u6210\uFF0C\u8BF7\u8FD4\u56DE Telegram \u67E5\u770B\u673A\u5668\u4EBA\u6D88\u606F\u3002';
-      // \u663E\u793A\u8FD4\u56DE Telegram \u6309\u94AE
-      var btn = document.getElementById('back-btn');
-      if (btn) {
-        btn.style.display = 'inline-block';
-      }
     } else {
       var errMap = {
         'turnstile_failed': '\u4EBA\u673A\u9A8C\u8BC1\u672A\u901A\u8FC7\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5',
@@ -4854,21 +5019,30 @@ function onTurnstileSuccess(token) {
   });
 }
 function onTurnstileError(errorCode) {
+  // \u7528\u6237\u4FA7\u53EA\u5C55\u793A\u53CB\u597D\u63D0\u793A\uFF1B\u7BA1\u7406\u5458\u6392\u969C\u6240\u9700\u7684\u9519\u8BEF\u7801\u4E0E\u4FEE\u590D\u5EFA\u8BAE\u6298\u53E0\u5728\u300C\u6280\u672F\u8BE6\u60C5\u300D\u4E2D\uFF0C
+  // \u907F\u514D\u5411\u666E\u901A\u7528\u6237\u66B4\u9732\u90E8\u7F72\u7EC6\u8282\uFF08\u57DF\u540D\u6388\u6743\u3001Site Key \u7B49\uFF09\u3002
   // Turnstile \u5BA2\u6237\u7AEF\u9519\u8BEF\u7801\uFF1Ahttps://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/
   var code = (errorCode == null || errorCode === '') ? '' : String(errorCode);
   var hint = '';
   if (code === '110200') {
-    hint = '\uFF08\u57DF\u540D\u672A\u6388\u6743\uFF1A\u8BF7\u5728 Cloudflare Turnstile \u2192 Hostname \u4E2D\u6DFB\u52A0\u5F53\u524D Worker \u57DF\u540D\uFF0C\u5982 xxx.workers.dev\uFF09';
+    hint = '\u57DF\u540D\u672A\u6388\u6743\uFF1A\u8BF7\u5728 Cloudflare Turnstile \u2192 Hostname \u4E2D\u6DFB\u52A0\u5F53\u524D Worker \u57DF\u540D\uFF0C\u5982 xxx.workers.dev';
   } else if (code === '110110') {
-    hint = '\uFF08Site Key \u65E0\u6548\uFF1A\u8BF7\u68C0\u67E5 Dashboard \u4E2D\u7684 TURNSTILE_SITE_KEY\uFF09';
+    hint = 'Site Key \u65E0\u6548\uFF1A\u8BF7\u68C0\u67E5 Dashboard \u4E2D\u7684 TURNSTILE_SITE_KEY';
   } else if (code === '110600') {
-    hint = '\uFF08\u6311\u6218\u8D85\u65F6\uFF1A\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5\uFF1B\u82E5\u5728 Telegram \u5185\u7F6E\u6D4F\u89C8\u5668\u5931\u8D25\uFF0C\u53EF\u6539\u7528\u7CFB\u7EDF\u6D4F\u89C8\u5668\u6253\u5F00\u94FE\u63A5\uFF09';
+    hint = '\u6311\u6218\u8D85\u65F6\uFF1A\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5\uFF1B\u82E5\u5728 Telegram \u5185\u7F6E\u6D4F\u89C8\u5668\u5931\u8D25\uFF0C\u53EF\u6539\u7528\u7CFB\u7EDF\u6D4F\u89C8\u5668\u6253\u5F00\u94FE\u63A5';
   } else if (code === '300030' || code === '300031') {
-    hint = '\uFF08\u7EC4\u4EF6\u521D\u59CB\u5316\u5931\u8D25\uFF1A\u591A\u4E3A CSP/\u7F51\u7EDC\u62E6\u622A challenges.cloudflare.com\uFF09';
+    hint = '\u7EC4\u4EF6\u521D\u59CB\u5316\u5931\u8D25\uFF1A\u591A\u4E3A CSP/\u7F51\u7EDC\u62E6\u622A challenges.cloudflare.com';
   } else if (!code) {
-    hint = '\uFF08\u65E0\u6CD5\u52A0\u8F7D challenges.cloudflare.com\uFF1A\u8BF7\u68C0\u67E5\u7F51\u7EDC/\u4EE3\u7406/\u5730\u533A\u8BBF\u95EE\uFF09';
+    hint = '\u65E0\u6CD5\u52A0\u8F7D challenges.cloudflare.com\uFF1A\u8BF7\u68C0\u67E5\u7F51\u7EDC/\u4EE3\u7406/\u5730\u533A\u8BBF\u95EE';
   }
-  showStatus('\u26A0\uFE0F \u9A8C\u8BC1\u7EC4\u4EF6\u5931\u8D25' + (code ? ' [' + code + ']' : '') + '\uFF0C\u8BF7\u5237\u65B0\u91CD\u8BD5' + hint, 'error');
+  showStatus('\u26A0\uFE0F \u9A8C\u8BC1\u7EC4\u4EF6\u52A0\u8F7D\u5931\u8D25\uFF0C\u8BF7\u5237\u65B0\u91CD\u8BD5\uFF1B\u82E5\u591A\u6B21\u5931\u8D25\uFF0C\u8BF7\u8FD4\u56DE Telegram \u91CD\u65B0\u83B7\u53D6\u94FE\u63A5\u3002', 'error');
+  var wrap = document.getElementById('tech-wrap');
+  var detailEl = document.getElementById('tech-detail');
+  if (wrap && detailEl) {
+    detailEl.textContent = (code ? '\u9519\u8BEF\u7801: ' + code + '
+' : '') + (hint || '\u672A\u77E5\u9519\u8BEF');
+    wrap.hidden = false;
+  }
 }
 // \u521D\u59CB\u52A0\u8F7D\u6001\uFF1A\u811A\u672C\u672A\u5C31\u7EEA\u65F6\u663E\u793A\u52A0\u8F7D\u52A8\u753B\uFF08\u533A\u5206\u811A\u672C\u88AB\u5899\u4E0E widget \u914D\u7F6E\u9519\u8BEF\uFF09
 showStatus('\u6B63\u5728\u52A0\u8F7D\u9A8C\u8BC1\u7EC4\u4EF6\u2026', 'loading');
@@ -4961,19 +5135,19 @@ var CONFIG = {
   WORD_MAX_LENGTH: 50
   // /addword 单词长度上限，防 KV 词库被超长输入污染
 };
-var GATEWAY_VERSION = "1.1.6";
+var GATEWAY_VERSION = "1.1.7";
+var TOPIC_TITLE_PLACEHOLDER = "User";
+var TOPIC_TITLE_USER_PATTERN = /^User @/i;
+var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
 var topicCreateInFlight = /* @__PURE__ */ new Map();
 var adminStatusCache = /* @__PURE__ */ new Map();
-var spamKeywordsCache = null;
-var messageHashCache = /* @__PURE__ */ new Map();
 var threadNotFoundCache = /* @__PURE__ */ new Map();
 var ruleCache = /* @__PURE__ */ new WeakMap();
 var THREAD_NOT_FOUND_TTL_MS = 5 * 60 * 1e3;
 var THREAD_NOT_FOUND_MAX_ENTRIES = 1e3;
 var ADMIN_STATUS_MAX_ENTRIES = 1e3;
 var THREAD_HEALTH_MAX_ENTRIES = 1e3;
-var MESSAGE_HASH_MAX_ENTRIES = 5e3;
 function setBoundedCache(cache, key, value, maxEntries) {
   cache.delete(key);
   cache.set(key, value);
@@ -5059,6 +5233,21 @@ var mediaGroup = createMediaGroupModule({
   safeGetJSON,
   logger: Logger
 });
+var spamModule = createSpamModule({
+  config: CONFIG,
+  logger: Logger,
+  escapeHtml,
+  adminCopy: ADMIN_COPY,
+  safeGetJSON,
+  tgCall,
+  getVerificationTimestamp: (env, userId) => ephemeralStore(env).getVerificationTimestamp(userId),
+  setBoundedCache
+});
+var {
+  spamCheck,
+  handleSpamMessage,
+  pruneMessageHashCache
+} = spamModule;
 var adminHandlers = createAdminCommandHandlers({
   tgCall,
   gatewayVersion: GATEWAY_VERSION,
@@ -5229,8 +5418,20 @@ function isSparseTelegramFrom(from) {
   const hasUsername = Boolean(String(from.username || "").trim());
   return !hasName && !hasUsername;
 }
+var profileSnapshotCache = /* @__PURE__ */ new Map();
+var PROFILE_SNAPSHOT_TTL_MS = 5 * 60 * 1e3;
+var PROFILE_SNAPSHOT_MAX_ENTRIES = 2e3;
+function profileFingerprint(from) {
+  return [from.first_name || "", from.last_name || "", from.username || ""].join("");
+}
 async function saveUserProfileSnapshot(env, userId, from) {
   if (!env?.TOPIC_MAP || !userId || isSparseTelegramFrom(from)) return;
+  const fingerprint = profileFingerprint(from);
+  const now = Date.now();
+  const cached = profileSnapshotCache.get(String(userId));
+  if (cached && cached.fingerprint === fingerprint && now - cached.ts < PROFILE_SNAPSHOT_TTL_MS) {
+    return;
+  }
   try {
     await env.TOPIC_MAP.put(`profile:${userId}`, JSON.stringify({
       first_name: from.first_name || null,
@@ -5238,6 +5439,7 @@ async function saveUserProfileSnapshot(env, userId, from) {
       username: from.username || null,
       saved_at: Date.now()
     }), { expirationTtl: 30 * 24 * 3600 });
+    setBoundedCache(profileSnapshotCache, String(userId), { fingerprint, ts: now }, PROFILE_SNAPSHOT_MAX_ENTRIES);
   } catch (e) {
     Logger.warn("profile_snapshot_save_failed", { userId, error: e?.message });
   }
@@ -5473,7 +5675,7 @@ async function isAdminUser(env, userId) {
     setBoundedCache(adminStatusCache, cacheKey, { ts: now, isAdmin }, ADMIN_STATUS_MAX_ENTRIES);
     return isAdmin;
   } catch (e) {
-    Logger.warn("admin_check_failed", { userId });
+    Logger.warn("admin_check_failed", { userId, error: e?.message });
     return false;
   }
 }
@@ -5500,152 +5702,6 @@ function shuffleArray(arr) {
 async function checkRateLimit(userId, env, action = "message", limit = 20, window = 60) {
   return ephemeralStore(env).checkRateLimit(userId, action, limit, window);
 }
-function getSpamKeywords(env) {
-  if (spamKeywordsCache) return spamKeywordsCache;
-  const raw = (env.SPAM_KEYWORDS || "").toString().trim();
-  spamKeywordsCache = parseSpamKeywords(raw);
-  if (spamKeywordsCache.length > 0) {
-    Logger.info("spam_keywords_loaded", { count: spamKeywordsCache.length });
-  }
-  return spamKeywordsCache;
-}
-async function detectRepeatMessage(userId, msg) {
-  const hash = computeMessageHash(msg);
-  if (!hash) return { isRepeat: false, count: 0 };
-  const cacheKey = `msghash:${userId}:${hash}`;
-  const now = Date.now();
-  const cached = messageHashCache.get(cacheKey);
-  if (cached && now - cached.ts > CONFIG.SPAM_MESSAGE_HASH_TTL * 1e3) {
-    messageHashCache.delete(cacheKey);
-    const count2 = 1;
-    setBoundedCache(messageHashCache, cacheKey, { count: count2, ts: now }, MESSAGE_HASH_MAX_ENTRIES);
-    return { isRepeat: false, count: count2 };
-  }
-  const count = (cached?.count || 0) + 1;
-  setBoundedCache(messageHashCache, cacheKey, { count, ts: now }, MESSAGE_HASH_MAX_ENTRIES);
-  if (count >= CONFIG.SPAM_REPEAT_MESSAGE_LIMIT) {
-    return { isRepeat: true, count };
-  }
-  return { isRepeat: false, count };
-}
-function pruneMessageHashCache(now) {
-  const ttl = CONFIG.SPAM_MESSAGE_HASH_TTL * 1e3;
-  for (const [key, value] of messageHashCache) {
-    if (now - value.ts > ttl) {
-      messageHashCache.delete(key);
-    }
-  }
-}
-async function spamCheck(msg, userId, env) {
-  const reasons = [];
-  const details = {};
-  const text = buildSpamCheckText(msg).trim();
-  const keywords = getSpamKeywords(env);
-  const keywordResult = detectSpamKeywords(text, keywords);
-  if (keywordResult.isSpam) {
-    reasons.push("keyword");
-    details.keyword = keywordResult.matchedWord;
-  }
-  if (containsLink(text)) {
-    const verifyTs = await ephemeralStore(env).getVerificationTimestamp(userId);
-    if (!verifyTs) {
-      reasons.push("new_user_link");
-      details.linkBlockRemainingHours = Math.ceil(CONFIG.NEW_USER_LINK_BLOCK_SECONDS / 3600);
-    } else {
-      const elapsed = (Date.now() - parseInt(verifyTs)) / 1e3;
-      if (elapsed < CONFIG.NEW_USER_LINK_BLOCK_SECONDS) {
-        const remainingHours = Math.ceil((CONFIG.NEW_USER_LINK_BLOCK_SECONDS - elapsed) / 3600);
-        reasons.push("new_user_link");
-        details.linkBlockRemainingHours = remainingHours;
-      }
-    }
-  }
-  const repeatResult = await detectRepeatMessage(userId, msg);
-  if (repeatResult.isRepeat) {
-    reasons.push("repeat_message");
-    details.repeatCount = repeatResult.count;
-  }
-  return {
-    isSpam: reasons.length > 0,
-    reasons,
-    details
-  };
-}
-var adminAlertThrottle = createThrottle({ windowMs: CONFIG.ALERT_THROTTLE_MS });
-var adminAlertSuppressedCounts = /* @__PURE__ */ new Map();
-async function notifyAdmin(env, alertType, message, threadId, parseMode = "HTML") {
-  if (!adminAlertThrottle(alertType)) {
-    adminAlertSuppressedCounts.set(alertType, (adminAlertSuppressedCounts.get(alertType) || 0) + 1);
-    return;
-  }
-  const suppressed = adminAlertSuppressedCounts.get(alertType) || 0;
-  if (suppressed > 0) {
-    adminAlertSuppressedCounts.delete(alertType);
-    Logger.warn("admin_alert_burst_summary", { alertType, suppressedCount: suppressed });
-  }
-  Logger.warn("admin_alert", { alertType, messageLength: message.length });
-  const body = threadId ? { message_thread_id: threadId } : {};
-  try {
-    await tgCall(env, "sendMessage", {
-      chat_id: env.SUPERGROUP_ID,
-      text: message,
-      parse_mode: parseMode,
-      ...body
-    });
-  } catch (e) {
-    Logger.error("admin_alert_failed", e, { alertType });
-  }
-}
-async function updateSpamStats(env, reasons) {
-  try {
-    await Promise.all((reasons || []).map(async (reason) => {
-      const countKey = `stats:spam:${reason}`;
-      const current = parseInt(await env.TOPIC_MAP.get(countKey) || "0");
-      await env.TOPIC_MAP.put(countKey, String(current + 1), { expirationTtl: 2592e3 });
-    }));
-    const totalKey = "stats:spam:total";
-    const total = parseInt(await env.TOPIC_MAP.get(totalKey) || "0");
-    await env.TOPIC_MAP.put(totalKey, String(total + 1), { expirationTtl: 2592e3 });
-  } catch (e) {
-    Logger.warn("spam_stats_update_failed", { error: e.message });
-  }
-}
-async function handleSpamMessage(env, userId, msg, spamResult, threadId, ctx) {
-  Logger.warn("spam_detected", {
-    userId,
-    reasons: spamResult.reasons,
-    details: spamResult.details
-  });
-  if (ctx?.waitUntil) {
-    ctx.waitUntil(updateSpamStats(env, spamResult.reasons));
-  }
-  if (CONFIG.SPAM_NOTIFY_ADMIN && !CONFIG.SPAM_SILENCE_MODE) {
-    let notifyThreadId = threadId;
-    if (!notifyThreadId) {
-      const rec = await safeGetJSON(env, `user:${userId}`, null);
-      notifyThreadId = rec?.thread_id || null;
-    }
-    const reasonText = spamResult.reasons.map((r) => {
-      switch (r) {
-        case "keyword":
-          return `\u{1F511} \u5173\u952E\u8BCD: <code>${escapeHtml(spamResult.details.keyword)}</code>`;
-        case "new_user_link":
-          return `\u{1F517} \u65B0\u7528\u6237\u94FE\u63A5 (\u5269\u4F59 ${spamResult.details.linkBlockRemainingHours}h)`;
-        case "repeat_message":
-          return `\u{1F504} \u91CD\u590D\u6D88\u606F (${spamResult.details.repeatCount}\u6B21)`;
-        default:
-          return escapeHtml(String(r));
-      }
-    }).join("\n");
-    const body = notifyThreadId ? { message_thread_id: notifyThreadId } : {};
-    await tgCall(env, "sendMessage", {
-      chat_id: env.SUPERGROUP_ID,
-      text: ADMIN_COPY.spamIntercepted(escapeHtml(String(userId)), reasonText, { threadId: notifyThreadId }),
-      parse_mode: "HTML",
-      ...body
-    });
-  }
-}
 var legacyApp = {
   /**
    * 业务层 HTTP 入口。
@@ -5659,11 +5715,7 @@ var legacyApp = {
     if (!env.TOPIC_MAP) return new Response("Error: KV 'TOPIC_MAP' not bound.");
     if (!env.BOT_TOKEN) return new Response("Error: BOT_TOKEN not set.");
     if (!env.SUPERGROUP_ID) return new Response("Error: SUPERGROUP_ID not set.");
-    const normalizedEnv = {
-      ...env,
-      SUPERGROUP_ID: String(env.SUPERGROUP_ID),
-      BOT_TOKEN: String(env.BOT_TOKEN)
-    };
+    const normalizedEnv = env;
     if (!normalizedEnv.SUPERGROUP_ID.startsWith("-100")) {
       return new Response("Error: SUPERGROUP_ID must start with -100");
     }
@@ -5861,6 +5913,7 @@ var legacyApp = {
       try {
         const ptext = removeCommandBotSuffix((msg.text || "").trim());
         if (ptext === "/help") {
+          const rateLimitMinutes = Math.max(1, Math.round(CONFIG.RATE_LIMIT_WINDOW / 60));
           await tgCall(normalizedEnv, "sendMessage", {
             chat_id: msg.chat.id,
             text: [
@@ -5872,7 +5925,7 @@ var legacyApp = {
               "\u2022 \u63D0\u793A\u300C\u4EBA\u673A\u9A8C\u8BC1\u300D\u2014 \u70B9\u6309\u94AE\u7B54\u9898\u6216\u6253\u5F00\u7F51\u9875\u5B8C\u6210\uFF0C\u7B54\u5BF9\u540E\u6D88\u606F\u81EA\u52A8\u9001\u8FBE",
               "\u2022 \u9A8C\u8BC1\u94FE\u63A5\u8FC7\u671F \u2014 \u91CD\u65B0\u53D1\u4E00\u6761\u6D88\u606F\u5373\u53EF\u83B7\u53D6\u65B0\u94FE\u63A5",
               "\u2022 \u63D0\u793A\u300C\u5305\u542B\u8FDD\u89C4\u5185\u5BB9\u300D\u2014 \u4FEE\u6539\u63AA\u8F9E\u540E\u91CD\u65B0\u53D1\u9001",
-              "\u2022 \u63D0\u793A\u300C\u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\u300D\u2014 \u8BF7\u7A0D\u7B49\u7EA6 1 \u5206\u949F\u518D\u53D1",
+              "\u2022 \u63D0\u793A\u300C\u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\u300D\u2014 \u672C\u6B21\u6D88\u606F\u672A\u9001\u8FBE\uFF0C\u8BF7\u7A0D\u7B49\u7EA6 " + rateLimitMinutes + " \u5206\u949F\u518D\u53D1",
               "\u2022 \u88AB\u9759\u97F3\u6216\u5C01\u7981 \u2014 \u4F1A\u6536\u5230\u5355\u72EC\u901A\u77E5\uFF0C\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406",
               "",
               "<b>\u547D\u4EE4</b>",
@@ -5897,7 +5950,10 @@ var legacyApp = {
           chat_id: msg.chat.id,
           text: USER_COPY.systemBusy
         });
-        Logger.error("private_message_failed", e, { userId: msg.chat.id });
+        Logger.error("private_message_failed", e, {
+          userId: msg.chat.id,
+          updateId: update?.update_id
+        });
       }
       return new Response("OK");
     }
@@ -5913,13 +5969,24 @@ var legacyApp = {
       const text = (msg.text || "").trim();
       const isCommand = !!text && text.startsWith("/");
       if (msg.message_thread_id || isCommand) {
-        await handleAdminReply(msg, normalizedEnv, ctx);
+        await handleAdminReply(msg, normalizedEnv, ctx, update?.update_id);
         return new Response("OK");
       }
     }
     return new Response("OK");
   }
 };
+async function sendHourlyNotice(env, userId, noticeKey, text) {
+  try {
+    if (await env.TOPIC_MAP.get(noticeKey)) return false;
+    await tgCall(env, "sendMessage", { chat_id: userId, text });
+    await env.TOPIC_MAP.put(noticeKey, "1", { expirationTtl: HOURLY_NOTICE_TTL_SECONDS });
+    return true;
+  } catch (e) {
+    Logger.warn("hourly_notice_failed", { userId, noticeKey, error: e?.message });
+    return false;
+  }
+}
 async function handlePrivateMessage(msg, env, ctx) {
   const userId = msg.chat.id;
   const key = `user:${userId}`;
@@ -5952,33 +6019,11 @@ async function handlePrivateMessage(msg, env, ctx) {
     rules: blockedRules
   });
   if (policyResult.reason === "banned") {
-    try {
-      const noticeKey = `ban_notice:${userId}`;
-      const noticed = await env.TOPIC_MAP.get(noticeKey);
-      if (!noticed) {
-        await tgCall(env, "sendMessage", {
-          chat_id: userId,
-          text: USER_COPY.bannedHourly
-        });
-        await env.TOPIC_MAP.put(noticeKey, "1", { expirationTtl: 3600 });
-      }
-    } catch (e) {
-      Logger.warn("ban_notice_failed", { userId, error: e?.message });
-    }
+    await sendHourlyNotice(env, userId, `ban_notice:${userId}`, USER_COPY.bannedHourly);
     return;
   }
   if (isMuted) {
-    try {
-      const noticeKey = `mute_notice:${userId}`;
-      if (!await env.TOPIC_MAP.get(noticeKey)) {
-        await tgCall(env, "sendMessage", {
-          chat_id: userId,
-          text: USER_COPY.mutedHourly
-        });
-        await env.TOPIC_MAP.put(noticeKey, "1", { expirationTtl: 3600 });
-      }
-    } catch {
-    }
+    await sendHourlyNotice(env, userId, `mute_notice:${userId}`, USER_COPY.mutedHourly);
     return;
   }
   if (policyResult.reason === "blocked_keyword") {
@@ -6037,11 +6082,11 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
     if (!rec || !rec.thread_id) {
       throw new Error("\u521B\u5EFA\u8BDD\u9898\u5931\u8D25");
     }
-  } else if (!rec.title || rec.title === "User" || /^User @/i.test(rec.title)) {
+  } else if (!rec.title || rec.title === TOPIC_TITLE_PLACEHOLDER || TOPIC_TITLE_USER_PATTERN.test(rec.title)) {
     try {
       const resolvedFrom = await resolveUserFromForTopic(env, userId, msg.from);
       const title = buildTopicTitle(resolvedFrom);
-      if (title && title !== "User" && title !== rec.title) {
+      if (title && title !== TOPIC_TITLE_PLACEHOLDER && title !== rec.title) {
         const edit = await tgCall(env, "editForumTopic", {
           chat_id: env.SUPERGROUP_ID,
           message_thread_id: rec.thread_id,
@@ -6232,13 +6277,14 @@ function removeCommandBotSuffix(text) {
   if (!text || !text.startsWith("/")) return text;
   return text.replace(/^\/([a-zA-Z0-9_]+)@[a-zA-Z0-9_]+/, "/$1");
 }
-async function handleAdminReply(msg, env, ctx) {
+async function handleAdminReply(msg, env, ctx, updateId) {
   try {
     await _handleAdminReplyInner(msg, env, ctx);
   } catch (e) {
     Logger.error("admin_reply_failed", e, {
       threadId: msg?.message_thread_id,
-      senderId: msg?.from?.id
+      senderId: msg?.from?.id,
+      updateId
     });
   }
 }
@@ -6513,7 +6559,7 @@ function buildTopicTitle(from) {
     username = String(rawUsername).replace(/[^\w]/g, "").substring(0, 20);
   }
   const cleanName = cleanProfileText(firstName + " " + lastName);
-  const name = cleanName || "User";
+  const name = cleanName || TOPIC_TITLE_PLACEHOLDER;
   const usernameStr = username ? ` @${username}` : "";
   const title = (name + usernameStr).substring(0, CONFIG.MAX_TITLE_LENGTH);
   return title;

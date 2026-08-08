@@ -11,6 +11,8 @@ describe('user-copy', () => {
   it('用户侧拦截/限流文案齐全', () => {
     expect(USER_COPY.rateLimited(1)).toMatch(/频繁/);
     expect(USER_COPY.rateLimited(1)).toContain('1 分钟');
+    // 明确告知本次消息未送达，避免用户误以为消息已发送
+    expect(USER_COPY.rateLimited(1)).toContain('本次消息未送达');
     expect(USER_COPY.systemBusy).toMatch(/繁忙/);
     expect(USER_COPY.bannedHourly).toMatch(/封禁/);
     expect(USER_COPY.mutedHourly).toMatch(/静音/);

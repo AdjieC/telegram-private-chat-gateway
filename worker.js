@@ -16,6 +16,7 @@ import { getBlockedWords } from './src/blocked-words.js';
 import { createAdminActions } from './src/admin-actions.js';
 import { createVerificationModule } from './src/verification.js';
 import { createMediaGroupModule } from './src/media-group.js';
+import { createSpamModule } from './src/spam.js';
 import { bumpDailyStat } from './src/daily-stats.js';
 import {
   escapeHtml,
@@ -81,7 +82,13 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.1.6';
+const GATEWAY_VERSION = '1.1.7';
+
+/** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
+const TOPIC_TITLE_PLACEHOLDER = 'User';
+const TOPIC_TITLE_USER_PATTERN = /^User @/i;
+/** 低频状态（封禁/静音）每小时最多提醒一次的 KV TTL */
+const HOURLY_NOTICE_TTL_SECONDS = 3600;
 
 // 线程健康检查缓存，减少频繁探测请求
 const threadHealthCache = new Map();
@@ -89,10 +96,6 @@ const threadHealthCache = new Map();
 const topicCreateInFlight = new Map();
 // 管理员权限缓存（实例内）
 const adminStatusCache = new Map();
-// PR #12: 垃圾关键词集合（延迟初始化）
-let spamKeywordsCache = null;
-// PR #12: 消息哈希去重缓存（用于检测重复骚扰消息）
-const messageHashCache = new Map();
 // thread 映射缺失时的负缓存（避免重复全量扫描已知不存在的话题）
 const threadNotFoundCache = new Map();
 const ruleCache = new WeakMap();
@@ -100,7 +103,6 @@ const THREAD_NOT_FOUND_TTL_MS = 5 * 60 * 1000;
 const THREAD_NOT_FOUND_MAX_ENTRIES = 1000;
 const ADMIN_STATUS_MAX_ENTRIES = 1000;
 const THREAD_HEALTH_MAX_ENTRIES = 1000;
-const MESSAGE_HASH_MAX_ENTRIES = 5000;
 
 function setBoundedCache(cache, key, value, maxEntries) {
   cache.delete(key);
@@ -197,6 +199,23 @@ const mediaGroup = createMediaGroupModule({
   safeGetJSON,
   logger: Logger,
 });
+
+// 垃圾内容检测与处理（关键词/链接/重复 + 管理员告警 + 统计）
+const spamModule = createSpamModule({
+  config: CONFIG,
+  logger: Logger,
+  escapeHtml,
+  adminCopy: ADMIN_COPY,
+  safeGetJSON,
+  tgCall,
+  getVerificationTimestamp: (env, userId) => ephemeralStore(env).getVerificationTimestamp(userId),
+  setBoundedCache,
+});
+const {
+  spamCheck,
+  handleSpamMessage,
+  pruneMessageHashCache,
+} = spamModule;
 
 const adminHandlers = createAdminCommandHandlers({
   tgCall,
@@ -409,9 +428,25 @@ function isSparseTelegramFrom(from) {
 
 /**
  * 缓存用户资料，供 Turnstile 验证回放等缺少 from 的路径建话题时使用。
+ * 写去重：同 isolate 内资料指纹未变化且在 TTL 窗口内时不重复写 KV——
+ * 用户资料极少变动，高频消息流可把「每消息一次 KV put」降为「资料变化时才写」。
  */
+const profileSnapshotCache = new Map(); // userId -> { fingerprint, ts }
+const PROFILE_SNAPSHOT_TTL_MS = 5 * 60 * 1000;
+const PROFILE_SNAPSHOT_MAX_ENTRIES = 2000;
+
+function profileFingerprint(from) {
+  return [from.first_name || '', from.last_name || '', from.username || ''].join('\u0001');
+}
+
 async function saveUserProfileSnapshot(env, userId, from) {
   if (!env?.TOPIC_MAP || !userId || isSparseTelegramFrom(from)) return;
+  const fingerprint = profileFingerprint(from);
+  const now = Date.now();
+  const cached = profileSnapshotCache.get(String(userId));
+  if (cached && cached.fingerprint === fingerprint && now - cached.ts < PROFILE_SNAPSHOT_TTL_MS) {
+    return; // 资料未变化，跳过 KV 写入
+  }
   try {
     await env.TOPIC_MAP.put(`profile:${userId}`, JSON.stringify({
       first_name: from.first_name || null,
@@ -419,6 +454,7 @@ async function saveUserProfileSnapshot(env, userId, from) {
       username: from.username || null,
       saved_at: Date.now(),
     }), { expirationTtl: 30 * 24 * 3600 });
+    setBoundedCache(profileSnapshotCache, String(userId), { fingerprint, ts: now }, PROFILE_SNAPSHOT_MAX_ENTRIES);
   } catch (e) {
     Logger.warn('profile_snapshot_save_failed', { userId, error: e?.message });
   }
@@ -699,7 +735,7 @@ async function isAdminUser(env, userId) {
     setBoundedCache(adminStatusCache, cacheKey, { ts: now, isAdmin }, ADMIN_STATUS_MAX_ENTRIES);
     return isAdmin;
   } catch (e) {
-    Logger.warn('admin_check_failed', { userId });
+    Logger.warn('admin_check_failed', { userId, error: e?.message });
     return false;
   }
 }
@@ -735,226 +771,6 @@ async function checkRateLimit(userId, env, action = 'message', limit = 20, windo
   return ephemeralStore(env).checkRateLimit(userId, action, limit, window);
 }
 
-// --- PR #12: 垃圾内容检测模块 ---
-
-/**
- * 加载/解析垃圾关键词列表
- * @param {object} env - 环境变量
- * @returns {string[]} 关键词数组
- */
-function getSpamKeywords(env) {
-  if (spamKeywordsCache) return spamKeywordsCache;
-
-  const raw = (env.SPAM_KEYWORDS || '').toString().trim();
-  spamKeywordsCache = parseSpamKeywords(raw);
-
-  if (spamKeywordsCache.length > 0) {
-    Logger.info('spam_keywords_loaded', { count: spamKeywordsCache.length });
-  }
-  return spamKeywordsCache;
-}
-
-/**
- * 检测用户是否在短时间内重复发送相同内容
- * @param {number} userId - 用户 ID
- * @param {object} msg - Telegram message object
- * @returns {Promise<{isRepeat: boolean, count: number}>}
- */
-async function detectRepeatMessage(userId, msg) {
-  const hash = computeMessageHash(msg);
-  if (!hash) return { isRepeat: false, count: 0 };
-
-  const cacheKey = `msghash:${userId}:${hash}`;
-  const now = Date.now();
-  const cached = messageHashCache.get(cacheKey);
-
-  // TTL 驱逐：过期条目视为首次出现
-  if (cached && (now - cached.ts > CONFIG.SPAM_MESSAGE_HASH_TTL * 1000)) {
-    messageHashCache.delete(cacheKey);
-    const count = 1;
-    setBoundedCache(messageHashCache, cacheKey, { count, ts: now }, MESSAGE_HASH_MAX_ENTRIES);
-    return { isRepeat: false, count };
-  }
-
-  const count = (cached?.count || 0) + 1;
-  setBoundedCache(messageHashCache, cacheKey, { count, ts: now }, MESSAGE_HASH_MAX_ENTRIES);
-
-  if (count >= CONFIG.SPAM_REPEAT_MESSAGE_LIMIT) {
-    return { isRepeat: true, count };
-  }
-  return { isRepeat: false, count };
-}
-
-// 定期清理过期的 messageHashCache 条目（防止内存无限增长）
-function pruneMessageHashCache(now) {
-  const ttl = CONFIG.SPAM_MESSAGE_HASH_TTL * 1000;
-  for (const [key, value] of messageHashCache) {
-    if (now - value.ts > ttl) {
-      messageHashCache.delete(key);
-    }
-  }
-}
-
-/**
- * 综合垃圾检测（关键词 + 链接 + 重复）
- * @param {object} msg - Telegram message object
- * @param {number} userId - 用户 ID
- * @param {object} env - 环境变量
- * @returns {Promise<{isSpam: boolean, reasons: string[], details: object}>}
- */
-async function spamCheck(msg, userId, env) {
-  const reasons = [];
-  const details = {};
-  const text = buildSpamCheckText(msg).trim();
-
-  // 1. 关键词检测
-  const keywords = getSpamKeywords(env);
-  const keywordResult = detectSpamKeywords(text, keywords);
-  if (keywordResult.isSpam) {
-    reasons.push('keyword');
-    details.keyword = keywordResult.matchedWord;
-  }
-
-  // 2. 链接检测（新用户限制）
-  if (containsLink(text)) {
-    // 检查用户验证时间：如果在 24 小时内验证的，拦截链接
-    const verifyTs = await ephemeralStore(env).getVerificationTimestamp(userId);
-    if (!verifyTs) {
-      reasons.push('new_user_link');
-      details.linkBlockRemainingHours = Math.ceil(CONFIG.NEW_USER_LINK_BLOCK_SECONDS / 3600);
-    } else {
-      const elapsed = (Date.now() - parseInt(verifyTs)) / 1000;
-      if (elapsed < CONFIG.NEW_USER_LINK_BLOCK_SECONDS) {
-        const remainingHours = Math.ceil((CONFIG.NEW_USER_LINK_BLOCK_SECONDS - elapsed) / 3600);
-        reasons.push('new_user_link');
-        details.linkBlockRemainingHours = remainingHours;
-      }
-    }
-  }
-
-  // 3. 重复消息检测
-  const repeatResult = await detectRepeatMessage(userId, msg);
-  if (repeatResult.isRepeat) {
-    reasons.push('repeat_message');
-    details.repeatCount = repeatResult.count;
-  }
-
-  return {
-    isSpam: reasons.length > 0,
-    reasons,
-    details
-  };
-}
-
-// 管理告警节流：同类型告警在窗口内只发一条，避免故障期间告警风暴刷屏
-const adminAlertThrottle = createThrottle({ windowMs: CONFIG.ALERT_THROTTLE_MS });
-// 节流窗口内被丢弃的告警计数：放行时汇总输出一次，避免风暴期逐条 DEBUG 刷屏
-const adminAlertSuppressedCounts = new Map();
-
-/**
- * 统一管理员告警通知
- * 用于关键异常（转发失败、KV 异常等）向管理员发送即时通知
- * @param {object} env - 环境变量
- * @param {string} alertType - 告警类型标识（同时作为节流 key）
- * @param {string} message - 告警内容（默认 HTML 格式，parseMode 可覆盖）
- * @param {number} [threadId] - 可选，发送到指定话题
- * @param {'HTML'|'Markdown'|'MarkdownV2'|''} [parseMode] - 解析模式，默认 HTML
- */
-async function notifyAdmin(env, alertType, message, threadId, parseMode = 'HTML') {
-  if (!adminAlertThrottle(alertType)) {
-    adminAlertSuppressedCounts.set(alertType, (adminAlertSuppressedCounts.get(alertType) || 0) + 1);
-    return;
-  }
-  const suppressed = adminAlertSuppressedCounts.get(alertType) || 0;
-  if (suppressed > 0) {
-    adminAlertSuppressedCounts.delete(alertType);
-    Logger.warn('admin_alert_burst_summary', { alertType, suppressedCount: suppressed });
-  }
-  Logger.warn('admin_alert', { alertType, messageLength: message.length });
-
-  const body = threadId ? { message_thread_id: threadId } : {};
-
-  try {
-    await tgCall(env, 'sendMessage', {
-      chat_id: env.SUPERGROUP_ID,
-      text: message,
-      parse_mode: parseMode,
-      ...body
-    });
-  } catch (e) {
-    Logger.error('admin_alert_failed', e, { alertType });
-  }
-}
-
-/**
- * 异步更新 spam 统计计数（在 waitUntil 中调用，不阻塞主响应）
- * @param {object} env - 环境变量
- * @param {string[]} reasons - spam 命中原因列表
- */
-async function updateSpamStats(env, reasons) {
-  try {
-    // 各原因计数并行写入，缩短 waitUntil 内滞留时间
-    await Promise.all((reasons || []).map(async (reason) => {
-      const countKey = `stats:spam:${reason}`;
-      const current = parseInt(await env.TOPIC_MAP.get(countKey) || "0");
-      await env.TOPIC_MAP.put(countKey, String(current + 1), { expirationTtl: 2592000 }); // 30天
-    }));
-    const totalKey = 'stats:spam:total';
-    const total = parseInt(await env.TOPIC_MAP.get(totalKey) || "0");
-    await env.TOPIC_MAP.put(totalKey, String(total + 1), { expirationTtl: 2592000 });
-  } catch (e) {
-    Logger.warn('spam_stats_update_failed', { error: e.message });
-  }
-}
-
-/**
- * 处理垃圾消息（通知管理员或静默丢弃）
- * @param {object} env - 环境变量
- * @param {number} userId - 用户 ID
- * @param {object} msg - 消息对象
- * @param {object} spamResult - spamCheck 返回的结果
- * @param {number} threadId - 可选，话题 ID
- */
-async function handleSpamMessage(env, userId, msg, spamResult, threadId, ctx) {
-  Logger.warn('spam_detected', {
-    userId,
-    reasons: spamResult.reasons,
-    details: spamResult.details
-  });
-
-  // 统计 spam 拦截计数（按原因分类，便于分析趋势）
-  // 使用 waitUntil 异步写入 KV，不阻塞主响应
-  // 注意：KV 无原子递增，多实例并发下计数可能略低于实际值，仅供参考
-  if (ctx?.waitUntil) {
-    ctx.waitUntil(updateSpamStats(env, spamResult.reasons));
-  }
-
-  if (CONFIG.SPAM_NOTIFY_ADMIN && !CONFIG.SPAM_SILENCE_MODE) {
-    // 反查用户话题：有话题时把告警发到对应话题并给出可操作提示，避免文案与实际不符
-    let notifyThreadId = threadId;
-    if (!notifyThreadId) {
-      const rec = await safeGetJSON(env, `user:${userId}`, null);
-      notifyThreadId = rec?.thread_id || null;
-    }
-    const reasonText = spamResult.reasons.map(r => {
-      switch (r) {
-        case 'keyword': return `🔑 关键词: <code>${escapeHtml(spamResult.details.keyword)}</code>`;
-        case 'new_user_link': return `🔗 新用户链接 (剩余 ${spamResult.details.linkBlockRemainingHours}h)`;
-        case 'repeat_message': return `🔄 重复消息 (${spamResult.details.repeatCount}次)`;
-        default: return escapeHtml(String(r));
-      }
-    }).join('\n');
-
-    const body = notifyThreadId ? { message_thread_id: notifyThreadId } : {};
-
-    await tgCall(env, 'sendMessage', {
-      chat_id: env.SUPERGROUP_ID,
-      text: ADMIN_COPY.spamIntercepted(escapeHtml(String(userId)), reasonText, { threadId: notifyThreadId }),
-      parse_mode: 'HTML',
-      ...body
-    });
-  }
-}
 
 // Turnstile 验证页面模板与渲染函数见 src/verify-page.js（独立模块便于单测）
 
@@ -973,12 +789,9 @@ const legacyApp = {
     if (!env.BOT_TOKEN) return new Response("Error: BOT_TOKEN not set.");
     if (!env.SUPERGROUP_ID) return new Response("Error: SUPERGROUP_ID not set.");
 
-    // 规范化环境变量，统一为字符串类型
-    const normalizedEnv = {
-      ...env,
-      SUPERGROUP_ID: String(env.SUPERGROUP_ID),
-      BOT_TOKEN: String(env.BOT_TOKEN)
-    };
+    // env 已由 app.js normalizeEnv 规范化（BOT_TOKEN/SUPERGROUP_ID 等已转字符串并 trim），
+    // 此处直接引用同一对象，避免对同一请求重复包装
+    const normalizedEnv = env;
 
     // 验证 SUPERGROUP_ID 格式
     if (!normalizedEnv.SUPERGROUP_ID.startsWith("-100")) {
@@ -1226,6 +1039,8 @@ const legacyApp = {
         const ptext = removeCommandBotSuffix((msg.text || '').trim());
         // 用户向简短帮助（非管理员也能看）
         if (ptext === '/help') {
+          // 限流时长按 RATE_LIMIT_WINDOW 注入，避免 FAQ 文案与配置漂移
+          const rateLimitMinutes = Math.max(1, Math.round(CONFIG.RATE_LIMIT_WINDOW / 60));
           await tgCall(normalizedEnv, 'sendMessage', {
             chat_id: msg.chat.id,
             text: [
@@ -1237,7 +1052,7 @@ const legacyApp = {
               '• 提示「人机验证」— 点按钮答题或打开网页完成，答对后消息自动送达',
               '• 验证链接过期 — 重新发一条消息即可获取新链接',
               '• 提示「包含违规内容」— 修改措辞后重新发送',
-              '• 提示「发送过于频繁」— 请稍等约 1 分钟再发',
+              '• 提示「发送过于频繁」— 本次消息未送达，请稍等约 ' + rateLimitMinutes + ' 分钟再发',
               '• 被静音或封禁 — 会收到单独通知，请等待管理员处理',
               '',
               '<b>命令</b>',
@@ -1267,7 +1082,10 @@ const legacyApp = {
           chat_id: msg.chat.id,
           text: USER_COPY.systemBusy,
         });
-        Logger.error('private_message_failed', e, { userId: msg.chat.id });
+        Logger.error('private_message_failed', e, {
+          userId: msg.chat.id,
+          updateId: update?.update_id,
+        });
       }
       return new Response("OK");
     }
@@ -1287,7 +1105,7 @@ const legacyApp = {
       const text = (msg.text || "").trim();
       const isCommand = !!text && text.startsWith("/");
       if (msg.message_thread_id || isCommand) {
-        await handleAdminReply(msg, normalizedEnv, ctx);
+        await handleAdminReply(msg, normalizedEnv, ctx, update?.update_id);
         return new Response("OK");
       }
     }
@@ -1297,6 +1115,22 @@ const legacyApp = {
 };
 
 // ---------------- 核心业务逻辑 ----------------
+
+/**
+ * 低频状态（封禁/静音）每小时最多提醒一次：避免用户反复发送时被重复打扰。
+ * @returns {Promise<boolean>} 本次是否实际发送了提醒
+ */
+async function sendHourlyNotice(env, userId, noticeKey, text) {
+  try {
+    if (await env.TOPIC_MAP.get(noticeKey)) return false;
+    await tgCall(env, 'sendMessage', { chat_id: userId, text });
+    await env.TOPIC_MAP.put(noticeKey, '1', { expirationTtl: HOURLY_NOTICE_TTL_SECONDS });
+    return true;
+  } catch (e) {
+    Logger.warn('hourly_notice_failed', { userId, noticeKey, error: e?.message });
+    return false;
+  }
+}
 
 async function handlePrivateMessage(msg, env, ctx) {
   const userId = msg.chat.id;
@@ -1339,33 +1173,12 @@ async function handlePrivateMessage(msg, env, ctx) {
 
   if (policyResult.reason === 'banned') {
     // 避免用户不知道已被封禁仍反复发送；每小时最多提醒一次
-    try {
-      const noticeKey = `ban_notice:${userId}`;
-      const noticed = await env.TOPIC_MAP.get(noticeKey);
-      if (!noticed) {
-        await tgCall(env, 'sendMessage', {
-          chat_id: userId,
-          text: USER_COPY.bannedHourly,
-        });
-        await env.TOPIC_MAP.put(noticeKey, '1', { expirationTtl: 3600 });
-      }
-    } catch (e) {
-      Logger.warn('ban_notice_failed', { userId, error: e?.message });
-    }
+    await sendHourlyNotice(env, userId, `ban_notice:${userId}`, USER_COPY.bannedHourly);
     return;
   }
   // 静音：仍接收但不转发到管理群（每小时提示一次）
   if (isMuted) {
-    try {
-      const noticeKey = `mute_notice:${userId}`;
-      if (!(await env.TOPIC_MAP.get(noticeKey))) {
-        await tgCall(env, 'sendMessage', {
-          chat_id: userId,
-          text: USER_COPY.mutedHourly,
-        });
-        await env.TOPIC_MAP.put(noticeKey, '1', { expirationTtl: 3600 });
-      }
-    } catch { /* ignore */ }
+    await sendHourlyNotice(env, userId, `mute_notice:${userId}`, USER_COPY.mutedHourly);
     return;
   }
   if (policyResult.reason === 'blocked_keyword') {
@@ -1442,12 +1255,12 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
     if (!rec || !rec.thread_id) {
       throw new Error("创建话题失败");
     }
-  } else if (!rec.title || rec.title === 'User' || /^User @/i.test(rec.title)) {
+  } else if (!rec.title || rec.title === TOPIC_TITLE_PLACEHOLDER || TOPIC_TITLE_USER_PATTERN.test(rec.title)) {
     // 修复 Turnstile 回放建话题时资料缺失导致的占位标题
     try {
       const resolvedFrom = await resolveUserFromForTopic(env, userId, msg.from);
       const title = buildTopicTitle(resolvedFrom);
-      if (title && title !== 'User' && title !== rec.title) {
+      if (title && title !== TOPIC_TITLE_PLACEHOLDER && title !== rec.title) {
         const edit = await tgCall(env, 'editForumTopic', {
           chat_id: env.SUPERGROUP_ID,
           message_thread_id: rec.thread_id,
@@ -1697,13 +1510,14 @@ function removeCommandBotSuffix(text) {
   return text.replace(/^\/([a-zA-Z0-9_]+)@[a-zA-Z0-9_]+/, '/$1');
 }
 
-async function handleAdminReply(msg, env, ctx) {
+async function handleAdminReply(msg, env, ctx, updateId) {
   try {
     await _handleAdminReplyInner(msg, env, ctx);
   } catch (e) {
     Logger.error('admin_reply_failed', e, {
       threadId: msg?.message_thread_id,
-      senderId: msg?.from?.id
+      senderId: msg?.from?.id,
+      updateId,
     });
   }
 }
@@ -2011,7 +1825,7 @@ function buildTopicTitle(from) {
   // 移除控制字符和换行符（与 src/utils.js cleanProfileText 同一规则）
   const cleanName = cleanProfileText(firstName + " " + lastName);
 
-  const name = cleanName || "User";
+  const name = cleanName || TOPIC_TITLE_PLACEHOLDER;
   const usernameStr = username ? ` @${username}` : "";
 
   // Telegram 话题标题最大长度为 128 字符

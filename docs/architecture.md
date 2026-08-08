@@ -16,6 +16,7 @@ flowchart TB
     WORKER --> ACTIONS[src/admin-actions.js]
     WORKER --> VERIFY[src/verification.js]
     WORKER --> MEDIA[src/media-group.js]
+    WORKER --> SPAM[src/spam.js]
     WORKER --> BWORDS[src/blocked-words.js]
     WORKER --> DSTATS[src/daily-stats.js]
     WORKER --> ADMFMT[src/admin-ui-format.js]
@@ -54,6 +55,7 @@ flowchart TB
 | `src/admin-actions.js` | `createAdminActions()`：用户状态操作、词库管理与批量清理等管理动作 |
 | `src/verification.js` | `createVerificationModule()`：本地题库 + Turnstile 人机验证编排与待发消息回放 |
 | `src/media-group.js` | `createMediaGroupModule()`：媒体组合并延迟转发与过期清理 |
+| `src/spam.js` | `createSpamModule()`：垃圾检测（关键词/链接/重复）与管理员告警、统计 |
 | `src/blocked-words.js` | `getBlockedWords()`：硬编码 + KV 动态屏蔽词库共享读取 |
 | `src/daily-stats.js` | CST 日历日统计 KV 读写共享 |
 | `src/admin-ui-format.js` | 管理键盘、排行/热力/空状态等展示纯函数（无 IO） |

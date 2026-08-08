@@ -126,6 +126,35 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     vi.useRealTimers();
   });
 
+  it('同资料连续消息不重复写 profile 快照（写去重）', async () => {
+    const telegram = createTelegramMock();
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    const userId = 222;
+    await preVerify(env, userId);
+    await seedTopic(env, userId, 99);
+
+    // 统计 profile: 前缀的 KV 写入次数（其余键不受影响）
+    const profilePuts = [];
+    const origPut = env.TOPIC_MAP.put.bind(env.TOPIC_MAP);
+    env.TOPIC_MAP.put = (key, value, opts) => {
+      if (String(key).startsWith('profile:')) profilePuts.push(String(key));
+      return origPut(key, value, opts);
+    };
+
+    // 相同资料连发两条消息：第二条不应重复写快照
+    await send(messageUpdate(privateMessage(userId, 201), 8200), env, telegram);
+    await send(messageUpdate(privateMessage(userId, 202), 8201), env, telegram);
+    expect(profilePuts.length).toBe(1);
+
+    // 资料变化后应再次写入，保证 KV 快照及时更新
+    await send(messageUpdate(
+      privateMessage(userId, 203, { from: { id: userId, first_name: '新名字' } }),
+      8202,
+    ), env, telegram);
+    expect(profilePuts.length).toBe(2);
+  });
+
   it('新用户消息 → 本地题库验证 → 答对后自动建话题并转发', async () => {
     const telegram = createTelegramMock();
     vi.stubGlobal('fetch', telegram.fetchImpl);

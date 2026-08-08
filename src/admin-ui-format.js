@@ -15,16 +15,11 @@ import {
   shouldAppendUsername,
   formatDelta,
 } from './activity-summary.js';
+import { escapeHtml } from './utils.js';
 
-/** HTML 转义（验证页与管理消息共用） */
-export function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+// re-export：历史引用（worker.js / admin-actions.js / spam.js 等）继续从本模块导入，
+// 定义统一收敛在纯函数基座 utils.js，避免重复实现
+export { escapeHtml };
 
 /** 管理消息统一分隔线（菜单/看板/用户面板共用，避免各处长度不一致） */
 export const SEP_LINE = '────────────────';
@@ -136,13 +131,19 @@ export function buildSysinfoKeyboard(page = 'overview') {
   };
 }
 
+/** 按钮标签截断：超出上限时保留前段并追加省略号，避免按钮被 Telegram 截断成无意义文本 */
+function truncateLabel(text, maxLen) {
+  const s = String(text ?? '');
+  return s.length > maxLen ? `${s.slice(0, maxLen - 1)}…` : s;
+}
+
 export function buildUserJumpKeyboard(users, { includeMenu = true, columns = 2 } = {}) {
   const cols = Math.min(Math.max(Number(columns) || 2, 1), 3);
   const list = (users || []).slice(0, 8);
   const rows = [];
   for (let i = 0; i < list.length; i += cols) {
     const chunk = list.slice(i, i + cols).map((u) => {
-      const label = displayUserLabel(u).slice(0, cols === 1 ? 24 : 14);
+      const label = truncateLabel(displayUserLabel(u), cols === 1 ? 24 : 14);
       return {
         text: `👤 ${label}`,
         callback_data: `adm:u:panel:${u.userId}`,
@@ -159,6 +160,13 @@ export function buildUserJumpKeyboard(users, { includeMenu = true, columns = 2 }
   return { inline_keyboard: rows };
 }
 
+/** 排行用户状态徽标（无限制时不显示） */
+function statusBadge(status) {
+  if (status === 'banned') return ' 🚫';
+  if (status === 'closed') return ' 🔒';
+  return '';
+}
+
 export function formatRankingBlock(rankingUsers, { withCount = true, now = Date.now() } = {}) {
   if (!rankingUsers?.length) {
     return ['暂无今日活跃用户', ...formatEmptyActivityHints()];
@@ -172,10 +180,7 @@ export function formatRankingBlock(rankingUsers, { withCount = true, now = Date.
     const when = u.lastMessageAt && u.count == null
       ? ` · ${formatRelativeTime(u.lastMessageAt, now)}`
       : '';
-    const badge = u.status === 'banned' ? ' 🚫'
-      : u.status === 'closed' ? ' 🔒'
-        : '';
-    lines.push(`${rankMedal(i)} ${name}${un}${cnt}${when}${badge}`);
+    lines.push(`${rankMedal(i)} ${name}${un}${cnt}${when}${statusBadge(u.status)}`);
     lines.push(`   <code>${escapeHtml(u.userId)}</code>${u.topicId ? ` · T${escapeHtml(u.topicId)}` : ''}`);
   });
   return lines;

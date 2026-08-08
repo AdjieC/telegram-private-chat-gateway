@@ -31,6 +31,7 @@ npm install
 │   ├── activity-summary.js      # CST 日切、热力、sparkline、峰值日纯函数
 │   ├── verification.js          # 人机验证编排：本地题库 + Turnstile + 待发消息回放
 │   ├── media-group.js           # 媒体组合并延迟转发与过期清理
+│   ├── spam.js                  # 垃圾检测：关键词/链接/重复 + 管理员告警与统计
 │   ├── blocked-words.js         # 硬编码 + KV 动态屏蔽词库共享读取
 │   ├── config.js                # 环境变量校验与归一化
 │   ├── daily-stats.js           # CST 日历日统计 KV 读写共享

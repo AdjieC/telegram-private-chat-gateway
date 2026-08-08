@@ -18,8 +18,9 @@ describe('verify-copy', () => {
   });
 
   it('验证限流文案按窗口分钟数生成', () => {
-    expect(VERIFY_COPY.verifyRateLimited(5)).toContain('5分钟');
+    expect(VERIFY_COPY.verifyRateLimited(5)).toContain('5 分钟');
     expect(VERIFY_COPY.verifyRateLimited(5)).toMatch(/频繁/);
+    expect(VERIFY_COPY.verifyRateLimited(5)).toContain('约');
   });
 
   it('自动送达失败提示存在且措辞一致', () => {
