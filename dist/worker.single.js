@@ -1388,6 +1388,14 @@ var POLICY_REASON_LABELS = {
 function policyReasonLabel(reason) {
   return POLICY_REASON_LABELS[reason] || String(reason || "unknown");
 }
+var CALLBACK_BUSY_COPY = {
+  ban: "\u6B63\u5728\u5C01\u7981\u2026",
+  banok: "\u6B63\u5728\u5C01\u7981\u2026",
+  close: "\u6B63\u5728\u5173\u95ED\u2026",
+  closeok: "\u6B63\u5728\u5173\u95ED\u2026",
+  reset: "\u6B63\u5728\u91CD\u7F6E\u2026",
+  resetok: "\u6B63\u5728\u91CD\u7F6E\u2026"
+};
 var USER_COPY = {
   /** 消息发送限流（minutes 由调用方按 RATE_LIMIT_WINDOW 换算，与验证限流口径一致，防文案漂移） */
   rateLimited(minutes) {
@@ -1506,6 +1514,9 @@ ${existing}
   cbNoUserTopic: "\u627E\u4E0D\u5230\u7528\u6237\u8BDD\u9898",
   cbUnknownAction: "\u672A\u77E5\u64CD\u4F5C",
   cbUnknownCallback: "\u672A\u77E5\u56DE\u8C03",
+  callbackBusy(action) {
+    return CALLBACK_BUSY_COPY[action] || "\u5904\u7406\u4E2D\u2026";
+  },
   cbOperationFailed: "\u64CD\u4F5C\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5",
   kvNotBoundNotes: "\u274C KV \u672A\u7ED1\u5B9A\uFF0C\u65E0\u6CD5\u641C\u7D22\u5907\u6CE8",
   d1NotBoundFind: "\u274C D1 \u672A\u7ED1\u5B9A\uFF0C\u65E0\u6CD5\u641C\u7D22",
@@ -1767,19 +1778,19 @@ function createConversationService({
 
 // src/logger.js
 var REDACTED_KEYS = /* @__PURE__ */ new Set([
-  "BOT_TOKEN",
-  "TURNSTILE_SECRET_KEY",
-  "WEBHOOK_SECRET",
-  "botToken",
-  "turnstileToken",
-  "webhookSecret",
-  "verifyCode",
-  "verifyId",
+  "bot_token",
+  "turnstile_secret_key",
+  "webhook_secret",
+  "bottoken",
+  "turnstiletoken",
+  "webhooksecret",
+  "verifycode",
+  "verifyid",
   "text",
   "caption"
 ]);
 function redactValue(key, value, seen) {
-  if (REDACTED_KEYS.has(key)) return "[REDACTED]";
+  if (REDACTED_KEYS.has(String(key).toLowerCase())) return "[REDACTED]";
   if (Array.isArray(value)) {
     return value.map((item) => redactValue("", item, seen));
   }
@@ -2128,24 +2139,33 @@ function createAdminActions(deps) {
     config,
     logger
   } = deps;
+  const readSafely = (work, fallback) => Promise.resolve().then(work).catch(() => fallback);
   async function panel(env, threadId, userId) {
-    const from = await resolveUserFromForTopic2(env, userId, null);
+    const [resolvedFrom, ban2, muted, rec, note2, d1User, verification] = await Promise.all([
+      readSafely(
+        async () => await resolveUserFromForTopic2(env, userId, null) || {},
+        {}
+      ),
+      readSafely(() => env.TOPIC_MAP.get(`banned:${userId}`), null),
+      readSafely(() => env.TOPIC_MAP.get(`muted:${userId}`), null),
+      readSafely(() => safeGetJSON2(env, `user:${userId}`, null), null),
+      readSafely(() => env.TOPIC_MAP.get(`note:${userId}`), null),
+      readSafely(
+        () => env.TG_BOT_DB ? createD1Storage2(env.TG_BOT_DB).getUser(userId) : null,
+        null
+      ),
+      readSafely(
+        () => env.TG_BOT_DB ? null : getVerificationState2(env, userId),
+        null
+      )
+    ]);
+    const from = resolvedFrom;
     const name = escapeHtml2([from.first_name, from.last_name].filter(Boolean).join(" ").trim() || "\u672A\u77E5");
     const un = from.username ? `@${escapeHtml2(from.username)}` : "\u65E0\u7528\u6237\u540D";
-    const ban2 = await env.TOPIC_MAP.get(`banned:${userId}`);
-    const muted = await env.TOPIC_MAP.get(`muted:${userId}`);
-    const rec = await safeGetJSON2(env, `user:${userId}`, null);
-    const note2 = await env.TOPIC_MAP.get(`note:${userId}`);
     let lastMsgLine = "\u6700\u8FD1\u6D88\u606F: \u65E0";
-    let d1Status = null;
-    if (env.TG_BOT_DB) {
-      try {
-        const u = await createD1Storage2(env.TG_BOT_DB).getUser(userId);
-        if (u?.lastMessageAt) lastMsgLine = `\u6700\u8FD1\u6D88\u606F: ${formatTimeBoth2(u.lastMessageAt)}`;
-        d1Status = u?.status || null;
-      } catch {
-      }
-    }
+    if (d1User?.lastMessageAt) lastMsgLine = `\u6700\u8FD1\u6D88\u606F: ${formatTimeBoth2(d1User.lastMessageAt)}`;
+    const d1Status = d1User?.status || null;
+    const trusted = d1User?.trustLevel === "trusted" || verification?.type === "trusted" || verification?.type === "legacy_trusted";
     const text = [
       "\u{1F39B} <b>\u7528\u6237\u9762\u677F</b>",
       SEP_LINE2,
@@ -2165,7 +2185,12 @@ function createAdminActions(deps) {
       message_thread_id: threadId,
       text,
       parse_mode: "HTML",
-      reply_markup: buildUserActionKeyboard2(userId)
+      reply_markup: buildUserActionKeyboard2(userId, {
+        banned: Boolean(ban2),
+        muted: Boolean(muted),
+        closed: Boolean(rec?.closed),
+        trusted
+      })
     });
   }
   async function mute(env, threadId, userId) {
@@ -2515,7 +2540,8 @@ function createAdminActions(deps) {
     const usernameText = from.username ? `@${escapeHtml2(from.username)}` : "\u65E0";
     const openLink = from.username ? `<a href="https://t.me/${escapeHtml2(from.username)}">\u6253\u5F00\u4E3B\u9875 @${escapeHtml2(from.username)}</a>` : `<a href="tg://user?id=${userId}">\u6253\u5F00\u7528\u6237\u8D44\u6599</a>`;
     const topicTitle = escapeHtml2(userRec?.title || resolvedTitle || "\u672A\u77E5");
-    const verifyText = verifyStatus ? verifyStatus.type === "trusted" ? "\u{1F31F} \u6C38\u4E45\u4FE1\u4EFB" : "\u2705 \u5DF2\u9A8C\u8BC1" : "\u274C \u672A\u9A8C\u8BC1";
+    const trusted = verifyStatus?.type === "trusted" || verifyStatus?.type === "legacy_trusted";
+    const verifyText = verifyStatus ? trusted ? "\u{1F31F} \u6C38\u4E45\u4FE1\u4EFB" : "\u2705 \u5DF2\u9A8C\u8BC1" : "\u274C \u672A\u9A8C\u8BC1";
     const banText = banStatus ? "\u{1F6AB} \u5DF2\u5C01\u7981" : "\u2705 \u6B63\u5E38";
     const muted = await env.TOPIC_MAP.get(`muted:${userId}`);
     const note2 = await env.TOPIC_MAP.get(`note:${userId}`);
@@ -2550,7 +2576,12 @@ function createAdminActions(deps) {
       text: lines,
       parse_mode: "HTML",
       disable_web_page_preview: true,
-      reply_markup: buildUserActionKeyboard2(userId)
+      reply_markup: buildUserActionKeyboard2(userId, {
+        banned: Boolean(banStatus),
+        muted: Boolean(muted),
+        closed: Boolean(userRec?.closed),
+        trusted
+      })
     });
   }
   async function cleanup(threadId, env) {
@@ -2931,26 +2962,37 @@ function formatUserStatusChips({ banned, muted, closed } = {}) {
   if (closed) chips.push("\u{1F512} \u5DF2\u5173\u95ED");
   return chips.length ? chips.join(" \xB7 ") : "\u2705 \u72B6\u6001\u6B63\u5E38";
 }
-function buildUserActionKeyboard(userId) {
+function buildUserActionKeyboard(userId, state = {}) {
   const id = String(userId);
+  const {
+    banned = false,
+    muted = false,
+    closed = false,
+    trusted = false
+  } = state;
+  const action = (active, activeButton, inactiveButton) => active ? activeButton : inactiveButton;
   return {
     inline_keyboard: [
-      [
-        { text: "\u{1F6AB} \u5C01\u7981", callback_data: `adm:u:banask:${id}` },
-        { text: "\u2705 \u89E3\u5C01", callback_data: `adm:u:unban:${id}` }
-      ],
-      [
-        { text: "\u{1F512} \u5173\u95ED", callback_data: `adm:u:closeask:${id}` },
-        { text: "\u{1F513} \u6253\u5F00", callback_data: `adm:u:open:${id}` }
-      ],
-      [
-        { text: "\u{1F31F} \u4FE1\u4EFB", callback_data: `adm:u:trust:${id}` },
-        { text: "\u{1F504} \u91CD\u7F6E", callback_data: `adm:u:resetask:${id}` }
-      ],
-      [
-        { text: "\u{1F507} \u9759\u97F3", callback_data: `adm:u:mute:${id}` },
-        { text: "\u{1F50A} \u53D6\u6D88\u9759\u97F3", callback_data: `adm:u:unmute:${id}` }
-      ],
+      [action(
+        banned,
+        { text: "\u2705 \u89E3\u5C01", callback_data: `adm:u:unban:${id}` },
+        { text: "\u{1F6AB} \u5C01\u7981", callback_data: `adm:u:banask:${id}` }
+      )],
+      [action(
+        closed,
+        { text: "\u{1F513} \u6253\u5F00", callback_data: `adm:u:open:${id}` },
+        { text: "\u{1F512} \u5173\u95ED", callback_data: `adm:u:closeask:${id}` }
+      )],
+      [action(
+        trusted,
+        { text: "\u{1F504} \u91CD\u7F6E", callback_data: `adm:u:resetask:${id}` },
+        { text: "\u{1F31F} \u4FE1\u4EFB", callback_data: `adm:u:trust:${id}` }
+      )],
+      [action(
+        muted,
+        { text: "\u{1F50A} \u53D6\u6D88\u9759\u97F3", callback_data: `adm:u:unmute:${id}` },
+        { text: "\u{1F507} \u9759\u97F3", callback_data: `adm:u:mute:${id}` }
+      )],
       [
         { text: "\u{1F464} \u8D44\u6599", callback_data: `adm:u:info:${id}` },
         { text: "\u{1F4DD} \u770B\u5907\u6CE8", callback_data: `adm:u:shownote:${id}` }
@@ -4025,6 +4067,29 @@ function createAdminCommandHandlers(deps) {
     return { total, truncated: Boolean(cursor) };
   }
   async function collectRecentErrors(env) {
+    const normalizeRecentError = (item) => {
+      if (!item || typeof item !== "object") return null;
+      const text = (value, maxLength, fallback = "") => {
+        if (typeof value !== "string" && typeof value !== "number") return fallback;
+        return String(value).slice(0, maxLength);
+      };
+      const id = (value) => {
+        if (typeof value !== "string" && typeof value !== "number") return void 0;
+        const valueText = String(value).slice(0, 120);
+        return valueText || void 0;
+      };
+      const timestamp = Number(item.ts);
+      const normalized = {
+        ts: Number.isFinite(timestamp) ? timestamp : 0,
+        action: text(item.action, 120, "unknown"),
+        error: text(item.error, 500)
+      };
+      for (const key of ["userId", "updateId", "correlationId"]) {
+        const value = id(item[key]);
+        if (value !== void 0) normalized[key] = value;
+      }
+      return normalized;
+    };
     let kvErrors = [];
     try {
       if (env?.TOPIC_MAP) {
@@ -4037,8 +4102,9 @@ function createAdminCommandHandlers(deps) {
     if (!Array.isArray(kvErrors)) kvErrors = [];
     const merged = [];
     const seen = /* @__PURE__ */ new Set();
-    for (const item of [...getRecentSystemErrors(), ...kvErrors]) {
-      if (!item || typeof item !== "object") continue;
+    for (const rawItem of [...getRecentSystemErrors(), ...kvErrors]) {
+      const item = normalizeRecentError(rawItem);
+      if (!item) continue;
       const key = `${item.ts}|${item.action}|${item.error}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -4249,8 +4315,12 @@ function createAdminCommandHandlers(deps) {
       for (const err of top) {
         const act = escapeHtml(err.action || "?");
         const msg = escapeHtml(String(err.error || "").slice(0, 140));
-        const uid = err.userId ? ` \xB7 uid ${escapeHtml(err.userId)}` : "";
-        lines.push(`\u{1F534} <b>${act}</b>${uid}`);
+        const identifiers = [
+          err.userId ? `uid ${escapeHtml(err.userId)}` : "",
+          err.updateId ? `update ${escapeHtml(err.updateId)}` : "",
+          err.correlationId ? `corr ${escapeHtml(err.correlationId)}` : ""
+        ].filter(Boolean).join(" \xB7 ");
+        lines.push(`\u{1F534} <b>${act}</b>${identifiers ? ` \xB7 ${identifiers}` : ""}`);
         lines.push(`   ${formatRelativeTime(err.ts)} \xB7 ${msg}`);
       }
       lines.push("");
@@ -4794,10 +4864,9 @@ function createAdminCommandHandlers(deps) {
           });
           return;
         }
-        const busyText = action === "banok" || action === "ban" ? "\u6B63\u5728\u5C01\u7981\u2026" : action === "closeok" || action === "close" ? "\u6B63\u5728\u5173\u95ED\u2026" : action === "resetok" || action === "reset" ? "\u6B63\u5728\u91CD\u7F6E\u2026" : "\u5904\u7406\u4E2D\u2026";
         await tgCall2(env, "answerCallbackQuery", {
           callback_query_id: query.id,
-          text: busyText
+          text: ADMIN_COPY.callbackBusy(action)
         });
         await fn();
         const refreshPanel = [
@@ -4816,7 +4885,11 @@ function createAdminCommandHandlers(deps) {
         if (refreshPanel && typeof userActions.panel === "function") {
           try {
             await userActions.panel(env, tid, userId);
-          } catch {
+          } catch (e) {
+            try {
+              recordSystemError2("admin_panel_refresh_failed", e, { userId }, env);
+            } catch {
+            }
           }
         }
         return;
@@ -4880,6 +4953,7 @@ h2{color:var(--text);margin-bottom:8px;font-size:20px;font-weight:600}
 p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
 #back-btn{display:inline-block;margin:20px auto 0;background:var(--accent);color:#fff;border:none;padding:13px 28px;border-radius:12px;font-size:16px;text-decoration:none;font-weight:600;transition:opacity .2s,transform .1s;box-shadow:0 2px 8px rgba(0,136,204,0.3)}
 #back-btn:hover{opacity:.92}
+#back-btn:focus-visible{outline:3px solid var(--text);outline-offset:3px}
 #back-btn:active{transform:scale(.98)}
 .footer{margin-top:22px;font-size:11px;color:var(--muted)}
 `;
@@ -4914,7 +4988,7 @@ var VERIFY_PAGE_HTML = `<!DOCTYPE html>
   <div class="turnstile-container">
     <div class="cf-turnstile" data-sitekey="{{SITE_KEY}}" data-callback="onTurnstileSuccess" data-error-callback="onTurnstileError"></div>
   </div>
-  <div id="status" aria-live="polite"></div>
+  <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
   <a id="back-btn" href="tg://resolve">\u{1F4F1} \u8FD4\u56DE Telegram</a>
   <details id="tech-wrap" hidden>
     <summary>\u6280\u672F\u8BE6\u60C5\uFF08\u6392\u969C\u7528\uFF09</summary>
@@ -5135,7 +5209,7 @@ var CONFIG = {
   WORD_MAX_LENGTH: 50
   // /addword 单词长度上限，防 KV 词库被超长输入污染
 };
-var GATEWAY_VERSION = "1.1.7";
+var GATEWAY_VERSION = "1.1.9";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var TOPIC_TITLE_USER_PATTERN = /^User @/i;
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
@@ -5162,15 +5236,43 @@ var Logger = createLogger({}, console, {
   }
 });
 var RECENT_SYSTEM_ERRORS_MAX = 12;
+var RECENT_ERROR_ACTION_MAX = 120;
+var RECENT_ERROR_TEXT_MAX = 500;
+var RECENT_ERROR_ID_MAX = 120;
 var recentSystemErrors = [];
 var systemErrorKvThrottle = createThrottle({ windowMs: 3e4 });
-function recordSystemError(action, error, data = {}, env = null) {
+function recentErrorText(value, maxLength, fallback = "") {
+  if (typeof value !== "string" && typeof value !== "number") return fallback;
+  return String(value).slice(0, maxLength);
+}
+function recentErrorId(value) {
+  if (typeof value !== "string" && typeof value !== "number") return void 0;
+  const text = String(value).slice(0, RECENT_ERROR_ID_MAX);
+  return text || void 0;
+}
+function normalizeRecentSystemError(item) {
+  if (!item || typeof item !== "object") return null;
+  const ts = Number(item.ts);
   const entry = {
-    ts: Date.now(),
-    action: String(action || "unknown"),
-    error: error instanceof Error ? error.message : String(error ?? ""),
-    userId: data?.userId != null ? String(data.userId) : void 0
+    ts: Number.isFinite(ts) ? ts : 0,
+    action: recentErrorText(item.action, RECENT_ERROR_ACTION_MAX, "unknown"),
+    error: recentErrorText(item.error, RECENT_ERROR_TEXT_MAX)
   };
+  for (const key of ["userId", "updateId", "correlationId"]) {
+    const value = recentErrorId(item[key]);
+    if (value !== void 0) entry[key] = value;
+  }
+  return entry;
+}
+function recordSystemError(action, error, data = {}, env = null) {
+  const entry = normalizeRecentSystemError({
+    ts: Date.now(),
+    action,
+    error: error instanceof Error ? error.message : String(error ?? ""),
+    userId: data?.userId,
+    updateId: data?.updateId,
+    correlationId: data?.correlationId
+  });
   recentSystemErrors.unshift(entry);
   if (recentSystemErrors.length > RECENT_SYSTEM_ERRORS_MAX) {
     recentSystemErrors.length = RECENT_SYSTEM_ERRORS_MAX;
@@ -5185,6 +5287,7 @@ function recordSystemError(action, error, data = {}, env = null) {
         list = [];
       }
       if (!Array.isArray(list)) list = [];
+      list = list.map(normalizeRecentSystemError).filter(Boolean);
       list.unshift(entry);
       await env.TOPIC_MAP.put(
         "sys:recent_errors",

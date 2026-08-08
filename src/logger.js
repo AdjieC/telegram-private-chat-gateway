@@ -1,18 +1,18 @@
 const REDACTED_KEYS = new Set([
-  'BOT_TOKEN',
-  'TURNSTILE_SECRET_KEY',
-  'WEBHOOK_SECRET',
-  'botToken',
-  'turnstileToken',
-  'webhookSecret',
-  'verifyCode',
-  'verifyId',
+  'bot_token',
+  'turnstile_secret_key',
+  'webhook_secret',
+  'bottoken',
+  'turnstiletoken',
+  'webhooksecret',
+  'verifycode',
+  'verifyid',
   'text',
   'caption',
 ]);
 
 function redactValue(key, value, seen) {
-  if (REDACTED_KEYS.has(key)) return '[REDACTED]';
+  if (REDACTED_KEYS.has(String(key).toLowerCase())) return '[REDACTED]';
   if (Array.isArray(value)) {
     return value.map(item => redactValue('', item, seen));
   }

@@ -25,6 +25,15 @@ export function policyReasonLabel(reason) {
   return POLICY_REASON_LABELS[reason] || String(reason || 'unknown');
 }
 
+const CALLBACK_BUSY_COPY = {
+  ban: '正在封禁…',
+  banok: '正在封禁…',
+  close: '正在关闭…',
+  closeok: '正在关闭…',
+  reset: '正在重置…',
+  resetok: '正在重置…',
+};
+
 export const USER_COPY = {
   /** 消息发送限流（minutes 由调用方按 RATE_LIMIT_WINDOW 换算，与验证限流口径一致，防文案漂移） */
   rateLimited(minutes) {
@@ -139,6 +148,9 @@ export const ADMIN_COPY = {
   cbNoUserTopic: '找不到用户话题',
   cbUnknownAction: '未知操作',
   cbUnknownCallback: '未知回调',
+  callbackBusy(action) {
+    return CALLBACK_BUSY_COPY[action] || '处理中…';
+  },
   cbOperationFailed: '操作失败，请重试',
   kvNotBoundNotes: '❌ KV 未绑定，无法搜索备注',
   d1NotBoundFind: '❌ D1 未绑定，无法搜索',

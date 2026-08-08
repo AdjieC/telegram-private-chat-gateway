@@ -98,8 +98,27 @@ describe('admin-ui-format', () => {
     const kb = buildUserActionKeyboard('3');
     const data = kb.inline_keyboard.flat().map(b => b.callback_data);
     expect(data).toContain('adm:u:closeask:3');
-    expect(data).toContain('adm:u:resetask:3');
+    expect(data).toContain('adm:u:trust:3');
     expect(data).toContain('adm:u:banask:3');
+  });
+
+  it('按用户当前状态只显示相反的状态操作', () => {
+    const kb = buildUserActionKeyboard('42', {
+      banned: true,
+      muted: true,
+      closed: true,
+      trusted: true,
+    });
+    const data = kb.inline_keyboard.flat().map(button => button.callback_data);
+
+    expect(data).toContain('adm:u:unban:42');
+    expect(data).toContain('adm:u:unmute:42');
+    expect(data).toContain('adm:u:open:42');
+    expect(data).toContain('adm:u:resetask:42');
+    expect(data).not.toContain('adm:u:banask:42');
+    expect(data).not.toContain('adm:u:mute:42');
+    expect(data).not.toContain('adm:u:closeask:42');
+    expect(data).not.toContain('adm:u:trust:42');
   });
 
   it('空活跃引导提示', () => {

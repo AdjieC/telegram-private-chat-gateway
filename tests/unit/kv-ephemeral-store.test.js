@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createMockKV } from '../helpers/mock-kv.js';
 import { createEphemeralStore } from '../../src/storage/kv-ephemeral-store.js';
 
@@ -42,6 +42,30 @@ describe('KV ephemeral store', () => {
       .resolves.toEqual({ allowed: true, remaining: 0 });
     await expect(store.checkRateLimit('1', 'message', 2, 60))
       .resolves.toEqual({ allowed: false, remaining: 0 });
+  });
+
+  it('KV 读取失败时不会伪造允许或成功状态', async () => {
+    const kv = {
+      get: vi.fn().mockRejectedValue(new Error('kv unavailable')),
+      put: vi.fn(),
+    };
+    const store = createEphemeralStore(kv);
+
+    await expect(store.checkRateLimit('42', 'message', 3, 60))
+      .rejects.toThrow('kv unavailable');
+    expect(kv.put).not.toHaveBeenCalled();
+  });
+
+  it('达到限额后不再写入 KV，并沿用窗口 TTL', async () => {
+    const kv = createMockKV();
+    const put = vi.spyOn(kv, 'put');
+    const store = createEphemeralStore(kv);
+
+    await store.checkRateLimit('42', 'message', 1, 60);
+    await store.checkRateLimit('42', 'message', 1, 60);
+
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalledWith('ratelimit:message:42', '1', { expirationTtl: 60 });
   });
 
   it('管理员和 Topic 健康缓存使用明确 TTL', async () => {

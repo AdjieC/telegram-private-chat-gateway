@@ -81,6 +81,10 @@ describe('user-copy', () => {
     expect(ADMIN_COPY.adminMenuTitle).toBe('管理后台');
     expect(ADMIN_COPY.cbInvalidOperation).toBe('无效操作');
     expect(ADMIN_COPY.userNotFound).toBe('用户不存在');
+    expect(ADMIN_COPY.callbackBusy('ban')).toBe('正在封禁…');
+    expect(ADMIN_COPY.callbackBusy('closeok')).toBe('正在关闭…');
+    expect(ADMIN_COPY.callbackBusy('reset')).toBe('正在重置…');
+    expect(ADMIN_COPY.callbackBusy('mute')).toBe('处理中…');
     expect(ADMIN_COPY.processed).toBe('已处理');
     expect(ADMIN_COPY.backendConnected).toBe('后台连接正常');
     expect(ADMIN_COPY.permissionExpired).toBe('权限已失效');

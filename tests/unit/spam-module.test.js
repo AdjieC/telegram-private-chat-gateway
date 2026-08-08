@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createSpamModule } from '../../src/spam.js';
+import { ADMIN_COPY } from '../../src/user-copy.js';
+import { escapeHtml } from '../../src/utils.js';
 
 /** 构造最小依赖的 spam 模块（可覆盖注入点便于单测） */
 function createModule(overrides = {}) {
@@ -176,6 +178,35 @@ describe('spam module', () => {
     expect(calls.length).toBe(1);
     expect(calls[0].body.text).toContain('发票');
     expect(calls[0].body.text).toContain('unknown_reason');
+  });
+
+  it('垃圾关键词告警动态内容只转义一次', async () => {
+    const calls = [];
+    const m = createModule({
+      config: {
+        SPAM_MESSAGE_HASH_TTL: 3600,
+        SPAM_REPEAT_MESSAGE_LIMIT: 3,
+        NEW_USER_LINK_BLOCK_SECONDS: 86400,
+        SPAM_NOTIFY_ADMIN: true,
+        SPAM_SILENCE_MODE: false,
+      },
+      escapeHtml,
+      adminCopy: ADMIN_COPY,
+      tgCall: async (env, method, body) => {
+        calls.push({ method, body });
+        return { ok: true };
+      },
+    });
+    const env = { TOPIC_MAP: {}, SUPERGROUP_ID: '-1001' };
+    await m.handleSpamMessage(env, 5, {}, {
+      isSpam: true,
+      reasons: ['keyword'],
+      details: { keyword: '<bad & keyword>' },
+    }, 77, { waitUntil: () => {} });
+
+    const text = calls[0].body.text;
+    expect(text).toContain('&lt;bad &amp; keyword&gt;');
+    expect(text).not.toContain('&amp;lt;');
   });
 
   it('handleSpamMessage 无话题时反查 user 记录并发送到对应话题', async () => {

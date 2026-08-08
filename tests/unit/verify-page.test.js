@@ -46,6 +46,8 @@ describe('verify-page', () => {
   it('状态区具备加载动画、无障碍与成功/错误样式', () => {
     expect(page).toContain('spinner');
     expect(page).toContain('aria-live');
+    expect(page).toContain('role="status"');
+    expect(page).toContain('aria-atomic="true"');
     expect(page).toContain('#status.success');
     expect(page).toContain('#status.error');
   });
@@ -67,6 +69,10 @@ describe('verify-page', () => {
     // 按钮不应初始隐藏：用户误入页面或验证失败时需要随时能返回 Telegram
     expect(page).not.toContain('#back-btn{display:none}');
     expect(page).not.toContain("btn.style.display = 'inline-block'");
+  });
+
+  it('返回 Telegram 按钮拥有键盘焦点可见反馈', () => {
+    expect(page).toContain('#back-btn:focus-visible');
   });
 
   it('Turnstile 错误只向用户展示友好提示，排障详情默认折叠', () => {

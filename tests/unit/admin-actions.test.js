@@ -4,13 +4,15 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAdminActions } from '../../src/admin-actions.js';
-import { SEP_LINE, formatUserStatusChips } from '../../src/admin-ui-format.js';
+import { SEP_LINE, formatTimeBoth, formatUserStatusChips } from '../../src/admin-ui-format.js';
+import { escapeHtml as escapeHtmlValue } from '../../src/utils.js';
 import { createD1Storage } from '../../src/storage/d1-storage.js';
 import { ensureMigrations } from '../../src/storage/migrations.js';
 import { createMockEnv } from '../helpers/mock-env.js';
 
 function createActions(overrides = {}) {
   const calls = [];
+  const keyboardStates = [];
   const env = createMockEnv();
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
   const config = {
@@ -31,8 +33,12 @@ function createActions(overrides = {}) {
     },
     escapeHtml: (s) => String(s),
     SEP_LINE,
+    formatTimeBoth,
     formatUserStatusChips,
-    buildUserActionKeyboard: () => ({ inline_keyboard: [] }),
+    buildUserActionKeyboard: (userId, state) => {
+      keyboardStates.push({ userId, state });
+      return { inline_keyboard: [] };
+    },
     createD1Storage,
     setPersistentTrust: vi.fn(async () => {}),
     getVerificationState: vi.fn(async () => null),
@@ -47,7 +53,7 @@ function createActions(overrides = {}) {
     recordSystemError: vi.fn(),
     ...overrides,
   });
-  return { actions, calls, env, logger, config };
+  return { actions, calls, env, logger, config, keyboardStates };
 }
 
 describe('admin-actions 管理动作', () => {
@@ -68,6 +74,28 @@ describe('admin-actions 管理动作', () => {
     expect(notify.body.text).toContain('封禁');
     const groupMsg = calls.find(c => c.method === 'sendMessage' && c.body.chat_id === env.SUPERGROUP_ID);
     expect(groupMsg.body.text).toContain('已封禁');
+  });
+
+  it('封禁通知失败的动态描述只转义一次', async () => {
+    const description = '<bad & reason>';
+    const { actions, calls, env } = createActions({
+      escapeHtml: escapeHtmlValue,
+      tgCall: async (_env, method, body) => {
+        calls.push({ method, body });
+        if (body.chat_id === 42) return { ok: false, description };
+        return { ok: true, result: { message_id: 1 } };
+      },
+    });
+
+    await actions.ban(env, 1, 42);
+
+    const failure = calls.find(call => (
+      call.method === 'sendMessage'
+      && call.body.chat_id === env.SUPERGROUP_ID
+      && String(call.body.text).includes('通知用户失败')
+    ));
+    expect(failure.body.text).toContain('&lt;bad &amp; reason&gt;');
+    expect(failure.body.text).not.toContain('&amp;lt;');
   });
 
   it('unban 清除封禁标记并恢复 D1 状态', async () => {
@@ -151,6 +179,95 @@ describe('admin-actions 管理动作', () => {
     expect(msg.body.text).toContain('用户面板');
     expect(msg.body.text).toContain('话题: 测试用户');
     expect(msg.body.text).toContain('状态正常');
+  });
+
+  it('panel 将当前用户状态传给动态操作键盘', async () => {
+    const { actions, env, keyboardStates } = createActions();
+    const db = createD1Storage(env.TG_BOT_DB);
+    await db.upsertUser({ userId: '42', status: 'banned', trustLevel: 'trusted' });
+    await env.TOPIC_MAP.put('banned:42', '1');
+    await env.TOPIC_MAP.put('muted:42', '1');
+    await env.TOPIC_MAP.put('user:42', JSON.stringify({ thread_id: 88, closed: true }));
+
+    await actions.panel(env, 88, 42);
+
+    expect(keyboardStates.at(-1)).toEqual({
+      userId: 42,
+      state: {
+        banned: true,
+        muted: true,
+        closed: true,
+        trusted: true,
+      },
+    });
+  });
+
+  it('info 将 legacy_trusted 视为已信任并显示重置操作', async () => {
+    const { actions, env, keyboardStates } = createActions({
+      getVerificationState: vi.fn(async () => ({ type: 'legacy_trusted' })),
+    });
+    env.TG_BOT_DB = undefined;
+    await env.TOPIC_MAP.put('user:42', JSON.stringify({ thread_id: 88, title: '测试用户' }));
+
+    await actions.info(env, 88, 42);
+
+    expect(keyboardStates.at(-1).state.trusted).toBe(true);
+  });
+
+  it('panel 并行启动互不依赖的状态读取', async () => {
+    const { actions, calls, env } = createActions();
+    const gatedKeys = new Set(['banned:42', 'muted:42', 'user:42', 'note:42']);
+    const started = [];
+    const releases = new Map();
+    const originalGet = env.TOPIC_MAP.get.bind(env.TOPIC_MAP);
+    env.TOPIC_MAP.get = vi.fn((key, options) => {
+      if (!gatedKeys.has(key)) return originalGet(key, options);
+      started.push(key);
+      return new Promise((resolve) => {
+        releases.set(key, () => resolve(null));
+      });
+    });
+
+    const pending = actions.panel(env, 88, 42);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(started).toEqual(expect.arrayContaining([...gatedKeys]));
+
+    for (const release of releases.values()) release();
+    await pending;
+
+    expect(calls.filter(call => call.method === 'sendMessage')).toHaveLength(1);
+  });
+
+  it('panel 的单项 KV 读取失败时仍发送可用面板', async () => {
+    const { actions, calls, env, keyboardStates } = createActions();
+    const originalGet = env.TOPIC_MAP.get.bind(env.TOPIC_MAP);
+    env.TOPIC_MAP.get = vi.fn((key, options) => {
+      if (key === 'banned:42' || key === 'note:42') {
+        return Promise.reject(new Error('KV unavailable'));
+      }
+      return originalGet(key, options);
+    });
+
+    await expect(actions.panel(env, 88, 42)).resolves.toBeUndefined();
+
+    const msg = calls.find(call => call.method === 'sendMessage');
+    expect(msg).toBeDefined();
+    expect(msg.body.text).not.toContain('undefined');
+    expect(keyboardStates.at(-1).state).toMatchObject({ banned: false, muted: false });
+  });
+
+  it('panel 的 D1 用户读取失败时仍发送面板', async () => {
+    const { actions, calls, env } = createActions();
+    env.TG_BOT_DB = {
+      prepare() {
+        throw new Error('D1 unavailable');
+      },
+    };
+
+    await expect(actions.panel(env, 88, 42)).resolves.toBeUndefined();
+
+    expect(calls.filter(call => call.method === 'sendMessage')).toHaveLength(1);
   });
 
   it('addWord/delWord 写 KV 词库并强制刷新缓存', async () => {

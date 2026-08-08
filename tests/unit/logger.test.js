@@ -55,6 +55,24 @@ describe('logger', () => {
     });
   });
 
+  it('大小写不同的敏感字段同样脱敏，不误伤普通诊断字段', () => {
+    const redacted = redactLogData({
+      Text: 'private',
+      CAPTION: 'secret caption',
+      VerifyID: 'challenge-id',
+      error: 'diagnostic error',
+      stack: 'diagnostic stack',
+    });
+
+    expect(redacted).toEqual({
+      Text: '[REDACTED]',
+      CAPTION: '[REDACTED]',
+      VerifyID: '[REDACTED]',
+      error: 'diagnostic error',
+      stack: 'diagnostic stack',
+    });
+  });
+
   it('onError 旁路收到错误且不影响主流程', () => {
     const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     const onError = vi.fn();
@@ -66,7 +84,12 @@ describe('logger', () => {
     expect(sink.error).toHaveBeenCalledOnce();
     expect(onError).toHaveBeenCalledWith('action_failed', error, { userId: 7 });
     const log = JSON.parse(sink.error.mock.calls[0][0]);
-    expect(log).toMatchObject({ level: 'ERROR', action: 'action_failed', error: 'boom' });
+    expect(log).toMatchObject({
+      level: 'ERROR',
+      action: 'action_failed',
+      error: 'boom',
+    });
+    expect(log.stack).toContain('Error: boom');
   });
 
   it('onError 抛错时不影响日志输出', () => {

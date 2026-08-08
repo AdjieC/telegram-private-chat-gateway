@@ -35,23 +35,41 @@ export function createAdminActions(deps) {
     logger,
   } = deps;
 
+  // 面板是诊断视图，单项存储读取失败时仍应尽量返回可用状态。
+  const readSafely = (work, fallback) => (
+    Promise.resolve().then(work).catch(() => fallback)
+  );
+
   async function panel(env, threadId, userId) {
-    const from = await resolveUserFromForTopic(env, userId, null);
+    const [resolvedFrom, ban, muted, rec, note, d1User, verification] = await Promise.all([
+      readSafely(
+        async () => (await resolveUserFromForTopic(env, userId, null)) || {},
+        {},
+      ),
+      readSafely(() => env.TOPIC_MAP.get(`banned:${userId}`), null),
+      readSafely(() => env.TOPIC_MAP.get(`muted:${userId}`), null),
+      readSafely(() => safeGetJSON(env, `user:${userId}`, null), null),
+      readSafely(() => env.TOPIC_MAP.get(`note:${userId}`), null),
+      readSafely(
+        () => env.TG_BOT_DB
+          ? createD1Storage(env.TG_BOT_DB).getUser(userId)
+          : null,
+        null,
+      ),
+      readSafely(
+        () => env.TG_BOT_DB ? null : getVerificationState(env, userId),
+        null,
+      ),
+    ]);
+    const from = resolvedFrom;
     const name = escapeHtml([from.first_name, from.last_name].filter(Boolean).join(' ').trim() || '未知');
     const un = from.username ? `@${escapeHtml(from.username)}` : '无用户名';
-    const ban = await env.TOPIC_MAP.get(`banned:${userId}`);
-    const muted = await env.TOPIC_MAP.get(`muted:${userId}`);
-    const rec = await safeGetJSON(env, `user:${userId}`, null);
-    const note = await env.TOPIC_MAP.get(`note:${userId}`);
     let lastMsgLine = '最近消息: 无';
-    let d1Status = null;
-    if (env.TG_BOT_DB) {
-      try {
-        const u = await createD1Storage(env.TG_BOT_DB).getUser(userId);
-        if (u?.lastMessageAt) lastMsgLine = `最近消息: ${formatTimeBoth(u.lastMessageAt)}`;
-        d1Status = u?.status || null;
-      } catch { /* ignore */ }
-    }
+    if (d1User?.lastMessageAt) lastMsgLine = `最近消息: ${formatTimeBoth(d1User.lastMessageAt)}`;
+    const d1Status = d1User?.status || null;
+    const trusted = d1User?.trustLevel === 'trusted'
+      || verification?.type === 'trusted'
+      || verification?.type === 'legacy_trusted';
     const text = [
       '🎛 <b>用户面板</b>',
       SEP_LINE,
@@ -73,7 +91,12 @@ export function createAdminActions(deps) {
       message_thread_id: threadId,
       text,
       parse_mode: 'HTML',
-      reply_markup: buildUserActionKeyboard(userId),
+      reply_markup: buildUserActionKeyboard(userId, {
+        banned: Boolean(ban),
+        muted: Boolean(muted),
+        closed: Boolean(rec?.closed),
+        trusted,
+      }),
     });
   }
 
@@ -461,8 +484,9 @@ export function createAdminActions(deps) {
       ? `<a href="https://t.me/${escapeHtml(from.username)}">打开主页 @${escapeHtml(from.username)}</a>`
       : `<a href="tg://user?id=${userId}">打开用户资料</a>`;
     const topicTitle = escapeHtml(userRec?.title || resolvedTitle || '未知');
+    const trusted = verifyStatus?.type === 'trusted' || verifyStatus?.type === 'legacy_trusted';
     const verifyText = verifyStatus
-      ? (verifyStatus.type === 'trusted' ? '🌟 永久信任' : '✅ 已验证')
+      ? (trusted ? '🌟 永久信任' : '✅ 已验证')
       : '❌ 未验证';
     const banText = banStatus ? '🚫 已封禁' : '✅ 正常';
     const muted = await env.TOPIC_MAP.get(`muted:${userId}`);
@@ -501,7 +525,12 @@ export function createAdminActions(deps) {
       text: lines,
       parse_mode: "HTML",
       disable_web_page_preview: true,
-      reply_markup: buildUserActionKeyboard(userId),
+      reply_markup: buildUserActionKeyboard(userId, {
+        banned: Boolean(banStatus),
+        muted: Boolean(muted),
+        closed: Boolean(userRec?.closed),
+        trusted,
+      }),
     });
   }
 

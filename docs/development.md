@@ -88,6 +88,10 @@ npm run test:integration
 - 管理命令 handlers（menu / stats 等，Mock Telegram）
 - Scheduled 保留期清理
 
+### 存储边界回归
+
+短期状态测试确认：KV 限流读取失败会向上暴露，达到限额后不会再次写入，并沿用调用方提供的窗口 TTL。D1 在同一绑定上复用 storage 实例，缺少绑定时实际读取会失败；管理员用户面板在单项 KV/D1 读取失败时仍发送一条降级面板。
+
 ### 全量测试
 
 ```bash

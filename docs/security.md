@@ -120,7 +120,7 @@ Telegram Webhook 只接受 `application/json`。所有公开 POST 请求体最�
 - 禁止外部表单提交
 - 禁止页面被其他站点 frame
 
-状态消息使用 `textContent`，不使用用户输入拼接 `innerHTML`。
+状态消息使用 `textContent`，不使用用户输入拼接 `innerHTML`。状态容器使用 `role="status"`、`aria-live="polite"` 和原子播报；返回 Telegram 入口保留 `:focus-visible` 焦点反馈，确保键盘用户在加载、失败和成功状态都能离开页面。
 
 ## Turnstile Callback 信任边界
 
@@ -145,7 +145,9 @@ Telegram Webhook 只接受 `application/json`。所有公开 POST 请求体最�
 - `verifyCode`、`verifyId`
 - `text`、`caption`
 
-错误日志保留错误消息和 stack 以便排障。调用者不得把完整 Request、完整 Telegram Update 或包含凭据的任意字符串作为错误消息写入日志。
+字段名匹配不区分大小写，以覆盖 Telegram Update、验证回调和第三方 SDK 常见的命名变体。标准错误日志仍保留 `error` 与 `stack` 以便排障；调用者不得把完整 Request、完整 Telegram Update 或包含凭据的字符串作为错误消息写入日志。
+
+recent-error 内存/KV 聚合只保留 `ts`、`action`、`error` 及可选 `userId`、`updateId`、`correlationId`，不会保存 `stack`、正文、caption、原始 Error 对象或未知字段。
 
 ## Secrets 管理
 

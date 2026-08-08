@@ -216,6 +216,29 @@ async function countKvPrefix(env, prefix) {
 }
 
 async function collectRecentErrors(env) {
+  const normalizeRecentError = (item) => {
+    if (!item || typeof item !== 'object') return null;
+    const text = (value, maxLength, fallback = '') => {
+      if (typeof value !== 'string' && typeof value !== 'number') return fallback;
+      return String(value).slice(0, maxLength);
+    };
+    const id = (value) => {
+      if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+      const valueText = String(value).slice(0, 120);
+      return valueText || undefined;
+    };
+    const timestamp = Number(item.ts);
+    const normalized = {
+      ts: Number.isFinite(timestamp) ? timestamp : 0,
+      action: text(item.action, 120, 'unknown'),
+      error: text(item.error, 500),
+    };
+    for (const key of ['userId', 'updateId', 'correlationId']) {
+      const value = id(item[key]);
+      if (value !== undefined) normalized[key] = value;
+    }
+    return normalized;
+  };
   let kvErrors = [];
   try {
     if (env?.TOPIC_MAP) {
@@ -226,8 +249,9 @@ async function collectRecentErrors(env) {
   if (!Array.isArray(kvErrors)) kvErrors = [];
   const merged = [];
   const seen = new Set();
-  for (const item of [...getRecentSystemErrors(), ...kvErrors]) {
-    if (!item || typeof item !== 'object') continue;
+  for (const rawItem of [...getRecentSystemErrors(), ...kvErrors]) {
+    const item = normalizeRecentError(rawItem);
+    if (!item) continue;
     const key = `${item.ts}|${item.action}|${item.error}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -463,8 +487,12 @@ async function renderErrorsPage(env) {
     for (const err of top) {
       const act = escapeHtml(err.action || '?');
       const msg = escapeHtml(String(err.error || '').slice(0, 140));
-      const uid = err.userId ? ` · uid ${escapeHtml(err.userId)}` : '';
-      lines.push(`🔴 <b>${act}</b>${uid}`);
+      const identifiers = [
+        err.userId ? `uid ${escapeHtml(err.userId)}` : '',
+        err.updateId ? `update ${escapeHtml(err.updateId)}` : '',
+        err.correlationId ? `corr ${escapeHtml(err.correlationId)}` : '',
+      ].filter(Boolean).join(' · ');
+      lines.push(`🔴 <b>${act}</b>${identifiers ? ` · ${identifiers}` : ''}`);
       lines.push(`   ${formatRelativeTime(err.ts)} · ${msg}`);
     }
     lines.push('');
@@ -1056,13 +1084,9 @@ async function handleAdminUiCallback(query, env, ctx) {
         return;
       }
       // 先应答再执行，避免 Telegram 转圈；文案不预告成功结果
-      const busyText = action === 'banok' || action === 'ban' ? '正在封禁…'
-        : action === 'closeok' || action === 'close' ? '正在关闭…'
-          : action === 'resetok' || action === 'reset' ? '正在重置…'
-            : '处理中…';
       await tgCall(env, 'answerCallbackQuery', {
         callback_query_id: query.id,
-        text: busyText,
+        text: ADMIN_COPY.callbackBusy(action),
       });
       await fn();
       // 状态变更后刷一次面板，方便管理员立刻看到最新状态
@@ -1075,7 +1099,11 @@ async function handleAdminUiCallback(query, env, ctx) {
       if (refreshPanel && typeof userActions.panel === 'function') {
         try {
           await userActions.panel(env, tid, userId);
-        } catch { /* 面板刷新失败不影响主操作 */ }
+        } catch (e) {
+          try {
+            recordSystemError('admin_panel_refresh_failed', e, { userId }, env);
+          } catch { /* 记录器异常不影响主操作 */ }
+        }
       }
       return;
     }

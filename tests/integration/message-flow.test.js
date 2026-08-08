@@ -288,6 +288,77 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     expect(mediaCall.body.media).toEqual([{ type: 'photo', media: 'photo-f1', caption: '' }]);
   });
 
+  it('媒体组新消息更新时间戳，旧 timer 不会提前发送', async () => {
+    vi.useFakeTimers();
+    const telegram = createTelegramMock();
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    const userId = 223;
+    await preVerify(env, userId);
+    await seedTopic(env, userId, 89);
+
+    const first = await send(messageUpdate(privateMessage(userId, 211, {
+      text: undefined,
+      media_group_id: 'mg-timestamp',
+      photo: [{ file_id: 'photo-first', width: 100, height: 100 }],
+    }), 8211), env, telegram);
+    await vi.advanceTimersByTimeAsync(2000);
+    const second = await send(messageUpdate(privateMessage(userId, 212, {
+      text: undefined,
+      media_group_id: 'mg-timestamp',
+      photo: [{ file_id: 'photo-second', width: 100, height: 100 }],
+    }), 8212), env, telegram);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(telegram.calls.some(call => call.method === 'sendMediaGroup')).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(2000);
+    await first.flush();
+    await second.flush();
+
+    const mediaCalls = telegram.calls.filter(call => call.method === 'sendMediaGroup');
+    expect(mediaCalls).toHaveLength(1);
+    expect(mediaCalls[0].body.media).toEqual([
+      { type: 'photo', media: 'photo-first', caption: '' },
+      { type: 'photo', media: 'photo-second', caption: '' },
+    ]);
+  });
+
+  it('媒体组无效项和发送失败都会清理 KV 且不重复发送', async () => {
+    vi.useFakeTimers();
+    const telegram = createTelegramMock({
+      sendMediaGroup: async () => ({
+        ok: false,
+        description: 'media group rejected',
+      }),
+    });
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    const userId = 224;
+    await preVerify(env, userId);
+    await seedTopic(env, userId, 90);
+
+    await send(messageUpdate(privateMessage(userId, 221, {
+      text: undefined,
+      media_group_id: 'mg-invalid',
+      photo: [{ width: 100, height: 100 }],
+    }), 8221), env, telegram);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await env.TOPIC_MAP.get('mg:user_to_admin:mg-invalid')).toBe(null);
+    expect(telegram.calls.some(call => call.method === 'sendMediaGroup')).toBe(false);
+
+    const failed = await send(messageUpdate(privateMessage(userId, 222, {
+      text: undefined,
+      media_group_id: 'mg-failed',
+      photo: [{ file_id: 'photo-failed', width: 100, height: 100 }],
+    }), 8222), env, telegram);
+    await vi.advanceTimersByTimeAsync(3000);
+    await failed.flush();
+
+    expect(await env.TOPIC_MAP.get('mg:user_to_admin:mg-failed')).toBe(null);
+    expect(telegram.calls.filter(call => call.method === 'sendMediaGroup')).toHaveLength(1);
+  });
+
   it('管理员在话题内回复 → copyMessage 直达用户并落 admin_to_user 映射', async () => {
     const telegram = createTelegramMock();
     vi.stubGlobal('fetch', telegram.fetchImpl);

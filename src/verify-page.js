@@ -34,6 +34,7 @@ h2{color:var(--text);margin-bottom:8px;font-size:20px;font-weight:600}
 p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
 #back-btn{display:inline-block;margin:20px auto 0;background:var(--accent);color:#fff;border:none;padding:13px 28px;border-radius:12px;font-size:16px;text-decoration:none;font-weight:600;transition:opacity .2s,transform .1s;box-shadow:0 2px 8px rgba(0,136,204,0.3)}
 #back-btn:hover{opacity:.92}
+#back-btn:focus-visible{outline:3px solid var(--text);outline-offset:3px}
 #back-btn:active{transform:scale(.98)}
 .footer{margin-top:22px;font-size:11px;color:var(--muted)}
 `;
@@ -69,7 +70,7 @@ const VERIFY_PAGE_HTML = `<!DOCTYPE html>
   <div class="turnstile-container">
     <div class="cf-turnstile" data-sitekey="{{SITE_KEY}}" data-callback="onTurnstileSuccess" data-error-callback="onTurnstileError"></div>
   </div>
-  <div id="status" aria-live="polite"></div>
+  <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
   <a id="back-btn" href="tg://resolve">📱 返回 Telegram</a>
   <details id="tech-wrap" hidden>
     <summary>技术详情（排障用）</summary>

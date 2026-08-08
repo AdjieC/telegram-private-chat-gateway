@@ -157,6 +157,22 @@ describe('D1 migrations', () => {
   });
 });
 
+describe('D1 storage 实例边界', () => {
+  it('同一 D1 绑定复用 storage，不同绑定保持隔离', () => {
+    const firstDb = createMockD1();
+    const secondDb = createMockD1();
+
+    expect(createD1Storage(firstDb)).toBe(createD1Storage(firstDb));
+    expect(createD1Storage(firstDb)).not.toBe(createD1Storage(secondDb));
+  });
+
+  it('缺少 D1 绑定时实际读取会明确失败', async () => {
+    const storage = createD1Storage(undefined);
+
+    await expect(storage.getUser('1')).rejects.toThrow();
+  });
+});
+
 describe('D1 管理员与审计', () => {
   it('保存管理员角色并记录不含消息正文的审计数据', async () => {
     const db = createMockD1();

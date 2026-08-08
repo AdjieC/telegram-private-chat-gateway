@@ -81,6 +81,39 @@ describe('Telegram Client', () => {
     expect(sleep).toHaveBeenCalledWith(5000);
   });
 
+  it('429 的 retry_after 超出总时限时不等待也不继续重试', async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const fetchImpl = vi.fn().mockResolvedValue(telegramResponse({
+      ok: false,
+      error_code: 429,
+      description: 'Too Many Requests',
+      parameters: { retry_after: 60 },
+    }, 429));
+    const client = createClient(fetchImpl, { sleep, maxTotalMs: 5000 });
+
+    await expect(client.call('sendMessage', {})).rejects.toMatchObject({
+      category: 'rate_limited',
+      attempts: 1,
+    });
+    expect(sleep).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('AbortError 分类为 timeout，并遵守网络重试上限', async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const timeout = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    const fetchImpl = vi.fn().mockRejectedValue(timeout);
+    const client = createClient(fetchImpl, { sleep });
+
+    await expect(client.call('sendMessage', {})).rejects.toMatchObject({
+      category: 'timeout',
+      retryable: true,
+      attempts: 3,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
   it('Telegram 5xx 最多重试两次', async () => {
     const fetchImpl = vi.fn().mockImplementation(async () => telegramResponse({
       ok: false,

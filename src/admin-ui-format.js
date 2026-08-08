@@ -79,26 +79,40 @@ export function formatUserStatusChips({ banned, muted, closed } = {}) {
   return chips.length ? chips.join(' · ') : '✅ 状态正常';
 }
 
-export function buildUserActionKeyboard(userId) {
+export function buildUserActionKeyboard(userId, state = {}) {
   const id = String(userId);
+  const {
+    banned = false,
+    muted = false,
+    closed = false,
+    trusted = false,
+  } = state;
+  const action = (active, activeButton, inactiveButton) => (
+    active ? activeButton : inactiveButton
+  );
+
   return {
     inline_keyboard: [
-      [
-        { text: '🚫 封禁', callback_data: `adm:u:banask:${id}` },
+      [action(
+        banned,
         { text: '✅ 解封', callback_data: `adm:u:unban:${id}` },
-      ],
-      [
-        { text: '🔒 关闭', callback_data: `adm:u:closeask:${id}` },
+        { text: '🚫 封禁', callback_data: `adm:u:banask:${id}` },
+      )],
+      [action(
+        closed,
         { text: '🔓 打开', callback_data: `adm:u:open:${id}` },
-      ],
-      [
-        { text: '🌟 信任', callback_data: `adm:u:trust:${id}` },
+        { text: '🔒 关闭', callback_data: `adm:u:closeask:${id}` },
+      )],
+      [action(
+        trusted,
         { text: '🔄 重置', callback_data: `adm:u:resetask:${id}` },
-      ],
-      [
-        { text: '🔇 静音', callback_data: `adm:u:mute:${id}` },
+        { text: '🌟 信任', callback_data: `adm:u:trust:${id}` },
+      )],
+      [action(
+        muted,
         { text: '🔊 取消静音', callback_data: `adm:u:unmute:${id}` },
-      ],
+        { text: '🔇 静音', callback_data: `adm:u:mute:${id}` },
+      )],
       [
         { text: '👤 资料', callback_data: `adm:u:info:${id}` },
         { text: '📝 看备注', callback_data: `adm:u:shownote:${id}` },

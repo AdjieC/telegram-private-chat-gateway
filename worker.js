@@ -82,7 +82,7 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.1.7';
+const GATEWAY_VERSION = '1.1.9';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -123,17 +123,48 @@ const Logger = createLogger({}, console, {
 
 // 进程内最近错误环形缓冲（isolate 生命周期内有效；并尽力写入 KV）
 const RECENT_SYSTEM_ERRORS_MAX = 12;
+const RECENT_ERROR_ACTION_MAX = 120;
+const RECENT_ERROR_TEXT_MAX = 500;
+const RECENT_ERROR_ID_MAX = 120;
 const recentSystemErrors = [];
 // 系统错误写入 KV 节流：错误风暴期间内存环形缓冲全量保留，KV 尽力写入降频，避免放大 KV 写入成本
 const systemErrorKvThrottle = createThrottle({ windowMs: 30000 });
 
-function recordSystemError(action, error, data = {}, env = null) {
+function recentErrorText(value, maxLength, fallback = '') {
+  if (typeof value !== 'string' && typeof value !== 'number') return fallback;
+  return String(value).slice(0, maxLength);
+}
+
+function recentErrorId(value) {
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+  const text = String(value).slice(0, RECENT_ERROR_ID_MAX);
+  return text || undefined;
+}
+
+function normalizeRecentSystemError(item) {
+  if (!item || typeof item !== 'object') return null;
+  const ts = Number(item.ts);
   const entry = {
-    ts: Date.now(),
-    action: String(action || 'unknown'),
-    error: error instanceof Error ? error.message : String(error ?? ''),
-    userId: data?.userId != null ? String(data.userId) : undefined,
+    ts: Number.isFinite(ts) ? ts : 0,
+    action: recentErrorText(item.action, RECENT_ERROR_ACTION_MAX, 'unknown'),
+    error: recentErrorText(item.error, RECENT_ERROR_TEXT_MAX),
   };
+  for (const key of ['userId', 'updateId', 'correlationId']) {
+    const value = recentErrorId(item[key]);
+    if (value !== undefined) entry[key] = value;
+  }
+  return entry;
+}
+
+function recordSystemError(action, error, data = {}, env = null) {
+  const entry = normalizeRecentSystemError({
+    ts: Date.now(),
+    action,
+    error: error instanceof Error ? error.message : String(error ?? ''),
+    userId: data?.userId,
+    updateId: data?.updateId,
+    correlationId: data?.correlationId,
+  });
   recentSystemErrors.unshift(entry);
   if (recentSystemErrors.length > RECENT_SYSTEM_ERRORS_MAX) {
     recentSystemErrors.length = RECENT_SYSTEM_ERRORS_MAX;
@@ -147,6 +178,7 @@ function recordSystemError(action, error, data = {}, env = null) {
           if (raw) list = JSON.parse(raw);
         } catch { list = []; }
         if (!Array.isArray(list)) list = [];
+        list = list.map(normalizeRecentSystemError).filter(Boolean);
         list.unshift(entry);
         await env.TOPIC_MAP.put(
           'sys:recent_errors',
