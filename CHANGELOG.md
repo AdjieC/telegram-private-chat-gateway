@@ -14,18 +14,30 @@
 
 - **`/help` 限流时长注入**：FAQ 中「请稍等约 1 分钟再发」改为按 `RATE_LIMIT_WINDOW` 动态生成，消除与配置漂移。
 - **限流文案明确「未送达」**：消息发送限流提示补充「本次消息未送达」，避免用户误以为消息已发出；验证限流文案与消息限流统一「约 X 分钟」口径。
+- **私聊帮助正文收拢**：`/help` 全文移入 `USER_COPY.helpText()`，无权限提示、话题未关联提示、清理确认、`/find` 导航等散落文案统一收拢到 `USER_COPY`/`ADMIN_COPY`，单一来源防漂移。
+- **二次确认文案去重**：封禁/关闭/重置的确认卡片与取消回执收敛到 `admin-ui-format.js`（`confirmBanText`/`confirmCloseText`/`confirmResetText`/`dangerCancelText`），文本命令（`/ban` `/close` `/reset`）与面板回调（`adm:u:*ask`）共用同一来源；两处清理确认文案统一为 `CLEANUP_CONFIRM_TEXT`。
+
+### 通知与友好度
+
+- **骚扰告警附带消息片段**：spam 管理员告警新增截断（120 字符、先截断后转义）的消息正文片段，管理员无需点开消息即可判断拦截是否合理。
+- **普通用户发管理指令有引导**：用户私聊发送已知管理指令时，每小时最多一次友好提示「该指令仅供管理员在超级群话题内使用」，不再静默丢弃。
 
 ### 性能与资源
 
 - **profile 快照写去重**：`saveUserProfileSnapshot` 增加同 isolate 指纹缓存（5 分钟 TTL），资料未变化时不再每条消息重复写 KV（原每私聊消息一次 30 天 TTL 写入）。
+- **媒体组过期清理概率化**：`flushExpiredMediaGroups` 由每条消息必扫改为按 `MEDIA_GROUP_CLEANUP_PROBABILITY`（默认 5%）抽样执行——媒体组键自带 60s TTL，孤儿键极少，避免每条消息都触发一次 KV list。
+- **入站统计异步写入**：`messages_in` 日统计由用户可见链路上的 `await` 改为 `ctx.waitUntil` 异步写入，消除转发前的 KV 读改写等待。
 
 ### 工程重构
 
 - **spam 检测抽取独立模块** `src/spam.js`：关键词/链接/重复检测、管理员告警与统计从 worker.js 迁出（含关键词与消息哈希缓存状态），worker.js 由 2075 行降至约 1885 行，行为不变。
 - **每小时通知模式抽取**：封禁/静音每小时提示收敛为 `sendHourlyNotice` 公共函数（统一错误日志）；「User」占位话题标题等魔法字符串常量化。
-- **依赖方向整理**：`escapeHtml` 定义上移纯函数基座 `src/utils.js`（admin-ui-format re-export 保持兼容），验证页不再反向依赖管理 UI 模块；`legacyApp.fetch` 移除对已 normalize env 的重复二次规范化。
+- **依赖方向整理**：`escapeHtml` 定义上移纯函数基座 `src/utils.js`（admin-ui-format re-export 保持兼容），验证页与验证模块不再反向依赖管理 UI 模块；`legacyApp.fetch` 移除对已 normalize env 的重复二次规范化。
+- **日志健壮性**：`logger` 引入 `safeStringify`（BigInt/循环引用等不可序列化值不再抛异常）、`errorMessage` 归一化（非 Error 错误值安全落日志），输出路径 try/catch 兜底，日志异常永不拖垮业务。
+- **问答键盘构建去重**：验证题目发送与答错追加提示共用 `buildQuizKeyboard` 纯函数，消除两处构造逻辑漂移；worker.js 清理 5 个未使用导入。
 - **日志卫生**：`admin_check_failed` 补充错误详情；`private_message_failed` 与 `admin_reply_failed` 补充 `updateId` 关联维度。
 - **管理面板微调**：用户跳转按钮超长用户名截断追加省略号；排行封禁/关闭徽标判断抽为 `statusBadge` 函数，消除嵌套三元。
+- **验证页可访问性**：新增 `prefers-reduced-motion` 减弱动态（关闭加载动画）、`format-detection` 关闭电话号码自动识别（防验证码误识别）、装饰图标对读屏器隐藏（`aria-hidden`）。
 
 ### 测试
 

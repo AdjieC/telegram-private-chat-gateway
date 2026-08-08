@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createLogger, redactLogData } from '../../src/logger.js';
+import { createLogger, redactLogData, safeStringify } from '../../src/logger.js';
 
 describe('logger', () => {
   it('脱敏凭据和完整消息内容', () => {
@@ -100,5 +100,46 @@ describe('logger', () => {
 
     expect(() => logger.error('x', new Error('y'))).not.toThrow();
     expect(sink.error).toHaveBeenCalledOnce();
+  });
+
+  it('日志含 BigInt 时不抛异常且不丢失输出', () => {
+    const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const logger = createLogger({}, sink);
+    expect(() => logger.info('bigint_event', { value: 9007199254740993n })).not.toThrow();
+    const raw = sink.info.mock.calls[0][0];
+    // safeStringify 兜底后至少输出一条可解析/可读的记录
+    expect(typeof raw).toBe('string');
+    expect(raw.length).toBeGreaterThan(0);
+  });
+
+  it('error 归一化：非 Error 值也能安全记录', () => {
+    const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const logger = createLogger({}, sink);
+
+    logger.error('string_error', '直接失败原因');
+    expect(JSON.parse(sink.error.mock.calls[0][0]).error).toBe('直接失败原因');
+
+    logger.error('object_error', { message: '对象内 message' });
+    expect(JSON.parse(sink.error.mock.calls[1][0]).error).toBe('对象内 message');
+
+    expect(() => logger.error('undefined_error', undefined)).not.toThrow();
+    expect(JSON.parse(sink.error.mock.calls[2][0]).error).toBe('unknown');
+  });
+
+  it('sink 不完整或抛错时日志路径不拖垮业务', () => {
+    const throwingSink = { error: () => { throw new Error('sink boom'); } };
+    const logger = createLogger({}, throwingSink);
+    expect(() => logger.error('x', new Error('y'))).not.toThrow();
+
+    const noMethodSink = {};
+    const logger2 = createLogger({}, noMethodSink);
+    expect(() => logger2.info('x', { a: 1 })).not.toThrow();
+  });
+
+  it('safeStringify 对不可序列化值兜底', () => {
+    expect(safeStringify({ a: 1 })).toBe('{"a":1}');
+    const circular = {};
+    circular.self = circular;
+    expect(safeStringify(circular)).toMatch(/Circular|Unserializable|\[/);
   });
 });

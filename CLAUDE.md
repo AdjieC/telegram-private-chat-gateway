@@ -139,51 +139,54 @@ npm run sync-docs
 | 函数 | 行号 | 职责 |
 |------|------|------|
 | `setBoundedCache` | L107 | — |
-| `recordSystemError` | L130 | — |
-| `ephemeralStore` | L237 | — |
-| `getVerificationState` | L241 | — |
-| `getStoredRules` | L257 | — |
-| `evaluateLegacyPolicy` | L267 | — |
-| `createLegacyConversationService` | L286 | — |
-| `parseIdAllowlistSet` | L299 | — |
-| `parseIdAllowlist` | L318 | — |
-| `idAllowlistHas` | L322 | — |
-| `createLegacyAdminService` | L326 | — |
-| `setPersistentTrust` | L336 | — |
-| `readLegacyKvUser` | L350 | 替代已删除的 createKVStorage 模块，仅保留 setPersistentTrust 需要的字段。 |
-| `saveLegacyMessageLink` | L362 | — |
-| `secureRandomInt` | L381 | 加密安全的随机数生成（拒绝采样消除取模偏差） |
-| `secureRandomId` | L394 | — |
-| `safeGetJSON` | L402 | 安全的 JSON 获取 |
-| `isSparseTelegramFrom` | L422 | 判断 Telegram from 是否缺少可用于话题标题的资料字段。 |
-| `profileFingerprint` | L438 | 用户资料极少变动，高频消息流可把「每消息一次 KV put」降为「资料变化时才写」。 |
-| `saveUserProfileSnapshot` | L442 | — |
-| `resolveUserFromForTopic` | L467 | 修复 Turnstile 验证通过后 fakeMsg 仅含 id 导致标题变成「User」的问题。 |
-| `getOrCreateUserTopicRec` | L531 | — |
-| `probeForumThread` | L618 | — |
-| `resetUserVerificationAndRequireReverify` | L674 | — |
-| `parseAdminIdAllowlist` | L700 | — |
-| `isAdminUser` | L705 | — |
-| `getAllKeys` | L744 | 获取所有 KV keys（处理分页；maxPages=0 表示不限制页数） |
-| `shuffleArray` | L760 | Fisher-Yates 洗牌算法 |
-| `checkRateLimit` | L770 | 速率限制检查 |
-| `sendHourlyNotice` | L1123 | 低频状态（封禁/静音）每小时最多提醒一次：避免用户反复发送时被重复打扰。 |
-| `handlePrivateMessage` | L1135 | — |
-| `forwardToTopic` | L1227 | 职责：前置检查 → 获取/创建话题 → 健康检查 → 执行转发 |
-| `checkThreadHealth` | L1323 | 话题健康检查 — 双层缓存（内存 + KV）+ 探测 |
-| `executeMessageForward` | L1382 | 执行消息转发 — forwardMessage → copyMessage 降级 + 重定向检测 |
-| `handleForwardRedirect` | L1426 | 处理转发重定向 — 删除误投消息 + 触发重建 |
-| `handleForwardFailure` | L1454 | 处理转发失败 — 话题丢失检测 + copyMessage 降级 + 通知管理员 |
-| `removeCommandBotSuffix` | L1507 | 例如：/listwords@callcosr_bot -> /listwords |
-| `handleAdminReply` | L1513 | — |
-| `isOwnerUser` | L1527 | --- 管理员命令处理函数 --- |
-| `resolveThreadIdForUser` | L1535 | — |
-| `_handleAdminReplyInner` | L1552 | 职责：权限检查 → 全局命令路由 → 用户反查 → 话题内指令路由 → 消息转发 |
-| `createTopic` | L1758 | 为话题建立 thread->user 映射，避免管理员命令时全量 KV 反查 |
-| `updateThreadStatus` | L1772 | 更新话题状态 |
-| `buildTopicTitle` | L1811 | 资料缺失时勿在调用方传入仅 { id } 的 from（会退化为 "User"）；应先 resolveUserFromForTopic。 |
-| `getTelegramClient` | L1840 | — |
-| `tgCall` | L1858 | 改进的 Telegram API 调用（添加超时和 HTTPS 强制） |
+| `recentErrorText` | L133 | — |
+| `recentErrorId` | L138 | — |
+| `normalizeRecentSystemError` | L144 | — |
+| `recordSystemError` | L159 | — |
+| `ephemeralStore` | L269 | — |
+| `getVerificationState` | L273 | — |
+| `getStoredRules` | L289 | — |
+| `evaluateLegacyPolicy` | L299 | — |
+| `createLegacyConversationService` | L318 | — |
+| `parseIdAllowlistSet` | L331 | — |
+| `parseIdAllowlist` | L350 | — |
+| `idAllowlistHas` | L354 | — |
+| `createLegacyAdminService` | L358 | — |
+| `setPersistentTrust` | L368 | — |
+| `readLegacyKvUser` | L382 | 替代已删除的 createKVStorage 模块，仅保留 setPersistentTrust 需要的字段。 |
+| `saveLegacyMessageLink` | L394 | — |
+| `secureRandomInt` | L413 | 加密安全的随机数生成（拒绝采样消除取模偏差） |
+| `secureRandomId` | L426 | — |
+| `safeGetJSON` | L434 | 安全的 JSON 获取 |
+| `isSparseTelegramFrom` | L454 | 判断 Telegram from 是否缺少可用于话题标题的资料字段。 |
+| `profileFingerprint` | L470 | 用户资料极少变动，高频消息流可把「每消息一次 KV put」降为「资料变化时才写」。 |
+| `saveUserProfileSnapshot` | L474 | — |
+| `resolveUserFromForTopic` | L499 | 修复 Turnstile 验证通过后 fakeMsg 仅含 id 导致标题变成「User」的问题。 |
+| `getOrCreateUserTopicRec` | L563 | — |
+| `probeForumThread` | L650 | — |
+| `resetUserVerificationAndRequireReverify` | L706 | — |
+| `parseAdminIdAllowlist` | L732 | — |
+| `isAdminUser` | L737 | — |
+| `getAllKeys` | L776 | 获取所有 KV keys（处理分页；maxPages=0 表示不限制页数） |
+| `shuffleArray` | L792 | Fisher-Yates 洗牌算法 |
+| `checkRateLimit` | L802 | 速率限制检查 |
+| `sendHourlyNotice` | L1141 | 低频状态（封禁/静音）每小时最多提醒一次：避免用户反复发送时被重复打扰。 |
+| `handlePrivateMessage` | L1153 | — |
+| `forwardToTopic` | L1255 | 职责：前置检查 → 获取/创建话题 → 健康检查 → 执行转发 |
+| `checkThreadHealth` | L1351 | 话题健康检查 — 双层缓存（内存 + KV）+ 探测 |
+| `executeMessageForward` | L1410 | 执行消息转发 — forwardMessage → copyMessage 降级 + 重定向检测 |
+| `handleForwardRedirect` | L1454 | 处理转发重定向 — 删除误投消息 + 触发重建 |
+| `handleForwardFailure` | L1482 | 处理转发失败 — 话题丢失检测 + copyMessage 降级 + 通知管理员 |
+| `removeCommandBotSuffix` | L1535 | 例如：/listwords@callcosr_bot -> /listwords |
+| `handleAdminReply` | L1541 | — |
+| `isOwnerUser` | L1555 | --- 管理员命令处理函数 --- |
+| `resolveThreadIdForUser` | L1563 | — |
+| `_handleAdminReplyInner` | L1580 | 职责：权限检查 → 全局命令路由 → 用户反查 → 话题内指令路由 → 消息转发 |
+| `createTopic` | L1786 | 为话题建立 thread->user 映射，避免管理员命令时全量 KV 反查 |
+| `updateThreadStatus` | L1800 | 更新话题状态 |
+| `buildTopicTitle` | L1839 | 资料缺失时勿在调用方传入仅 { id } 的 from（会退化为 "User"）；应先 resolveUserFromForTopic。 |
+| `getTelegramClient` | L1868 | — |
+| `tgCall` | L1886 | 改进的 Telegram API 调用（添加超时和 HTTPS 强制） |
 
 ### src/utils.js 纯函数
 
@@ -244,6 +247,7 @@ npm run sync-docs
 | `SPAM_SILENCE_MODE` |
 | `ALERT_THROTTLE_MS` |
 | `WORD_MAX_LENGTH` |
+| `MEDIA_GROUP_CLEANUP_PROBABILITY` |
 
 <!-- AUTO-GENERATED END: config -->
 

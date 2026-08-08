@@ -281,6 +281,39 @@ export function buildCleanupConfirmKeyboard() {
   };
 }
 
+// --- 危险操作二次确认文案（worker.js 文本命令与 adm:u:* 回调共用，避免两处漂移） ---
+
+/** 封禁确认卡片正文（userId 已做 HTML 转义，仅作展示） */
+export function confirmBanText(userId) {
+  return `⚠️ <b>确认封禁用户</b> <code>${escapeHtml(String(userId))}</code>？\n对方将收到通知且无法继续发消息。`;
+}
+
+/** 关闭对话确认卡片正文 */
+export function confirmCloseText(userId) {
+  return `⚠️ <b>确认关闭对话</b> <code>${escapeHtml(String(userId))}</code>？\n将关闭 Forum Topic，用户消息不再接入（可用打开恢复）。`;
+}
+
+/** 重置验证确认卡片正文 */
+export function confirmResetText(userId) {
+  return `⚠️ <b>确认重置验证</b> <code>${escapeHtml(String(userId))}</code>？\n将取消永久信任，用户下次需重新验证。`;
+}
+
+/** 清理无效话题确认卡片正文（/cleanup 文本命令与 adm:nav:cleanup_ask 共用） */
+export const CLEANUP_CONFIRM_TEXT =
+  '🧹 <b>确认清理无效话题？</b>\n将扫描并处理失效 Topic 映射，可能耗时。';
+
+/** 危险操作「取消」回执文案 */
+export const DANGER_CANCEL_TEXT = {
+  ban: '已取消封禁。',
+  close: '已取消关闭对话。',
+  reset: '已取消重置验证。',
+};
+
+/** 危险操作「取消」回执文案取值（未知操作回退通用文案） */
+export function dangerCancelText(action) {
+  return DANGER_CANCEL_TEXT[action] || '已取消操作。';
+}
+
 /** 看板空数据引导 */
 export function formatEmptyActivityHints() {
   return [

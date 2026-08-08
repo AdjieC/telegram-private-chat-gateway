@@ -4,8 +4,7 @@
  */
 import { VERIFY_COPY } from './verify-copy.js';
 import { USER_COPY } from './user-copy.js';
-import { escapeHtml } from './admin-ui-format.js';
-import { generateVerifyCode } from './utils.js';
+import { escapeHtml, generateVerifyCode } from './utils.js';
 
 // 验证请求速率限制窗口（秒）。文案中的「分钟数」由本常量换算，避免与提示语漂移。
 const VERIFY_RATE_WINDOW_SECONDS = 300;
@@ -28,6 +27,27 @@ export const LOCAL_QUESTIONS = [
   {"question": "太阳从哪个方向升起？", "correct_answer": "东方", "incorrect_answers": ["西方", "南方", "北方"]},
   {"question": "小狗发出的叫声通常是？", "correct_answer": "汪汪", "incorrect_answers": ["喵喵", "咩咩", "呱呱"]}
 ];
+
+/**
+ * 构建问答键盘：选项按钮按列数分组成 inline_keyboard。
+ * 发送题目与答错追加提示共用，避免两处构造逻辑漂移。
+ * @param {string[]} options - 选项文本列表
+ * @param {string} verifyId - 验证挑战 ID
+ * @param {number} [columns] - 每行按钮数（默认 2）
+ * @returns {{inline_keyboard: Array<Array<{text:string, callback_data:string}>>}}
+ */
+export function buildQuizKeyboard(options, verifyId, columns = 2) {
+  const buttons = (options || []).map((opt, idx) => ({
+    text: String(opt),
+    callback_data: `verify:${verifyId}:${idx}`,
+  }));
+  const cols = Math.max(1, Number(columns) || 2);
+  const keyboard = [];
+  for (let i = 0; i < buttons.length; i += cols) {
+    keyboard.push(buttons.slice(i, i + cols));
+  }
+  return { inline_keyboard: keyboard };
+}
 
 /**
  * @param {object} deps
@@ -247,22 +267,14 @@ export function createVerificationModule(deps) {
       pendingCount: state.pending_ids.length
     });
 
-    const buttons = challenge.options.map((opt, idx) => ({
-      text: opt,
-      callback_data: `verify:${verifyId}:${idx}`
-    }));
-
-    const keyboard = [];
-    for (let i = 0; i < buttons.length; i += config.BUTTON_COLUMNS) {
-      keyboard.push(buttons.slice(i, i + config.BUTTON_COLUMNS));
-    }
+    const keyboard = buildQuizKeyboard(challenge.options, verifyId, config.BUTTON_COLUMNS);
 
     // 发送验证题目
     const quizMsg = await tgCall(env, "sendMessage", {
       chat_id: userId,
       text: VERIFY_COPY.quizChallenge(escapeHtml(challenge.question)),
       parse_mode: "HTML",
-      reply_markup: { inline_keyboard: keyboard }
+      reply_markup: keyboard
     });
 
     // 发送失败时抛出异常，触发外层回滚（清理已写入的 chal、user_challenge）
@@ -382,20 +394,13 @@ export function createVerificationModule(deps) {
           const prev = String(query.message?.text || '');
           const hint = VERIFY_COPY.wrongAnswerHint.trim();
           if (prev && !prev.includes(hint) && query.message?.message_id) {
-            const buttons = (state.options || []).map((opt, idx) => ({
-              text: opt,
-              callback_data: `verify:${verifyId}:${idx}`
-            }));
-            const keyboard = [];
-            for (let i = 0; i < buttons.length; i += config.BUTTON_COLUMNS) {
-              keyboard.push(buttons.slice(i, i + config.BUTTON_COLUMNS));
-            }
+            const keyboard = buildQuizKeyboard(state.options, verifyId, config.BUTTON_COLUMNS);
             await tgCall(env, 'editMessageText', {
               chat_id: userId,
               message_id: query.message.message_id,
               text: `${prev}${VERIFY_COPY.wrongAnswerHint}`,
               parse_mode: 'HTML',
-              reply_markup: { inline_keyboard: keyboard },
+              reply_markup: keyboard,
             });
           }
         } catch { /* 编辑失败不影响 toast */ }

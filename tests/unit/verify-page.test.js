@@ -103,6 +103,21 @@ describe('verify-page', () => {
     expect(page).toContain('约 10 分钟');
     expect(page).not.toContain('{{VERIFY_EXPIRE_MINUTES}}');
   });
+
+  it('尊重系统减弱动态偏好：关闭动画且保留静态样式', () => {
+    expect(page).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(page).toContain('animation:none');
+    // 正常模式下动画仍保留
+    expect(page).toContain('@keyframes spin');
+  });
+
+  it('关闭移动端电话号码自动识别（防止验证码被误识别为电话）', () => {
+    expect(page).toContain('name="format-detection" content="telephone=no"');
+  });
+
+  it('装饰性图标对读屏器隐藏', () => {
+    expect(page).toContain('<div class="icon" aria-hidden="true">');
+  });
 });
 
 describe('verify-page error page', () => {

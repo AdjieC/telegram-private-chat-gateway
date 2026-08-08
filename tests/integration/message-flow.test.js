@@ -487,4 +487,25 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     expect(spamNotice.body.text).toContain('已发送到该用户话题');
     expect(await env.TOPIC_MAP.get('stats:spam:total')).toBe('1');
   });
+
+  it('普通用户私聊发管理指令只给一次性提示，且不转发消息', async () => {
+    const telegram = createTelegramMock();
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    const userId = 777;
+    await preVerify(env, userId);
+    await seedTopic(env, userId, 88);
+
+    // 第一次发 /menu：应收到友好提示，且不触发任何转发
+    await send(messageUpdate(privateMessage(userId, 910, { text: '/menu' }), 8801), env, telegram);
+    const hints = telegram.calls.filter(c => c.method === 'sendMessage' && c.body.chat_id === userId);
+    expect(hints).toHaveLength(1);
+    expect(hints[0].body.text).toContain('仅供管理员');
+    expect(telegram.calls.filter(c => c.method === 'forwardMessage')).toHaveLength(0);
+
+    // 同一小时内再次发送：节流生效，不再重复打扰
+    await send(messageUpdate(privateMessage(userId, 911, { text: '/sysinfo' }), 8802), env, telegram);
+    const hintsAfter = telegram.calls.filter(c => c.method === 'sendMessage' && c.body.chat_id === userId);
+    expect(hintsAfter).toHaveLength(1);
+  });
 });

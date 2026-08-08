@@ -30,6 +30,9 @@ describe('user-copy', () => {
     expect(spam).toContain('/find UID');
     expect(ADMIN_COPY.spamIntercepted('1', '🔑 x', { threadId: 88 })).toContain('/panel');
     expect(ADMIN_COPY.spamIntercepted('1', '🔑 x', { threadId: 88 })).not.toContain('/find');
+    // 附带消息片段时展示内容标签；未提供时不出现空行噪音
+    expect(ADMIN_COPY.spamIntercepted('1', '🔑 x', { snippet: '加微信赚钱' })).toContain('📄 内容: <code>加微信赚钱</code>');
+    expect(ADMIN_COPY.spamIntercepted('1', '🔑 x')).not.toContain('📄 内容');
     const fwd = ADMIN_COPY.forwardTotalFail('1', '2', 'a', 'b');
     expect(fwd).toMatch(/转发完全失败/);
     expect(ADMIN_COPY.wordUsageAdd).toMatch(/addword/);
@@ -93,5 +96,23 @@ describe('user-copy', () => {
     expect(ADMIN_COPY.cleanupScanning).toContain('<b>');
     expect(ADMIN_COPY.cleanupFailed('x')).toContain('<code>');
     expect(`${ADMIN_COPY.cleanupBusy}${ADMIN_COPY.cleanupScanning}${ADMIN_COPY.cleanupFailed('x')}`).not.toMatch(/\*\*|`/);
+  });
+
+  it('帮助正文按限流分钟数注入，避免文案与配置漂移', () => {
+    const help = USER_COPY.helpText(1);
+    expect(help).toContain('私聊网关');
+    expect(help).toContain('约 1 分钟');
+    expect(USER_COPY.helpText(5)).toContain('约 5 分钟');
+    expect(help).not.toContain('undefined');
+  });
+
+  it('管理提示文案收拢齐全', () => {
+    expect(ADMIN_COPY.noPermissionHint).toContain('无管理权限');
+    expect(ADMIN_COPY.threadNotLinked).toContain('未关联用户');
+    expect(ADMIN_COPY.threadNotLinkedGlobal).toContain('/sysinfo');
+    expect(ADMIN_COPY.findNavHelp).toContain('/find');
+    expect(ADMIN_COPY.listWordsUnavailable).toContain('/listwords');
+    expect(ADMIN_COPY.syncCommandsDenied).toContain('OWNER_IDS');
+    expect(ADMIN_COPY.commandsSynced(23)).toContain('23');
   });
 });

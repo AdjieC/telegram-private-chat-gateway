@@ -37,6 +37,10 @@ p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
 #back-btn:focus-visible{outline:3px solid var(--text);outline-offset:3px}
 #back-btn:active{transform:scale(.98)}
 .footer{margin-top:22px;font-size:11px;color:var(--muted)}
+@media (prefers-reduced-motion: reduce){
+  *{animation:none!important;transition:none!important}
+  #back-btn:active{transform:none}
+}
 `;
 
 const VERIFY_PAGE_HTML = `<!DOCTYPE html>
@@ -47,6 +51,7 @@ const VERIFY_PAGE_HTML = `<!DOCTYPE html>
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<meta name="format-detection" content="telephone=no">
 <title>人机验证</title>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <style>${VERIFY_SHARED_STYLE}
@@ -64,7 +69,7 @@ const VERIFY_PAGE_HTML = `<!DOCTYPE html>
 </head>
 <body>
 <div class="card">
-  <div class="icon">🛡️</div>
+  <div class="icon" aria-hidden="true">🛡️</div>
   <h2>人机验证</h2>
   <p class="desc">请完成下方验证以确认您不是机器人。<br>验证通过后您的消息将自动送达。</p>
   <div class="turnstile-container">
@@ -238,6 +243,7 @@ const VERIFY_ERROR_PAGE_HTML = `<!DOCTYPE html>
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<meta name="format-detection" content="telephone=no">
 <title>人机验证</title>
 <style>${VERIFY_SHARED_STYLE}
 .error{display:inline-flex;align-items:center;gap:7px;font-size:13px;line-height:1.5;color:var(--error-text);margin-top:14px;padding:9px 16px;border-radius:999px;background:var(--error-bg);border:1px solid transparent}
@@ -245,7 +251,7 @@ const VERIFY_ERROR_PAGE_HTML = `<!DOCTYPE html>
 </head>
 <body>
 <div class="card">
-  <div class="icon">⚠️</div>
+  <div class="icon" aria-hidden="true">⚠️</div>
   <h2>验证不可用</h2>
   <p class="desc">{{DESC}}</p>
   <div class="error">❌ 无法继续验证</div>

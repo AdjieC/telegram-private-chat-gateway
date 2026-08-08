@@ -48,6 +48,9 @@ export const USER_COPY = {
     '🚫 您的消息包含违规内容，已被拦截。请修改后重新发送。',
   conversationClosed:
     '🚫 当前对话已被管理员关闭。如需继续，请等待管理员重新打开。',
+  /** 普通用户私聊发送管理指令时的一次性提示（每小时节流，避免反复打扰） */
+  adminCommandHint:
+    'ℹ️ 该指令仅供管理员在超级群话题内使用。如需联系管理员，直接发送消息即可。',
   pendingDelivered(count) {
     return `📩 刚才的 <b>${count}</b> 条消息已帮您送达管理员。`;
   },
@@ -60,10 +63,31 @@ export const USER_COPY = {
   adminEditedReply(original, updated) {
     return `✏️ 管理员修改了回复\n原内容：${truncateText(original)}\n新内容：${truncateText(updated)}`;
   },
+  /** 私聊 /help 帮助正文（rateLimitMinutes 由调用方按 RATE_LIMIT_WINDOW 注入，防文案与配置漂移） */
+  helpText(rateLimitMinutes) {
+    return [
+      '👋 <b>私聊网关</b>',
+      '',
+      '直接发送文字 / 图片 / 文件即可联系管理员。',
+      '',
+      '<b>常见问题</b>',
+      '• 提示「人机验证」— 点按钮答题或打开网页完成，答对后消息自动送达',
+      '• 验证链接过期 — 重新发一条消息即可获取新链接',
+      '• 提示「包含违规内容」— 修改措辞后重新发送',
+      `• 提示「发送过于频繁」— 本次消息未送达，请稍等约 ${rateLimitMinutes} 分钟再发`,
+      '• 被静音或封禁 — 会收到单独通知，请等待管理员处理',
+      '',
+      '<b>命令</b>',
+      '• /start — 开始或重新验证',
+      '• /help — 本说明',
+      '',
+      '<i>请勿在此使用管理指令；管理操作仅在超级群话题内有效。</i>',
+    ].join('\n');
+  },
 };
 
 export const ADMIN_COPY = {
-  spamIntercepted(userId, reasonText, { threadId } = {}) {
+  spamIntercepted(userId, reasonText, { threadId, snippet } = {}) {
     const locateHint = threadId
       ? '已发送到该用户话题，可在本话题内使用 <b>/panel</b> 操作。'
       : '该用户尚无话题，可用 <code>/find UID</code> 定位。';
@@ -72,6 +96,7 @@ export const ADMIN_COPY = {
       '',
       `👤 用户: <code>${userId}</code>`,
       reasonText,
+      ...(snippet ? ['', `📄 内容: <code>${snippet}</code>`] : []),
       '',
       `📝 消息已拦截。${locateHint}`,
     ].join('\n');
@@ -167,4 +192,25 @@ export const ADMIN_COPY = {
   processed: '已处理',
   backendConnected: '后台连接正常',
   permissionExpired: '权限已失效',
+  /** 群内非管理员执行管理命令时的提示 */
+  noPermissionHint: '⛔ 无管理权限：仅群主/管理员或 ADMIN_IDS 可使用该指令。',
+  /** 话题内未反查到用户（可定位） */
+  threadNotLinked: '⚠️ 当前话题未关联用户（请在对应用户 Forum Topic 内执行，或使用 /find）。',
+  /** 话题内未反查到用户（不可定位时的全局命令提示） */
+  threadNotLinkedGlobal: '⚠️ 当前话题未关联用户。全局命令：/sysinfo /stats /rank /find /notes /help',
+  /** /find 导航说明卡片（adm:nav:find 与文本命令共用） */
+  findNavHelp: [
+    '🔍 <b>查找用户</b>',
+    '用法: <code>/find UID或用户名或姓名</code>',
+    '备注: <code>/notes 关键词</code>',
+    '活跃: <code>/rank</code>',
+  ].join('\n'),
+  /** listwords 回调不可用时的兜底提示 */
+  listWordsUnavailable: '请使用命令 <code>/listwords</code>',
+  /** 非 Owner 尝试同步 Bot 命令菜单 */
+  syncCommandsDenied: '❌ 仅 <code>OWNER_IDS</code> 可同步 Bot 命令菜单',
+  /** 命令菜单同步成功回执（count 为同步条数） */
+  commandsSynced(count) {
+    return `✅ 已同步 <b>${count}</b> 条命令到 Bot 菜单\n\n<i>客户端可能需重启或等几分钟后刷新菜单</i>`;
+  },
 };

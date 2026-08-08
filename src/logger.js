@@ -35,6 +35,41 @@ export function redactLogData(data = {}) {
   return redactValue('', data, new WeakSet());
 }
 
+/**
+ * 将任意数据序列化为 JSON 字符串。
+ * JSON.stringify 遇 BigInt 会抛 TypeError、遇函数/undefined 会丢字段，
+ * 日志路径不允许因序列化失败拖垮调用方，故兜底为安全字符串。
+ */
+export function safeStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    try {
+      return String(value);
+    } catch {
+      return '[Unserializable]';
+    }
+  }
+}
+
+/** 归一化错误值：Error 取 message，字符串原样，其余对象取 message 或安全字符串 */
+function errorMessage(value) {
+  if (value instanceof Error) return value.message;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value !== null && typeof value === 'object') {
+    const message = value.message;
+    if (typeof message === 'string') return message;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '[Unserializable Error]';
+    }
+  }
+  if (value === undefined || value === null) return 'unknown';
+  return String(value);
+}
+
 export function createLogger(baseContext = {}, sink = console, options = {}) {
   const { onError } = options;
 
@@ -47,8 +82,13 @@ export function createLogger(baseContext = {}, sink = console, options = {}) {
       ...baseContext,
       ...data,
     });
-    const output = JSON.stringify(log);
-    (sink[method] || sink.log).call(sink, output);
+    const output = safeStringify(log);
+    try {
+      const target = typeof sink?.[method] === 'function' ? sink[method] : sink?.log;
+      if (typeof target === 'function') target.call(sink, output);
+    } catch {
+      // 日志输出异常不得影响业务主流程
+    }
   }
 
   return {
@@ -60,7 +100,7 @@ export function createLogger(baseContext = {}, sink = console, options = {}) {
     },
     error(action, error, data = {}) {
       emit('ERROR', action, {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
         stack: error instanceof Error ? error.stack : undefined,
         ...data,
       });

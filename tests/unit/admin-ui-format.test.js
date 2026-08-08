@@ -15,6 +15,11 @@ import {
   formatTimeBoth,
   SEP_LINE,
   formatUserStatusChips,
+  confirmBanText,
+  confirmCloseText,
+  confirmResetText,
+  dangerCancelText,
+  CLEANUP_CONFIRM_TEXT,
 } from '../../src/admin-ui-format.js';
 
 describe('admin-ui-format', () => {
@@ -156,5 +161,32 @@ describe('admin-ui-format', () => {
     expect(formatUserStatusChips({ muted: true, closed: true })).toContain('已关闭');
     expect(formatUserStatusChips({})).toBe('✅ 状态正常');
     expect(formatUserStatusChips({ banned: false, muted: false, closed: false })).toBe('✅ 状态正常');
+  });
+
+  it('危险操作确认文案含转义后的 UID 且三操作互不串词', () => {
+    const ban = confirmBanText('12<34>');
+    expect(ban).toContain('确认封禁用户');
+    expect(ban).toContain('&lt;34&gt;');
+    expect(ban).not.toContain('关闭对话');
+
+    const close = confirmCloseText(99);
+    expect(close).toContain('确认关闭对话');
+    expect(close).not.toContain('封禁');
+
+    const reset = confirmResetText(99);
+    expect(reset).toContain('确认重置验证');
+    expect(reset).not.toContain('封禁');
+  });
+
+  it('取消回执文案按操作区分，未知操作回退通用文案', () => {
+    expect(dangerCancelText('ban')).toBe('已取消封禁。');
+    expect(dangerCancelText('close')).toBe('已取消关闭对话。');
+    expect(dangerCancelText('reset')).toBe('已取消重置验证。');
+    expect(dangerCancelText('unknown')).toBe('已取消操作。');
+  });
+
+  it('清理确认文案统一为同一常量（文本命令与回调共用）', () => {
+    expect(CLEANUP_CONFIRM_TEXT).toContain('确认清理无效话题');
+    expect(CLEANUP_CONFIRM_TEXT).toContain('失效 Topic 映射');
   });
 });

@@ -30,6 +30,11 @@ import {
   buildCloseConfirmKeyboard,
   buildResetConfirmKeyboard,
   buildCleanupConfirmKeyboard,
+  confirmBanText,
+  confirmCloseText,
+  confirmResetText,
+  dangerCancelText,
+  CLEANUP_CONFIRM_TEXT,
   formatEmptyActivityHints,
 } from './admin-ui-format.js';
 import { bumpDailyStat, getDailyStats, getRecentDailySeries } from './daily-stats.js';
@@ -816,7 +821,7 @@ async function handleSyncCommandsCommand(env, threadId, senderId) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: '❌ 仅 <code>OWNER_IDS</code> 可同步 Bot 命令菜单',
+      text: ADMIN_COPY.syncCommandsDenied,
       parse_mode: 'HTML',
     });
     return;
@@ -850,7 +855,7 @@ async function handleSyncCommandsCommand(env, threadId, senderId) {
     chat_id: env.SUPERGROUP_ID,
     message_thread_id: threadId,
     text: res?.ok
-      ? `✅ 已同步 <b>${commands.length}</b> 条命令到 Bot 菜单\n\n<i>客户端可能需重启或等几分钟后刷新菜单</i>`
+      ? ADMIN_COPY.commandsSynced(commands.length)
       : `❌ 同步失败: ${escapeHtml(res?.description || 'unknown')}`,
     parse_mode: 'HTML',
   });
@@ -894,7 +899,7 @@ async function handleAdminUiCallback(query, env, ctx) {
         await tgCall(env, 'sendMessage', {
           chat_id: env.SUPERGROUP_ID,
           message_thread_id: threadId,
-          text: '🧹 <b>确认清理无效话题？</b>\n将扫描并处理失效 Topic 映射，可能耗时。',
+          text: CLEANUP_CONFIRM_TEXT,
           parse_mode: 'HTML',
           reply_markup: buildCleanupConfirmKeyboard(),
         });
@@ -930,12 +935,7 @@ async function handleAdminUiCallback(query, env, ctx) {
           await tgCall(env, 'sendMessage', {
             chat_id: env.SUPERGROUP_ID,
             message_thread_id: threadId,
-            text: [
-              '🔍 <b>查找用户</b>',
-              '用法: <code>/find UID或用户名或姓名</code>',
-              '备注: <code>/notes 关键词</code>',
-              '活跃: <code>/rank</code>',
-            ].join('\n'),
+            text: ADMIN_COPY.findNavHelp,
             parse_mode: 'HTML',
             reply_markup: {
               inline_keyboard: [[
@@ -954,7 +954,7 @@ async function handleAdminUiCallback(query, env, ctx) {
           return tgCall(env, 'sendMessage', {
             chat_id: env.SUPERGROUP_ID,
             message_thread_id: threadId,
-            text: '请使用命令 <code>/listwords</code>',
+            text: ADMIN_COPY.listWordsUnavailable,
             parse_mode: 'HTML',
           });
         },
@@ -1022,35 +1022,35 @@ async function handleAdminUiCallback(query, env, ctx) {
 
       if (action === 'banask') {
         await confirmAsk(
-          `⚠️ <b>确认封禁用户</b> <code>${escapeHtml(userId)}</code>？\n对方将收到通知且无法继续发消息。`,
+          confirmBanText(userId),
           buildBanConfirmKeyboard(userId),
         );
         return;
       }
       if (action === 'bancancel') {
-        await confirmCancel('已取消封禁。');
+        await confirmCancel(dangerCancelText('ban'));
         return;
       }
       if (action === 'closeask') {
         await confirmAsk(
-          `⚠️ <b>确认关闭对话</b> <code>${escapeHtml(userId)}</code>？\n将关闭 Forum Topic，用户消息不再接入（可用打开恢复）。`,
+          confirmCloseText(userId),
           buildCloseConfirmKeyboard(userId),
         );
         return;
       }
       if (action === 'closecancel') {
-        await confirmCancel('已取消关闭对话。');
+        await confirmCancel(dangerCancelText('close'));
         return;
       }
       if (action === 'resetask') {
         await confirmAsk(
-          `⚠️ <b>确认重置验证</b> <code>${escapeHtml(userId)}</code>？\n将取消永久信任，用户下次需重新验证。`,
+          confirmResetText(userId),
           buildResetConfirmKeyboard(userId),
         );
         return;
       }
       if (action === 'resetcancel') {
-        await confirmCancel('已取消重置验证。');
+        await confirmCancel(dangerCancelText('reset'));
         return;
       }
       if (action === 'shownote') {

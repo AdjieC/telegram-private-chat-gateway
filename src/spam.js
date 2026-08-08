@@ -8,11 +8,15 @@ import {
   computeMessageHash,
   containsLink,
   detectSpamKeywords,
+  extractMessageText,
   parseSpamKeywords,
 } from './utils.js';
 
 /** 消息哈希去重缓存上限（同 isolate 内存有界，防无限增长） */
 const MESSAGE_HASH_MAX_ENTRIES = 5000;
+
+/** 管理员告警附带的截断消息片段上限（仅正文，不含发送者资料） */
+const SPAM_SNIPPET_MAX_LENGTH = 120;
 
 /**
  * @param {object} deps
@@ -211,11 +215,20 @@ export function createSpamModule(deps) {
         }
       }).join('\n');
 
+      // 附带截断的消息正文片段（先截断再转义，避免截断 HTML 实体），
+      // 让管理员无需点开消息即可判断拦截是否合理
+      const rawText = extractMessageText(msg).trim();
+      const snippet = rawText
+        ? escapeHtml(rawText.length > SPAM_SNIPPET_MAX_LENGTH
+          ? `${rawText.slice(0, SPAM_SNIPPET_MAX_LENGTH)}…`
+          : rawText)
+        : '';
+
       const body = notifyThreadId ? { message_thread_id: notifyThreadId } : {};
 
       await tgCall(env, 'sendMessage', {
         chat_id: env.SUPERGROUP_ID,
-        text: adminCopy.spamIntercepted(escapeHtml(String(userId)), reasonText, { threadId: notifyThreadId }),
+        text: adminCopy.spamIntercepted(escapeHtml(String(userId)), reasonText, { threadId: notifyThreadId, snippet }),
         parse_mode: 'HTML',
         ...body,
       });

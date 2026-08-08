@@ -27,20 +27,19 @@ import {
   buildCloseConfirmKeyboard,
   buildResetConfirmKeyboard,
   buildCleanupConfirmKeyboard,
+  confirmBanText,
+  confirmCloseText,
+  confirmResetText,
+  CLEANUP_CONFIRM_TEXT,
 } from './src/admin-ui-format.js';
 import { createAdminCommandHandlers } from './src/admin-commands.js';
 import { VERIFY_COPY } from './src/verify-copy.js';
 import { renderVerifyPage, renderVerifyErrorPage } from './src/verify-page.js';
 import { USER_COPY, ADMIN_COPY } from './src/user-copy.js';
 import {
-  containsLink,
-  buildSpamCheckText,
-  detectSpamKeywords,
-  computeMessageHash,
   normalizeTgDescription,
   isTopicMissingOrDeleted,
   isTestMessageInvalid,
-  parseSpamKeywords,
   cleanProfileText,
   createThrottle,
 } from './src/utils.js';
@@ -78,11 +77,12 @@ const CONFIG = {
   SPAM_NOTIFY_ADMIN: true,              // 是否通知管理员有骚扰消息
   SPAM_SILENCE_MODE: false,             // 静默丢弃模式（不通知管理员）
   ALERT_THROTTLE_MS: 60000,             // 管理告警节流：同类型 60 秒内最多一条
-  WORD_MAX_LENGTH: 50                   // /addword 单词长度上限，防 KV 词库被超长输入污染
+  WORD_MAX_LENGTH: 50,                  // /addword 单词长度上限，防 KV 词库被超长输入污染
+  MEDIA_GROUP_CLEANUP_PROBABILITY: 0.05 // 过期媒体组扫描概率：键自带 60s TTL，孤儿键极少，无需每条消息全量扫 KV
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.1.9';
+const GATEWAY_VERSION = '1.2.0';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -1059,11 +1059,14 @@ const legacyApp = {
     const msg = update.message;
     if (!msg) return new Response("OK");
 
-    const now = Date.now();
-    ctx.waitUntil(mediaGroup.flushExpiredMediaGroups(normalizedEnv, now));
+    // 概率性清理过期媒体组：媒体组键自带 60s TTL，孤儿键极少，
+    // 按 MEDIA_GROUP_CLEANUP_PROBABILITY 抽样执行，避免每条消息都触发一次 KV list
+    if (Math.random() < CONFIG.MEDIA_GROUP_CLEANUP_PROBABILITY) {
+      ctx.waitUntil(mediaGroup.flushExpiredMediaGroups(normalizedEnv, Date.now()));
+    }
     // 概率性清理过期缓存（1% 请求触发一次，分摊成本）
     if (Math.random() < 0.01) {
-      pruneMessageHashCache(now);
+      pruneMessageHashCache(Date.now());
     }
 
     if (msg.chat && msg.chat.type === "private") {
@@ -1075,24 +1078,7 @@ const legacyApp = {
           const rateLimitMinutes = Math.max(1, Math.round(CONFIG.RATE_LIMIT_WINDOW / 60));
           await tgCall(normalizedEnv, 'sendMessage', {
             chat_id: msg.chat.id,
-            text: [
-              '👋 <b>私聊网关</b>',
-              '',
-              '直接发送文字 / 图片 / 文件即可联系管理员。',
-              '',
-              '<b>常见问题</b>',
-              '• 提示「人机验证」— 点按钮答题或打开网页完成，答对后消息自动送达',
-              '• 验证链接过期 — 重新发一条消息即可获取新链接',
-              '• 提示「包含违规内容」— 修改措辞后重新发送',
-              '• 提示「发送过于频繁」— 本次消息未送达，请稍等约 ' + rateLimitMinutes + ' 分钟再发',
-              '• 被静音或封禁 — 会收到单独通知，请等待管理员处理',
-              '',
-              '<b>命令</b>',
-              '• /start — 开始或重新验证',
-              '• /help — 本说明',
-              '',
-              '<i>请勿在此使用管理指令；管理操作仅在超级群话题内有效。</i>',
-            ].join('\n'),
+            text: USER_COPY.helpText(rateLimitMinutes),
             parse_mode: 'HTML',
           });
           return new Response('OK');
@@ -1181,8 +1167,13 @@ async function handlePrivateMessage(msg, env, ctx) {
     return;
   }
 
-  // 拦截普通用户发送的指令（/help 已在入口处理）
+  // 拦截普通用户发送的指令（/help 已在入口处理）。
+  // 已知管理指令给一次性（每小时节流）友好提示，避免用户误发指令后毫无反馈
   if (msg.text && msg.text.startsWith("/") && msg.text.trim() !== "/start") {
+    const command = removeCommandBotSuffix(msg.text.trim());
+    if (/^\/(help|menu|dashboard|sysinfo|system|status|stats|rank|activity|heat|whoami|find|notes|cleanup|listwords|addword|delword|panel|info|ban|unban|close|open|mute|unmute|trust|reset|note|synccommands)(@|\s|$)/i.test(command)) {
+      await sendHourlyNotice(env, userId, `cmd_hint:${userId}`, USER_COPY.adminCommandHint);
+    }
     return;
   }
 
@@ -1248,7 +1239,12 @@ async function handlePrivateMessage(msg, env, ctx) {
   }
   if (policyResult.action === 'auto_reply_only') return;
 
-  await bumpDailyStat(env, 'messages_in', 1);
+  // 入站统计异步写入：不阻塞用户可见的转发链路（KV 读改写约几十毫秒）
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(bumpDailyStat(env, 'messages_in', 1));
+  } else {
+    await bumpDailyStat(env, 'messages_in', 1);
+  }
   await forwardToTopic(msg, userId, key, env, ctx);
 }
 
@@ -1596,7 +1592,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
       await tgCall(env, 'sendMessage', {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: '⛔ 无管理权限：仅群主/管理员或 ADMIN_IDS 可使用该指令。',
+        text: ADMIN_COPY.noPermissionHint,
       });
     }
     return;
@@ -1607,7 +1603,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: '🧹 <b>确认清理无效话题？</b>\n将扫描失效 Topic 映射，可能耗时。',
+      text: CLEANUP_CONFIRM_TEXT,
       parse_mode: 'HTML',
       reply_markup: buildCleanupConfirmKeyboard(),
     });
@@ -1680,7 +1676,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
       await tgCall(env, 'sendMessage', {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: '⚠️ 当前话题未关联用户（请在对应用户 Forum Topic 内执行，或使用 /find）。',
+        text: ADMIN_COPY.threadNotLinked,
       });
     }
     return;
@@ -1715,7 +1711,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
       await tgCall(env, 'sendMessage', {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: '⚠️ 当前话题未关联用户。全局命令：/sysinfo /stats /rank /find /notes /help',
+        text: ADMIN_COPY.threadNotLinkedGlobal,
       });
     }
     return;
@@ -1727,7 +1723,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: `⚠️ <b>确认关闭对话</b> <code>${escapeHtml(String(userId))}</code>？\n将关闭 Forum Topic，用户消息不再接入（可用打开恢复）。`,
+      text: confirmCloseText(userId),
       parse_mode: 'HTML',
       reply_markup: buildCloseConfirmKeyboard(userId),
     });
@@ -1738,7 +1734,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: `⚠️ <b>确认重置验证</b> <code>${escapeHtml(String(userId))}</code>？\n将取消永久信任，用户下次需重新验证。`,
+      text: confirmResetText(userId),
       parse_mode: 'HTML',
       reply_markup: buildResetConfirmKeyboard(userId),
     });
@@ -1749,7 +1745,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: `⚠️ <b>确认封禁用户</b> <code>${escapeHtml(String(userId))}</code>？\n对方将收到通知且无法继续发消息。`,
+      text: confirmBanText(userId),
       parse_mode: 'HTML',
       reply_markup: buildBanConfirmKeyboard(userId),
     });

@@ -180,6 +180,49 @@ describe('spam module', () => {
     expect(calls[0].body.text).toContain('unknown_reason');
   });
 
+  it('handleSpamMessage 告警附带截断且转义后的消息片段', async () => {
+    const calls = [];
+    const m = createModule({
+      config: {
+        SPAM_MESSAGE_HASH_TTL: 3600,
+        SPAM_REPEAT_MESSAGE_LIMIT: 3,
+        NEW_USER_LINK_BLOCK_SECONDS: 86400,
+        SPAM_NOTIFY_ADMIN: true,
+        SPAM_SILENCE_MODE: false,
+      },
+      tgCall: async (env, method, body) => { calls.push({ method, body }); return { ok: true }; },
+      escapeHtml,
+      adminCopy: {
+        spamIntercepted: (userId, reasonText, opts) => {
+          const snippet = opts?.snippet || '';
+          return `告警|${snippet}`;
+        },
+      },
+    });
+    const env = { TOPIC_MAP: {}, SUPERGROUP_ID: '-1001' };
+
+    // 带正文：片段包含文本并转义尖括号
+    await m.handleSpamMessage(env, 5, { text: '加我<微信>赚钱' }, {
+      isSpam: true, reasons: ['keyword'], details: { keyword: '赚钱' },
+    }, null, { waitUntil: () => {} });
+    expect(calls[0].body.text).toContain('加我&lt;微信&gt;赚钱');
+
+    // 超长正文：截断到 120 字符并追加省略号
+    const longText = '长'.repeat(300);
+    await m.handleSpamMessage(env, 5, { text: longText }, {
+      isSpam: true, reasons: ['keyword'], details: { keyword: 'x' },
+    }, null, { waitUntil: () => {} });
+    const snippet = calls[1].body.text.slice(3);
+    expect(snippet.length).toBeLessThanOrEqual(121);
+    expect(snippet.endsWith('…')).toBe(true);
+
+    // 纯媒体消息（无正文）：不附带片段
+    await m.handleSpamMessage(env, 5, { photo: [{ file_id: 'f1' }], caption: '   ' }, {
+      isSpam: true, reasons: ['keyword'], details: { keyword: 'x' },
+    }, null, { waitUntil: () => {} });
+    expect(calls[2].body.text).toBe('告警|');
+  });
+
   it('垃圾关键词告警动态内容只转义一次', async () => {
     const calls = [];
     const m = createModule({
