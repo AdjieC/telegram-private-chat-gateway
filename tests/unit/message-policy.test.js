@@ -3,6 +3,7 @@ import {
   evaluateMessagePolicy,
   matchRule,
   validateRuleInput,
+  buildLegacyBlockedRules,
 } from '../../src/message-policy.js';
 
 const verifiedUser = {
@@ -114,6 +115,28 @@ describe('消息策略', () => {
       verification: { type: 'temporary' },
       rules: [],
     })).toMatchObject({ action: 'reject', reason: 'closed' });
+  });
+});
+
+describe('legacy 规则构造', () => {
+  it('将屏蔽词数组转为 blocked_keyword 规则并过滤空值', () => {
+    const rules = buildLegacyBlockedRules(['词A', '', '词B']);
+    expect(rules).toHaveLength(2);
+    expect(rules[0]).toMatchObject({
+      ruleId: 'legacy_blocked:0',
+      ruleType: 'blocked_keyword',
+      matchType: 'contains',
+      pattern: '词A',
+      action: 'reject',
+      priority: 0,
+    });
+    expect(rules[1].ruleId).toBe('legacy_blocked:1');
+    expect(rules[1].pattern).toBe('词B');
+  });
+
+  it('非数组输入返回空规则列表', () => {
+    expect(buildLegacyBlockedRules(null)).toEqual([]);
+    expect(buildLegacyBlockedRules(undefined)).toEqual([]);
   });
 });
 

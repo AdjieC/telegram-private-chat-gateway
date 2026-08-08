@@ -1268,6 +1268,16 @@ function ruleId(rule) {
   const value = ruleValue(rule, "ruleId", "rule_id");
   return value == null ? null : String(value);
 }
+function buildLegacyBlockedRules(blockedWords) {
+  return (Array.isArray(blockedWords) ? blockedWords : []).filter(Boolean).map((pattern, index) => ({
+    ruleId: `legacy_blocked:${index}`,
+    ruleType: "blocked_keyword",
+    matchType: "contains",
+    pattern,
+    action: "reject",
+    priority: index
+  }));
+}
 function enabledRules(rules) {
   return [...Array.isArray(rules) ? rules : []].filter((rule) => rule && rule.enabled !== false && rule.enabled !== 0).sort((left, right) => Number(left.priority ?? 100) - Number(right.priority ?? 100));
 }
@@ -1376,7 +1386,10 @@ function policyReasonLabel(reason) {
   return POLICY_REASON_LABELS[reason] || String(reason || "unknown");
 }
 var USER_COPY = {
-  rateLimited: "\u26A0\uFE0F \u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+  /** 消息发送限流（minutes 由调用方按 RATE_LIMIT_WINDOW 换算，与验证限流口径一致，防文案漂移） */
+  rateLimited(minutes) {
+    return `\u26A0\uFE0F \u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7EA6 ${minutes} \u5206\u949F\u540E\u518D\u8BD5\u3002`;
+  },
   systemBusy: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
   bannedHourly: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
   mutedHourly: "\u{1F507} \u60A8\u5F53\u524D\u5904\u4E8E\u9759\u97F3\u72B6\u6001\uFF0C\u6D88\u606F\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u53D6\u6D88\u9759\u97F3\u3002",
@@ -2135,6 +2148,7 @@ function createAdminActions(deps) {
       SEP_LINE2,
       `\u{1F464} ${name} \xB7 ${un}`,
       `UID <code>${userId}</code>`,
+      rec?.title ? `\u8BDD\u9898: ${escapeHtml2(String(rec.title))}` : "",
       `\u72B6\u6001  ${formatUserStatusChips2({ banned: Boolean(ban2), muted: Boolean(muted), closed: Boolean(rec?.closed) })}`,
       d1Status ? `D1: <code>${escapeHtml2(d1Status)}</code>` : "",
       lastMsgLine,
@@ -2226,6 +2240,15 @@ function createAdminActions(deps) {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
         text: ADMIN_COPY.wordUsageAdd,
+        parse_mode: "HTML"
+      });
+      return;
+    }
+    if (word.length > config.WORD_MAX_LENGTH) {
+      await tgCall2(env, "sendMessage", {
+        chat_id: env.SUPERGROUP_ID,
+        message_thread_id: threadId,
+        text: `\u26A0\uFE0F \u8BCD\u8FC7\u957F\uFF08\u6700\u591A ${config.WORD_MAX_LENGTH} \u5B57\uFF09\uFF0C\u8BF7\u7F29\u77ED\u540E\u91CD\u8BD5\u3002`,
         parse_mode: "HTML"
       });
       return;
@@ -3119,17 +3142,26 @@ function createVerificationModule(deps) {
     if (remoteIp) {
       formData.append("remoteip", remoteIp);
     }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1e4);
     try {
       const resp = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: formData.toString()
+        body: formData.toString(),
+        signal: controller.signal
       });
       const result = await resp.json();
       return { success: result.success === true, error: result["error-codes"]?.join(", ") };
     } catch (e) {
+      if (e?.name === "AbortError") {
+        logger.warn("turnstile_verify_timeout");
+        return { success: false, error: "timeout" };
+      }
       logger.error("turnstile_verify_error", e);
       return { success: false, error: e.message };
+    } finally {
+      clearTimeout(timer);
     }
   }
   async function sendVerificationChallenge(userId, env, pendingMsgId, from = null) {
@@ -3879,11 +3911,10 @@ function createAdminCommandHandlers(deps) {
       ["stats:", "\u65E5\u7EDF\u8BA1"],
       ["sys:", "\u7CFB\u7EDF\u952E"]
     ];
-    const rows = [];
-    for (const [prefix, label] of prefixes) {
+    const rows = await Promise.all(prefixes.map(async ([prefix, label]) => {
       const c = await countKvPrefix(env, prefix);
-      rows.push({ prefix, label, ...c || { total: 0, truncated: false } });
-    }
+      return { prefix, label, ...c || { total: 0, truncated: false } };
+    }));
     sysinfoKvCache.ts = now;
     sysinfoKvCache.data = rows;
     return rows;
@@ -3982,9 +4013,14 @@ function createAdminCommandHandlers(deps) {
     }
     lines.push("");
     lines.push("\u{1F517} <b>\u7AEF\u70B9</b>");
-    lines.push(`<code>${escapeHtml(baseUrl)}/health</code>`);
-    lines.push(`<code>\u2026/health/env</code> \xB7 <code>\u2026/health/d1</code> \xB7 <code>\u2026/verify</code>`);
-    lines.push(`Webhook <code>POST ${escapeHtml(baseUrl)}/</code>`);
+    if (baseUrl.startsWith("https://") || baseUrl.startsWith("http://")) {
+      lines.push(`<code>${escapeHtml(baseUrl)}/health</code>`);
+      lines.push(`<code>\u2026/health/env</code> \xB7 <code>\u2026/health/d1</code> \xB7 <code>\u2026/verify</code>`);
+      lines.push(`Webhook <code>POST ${escapeHtml(baseUrl)}/</code>`);
+    } else {
+      lines.push("<i>\u672A\u914D\u7F6E VERIFICATION_PAGE_URL\uFF0C\u4EC5\u5C55\u793A\u76F8\u5BF9\u8DEF\u5F84</i>");
+      lines.push("<code>/health</code> \xB7 <code>/health/env</code> \xB7 <code>/health/d1</code>");
+    }
     return { lines, activity };
   }
   async function renderActivityPage(env) {
@@ -4055,6 +4091,7 @@ function createAdminCommandHandlers(deps) {
       lines.push("\u2728 \u6682\u65E0\u9519\u8BEF\u8BB0\u5F55");
       lines.push("<i>\u51B7\u542F\u52A8\u540E\u5185\u5B58\u7F13\u51B2\u4F1A\u6E05\u7A7A\uFF1B\u6301\u7EED 5xx \u65F6\u8BF7\u67E5 /health \u4E0E CF \u65E5\u5FD7</i>");
     } else {
+      lines.push(`\u{1F534} \u6700\u8FD1 <b>${top.length}</b> \u6761\u9519\u8BEF\u8BB0\u5F55\uFF08\u5185\u5B58 + KV \u5408\u5E76\u53BB\u91CD\uFF09`);
       for (const err of top) {
         const act = escapeHtml(err.action || "?");
         const msg = escapeHtml(String(err.error || "").slice(0, 140));
@@ -4164,19 +4201,21 @@ function createAdminCommandHandlers(deps) {
     try {
       do {
         const result = await env.TOPIC_MAP.list({ prefix: "note:", cursor, limit: 100 });
-        for (const key of result.keys || []) {
-          const userId = String(key.name || "").slice(5);
-          if (!userId) continue;
-          const note = await env.TOPIC_MAP.get(key.name);
-          if (!note) continue;
-          const noteStr = String(note);
-          if (needle) {
-            const hitNote = noteStr.toLowerCase().includes(needle);
-            const hitId = userId.includes(needle);
-            if (!hitNote && !hitId) continue;
+        const batchKeys = (result.keys || []).map((key) => String(key.name || "")).filter((name) => {
+          const uid = name.slice(5);
+          return uid && (!needle || uid.includes(needle));
+        });
+        for (let i = 0; i < batchKeys.length && matches.length < 12; i += 20) {
+          const chunk = batchKeys.slice(i, i + 20);
+          const notes = await Promise.all(chunk.map((name) => env.TOPIC_MAP.get(name)));
+          for (let j = 0; j < chunk.length && matches.length < 12; j += 1) {
+            const note = notes[j];
+            if (!note) continue;
+            const userId = String(chunk[j]).slice(5);
+            const noteStr = String(note);
+            if (needle && !noteStr.toLowerCase().includes(needle)) continue;
+            matches.push({ userId, note: noteStr });
           }
-          matches.push({ userId, note: noteStr });
-          if (matches.length >= 12) break;
         }
         cursor = result.list_complete ? void 0 : result.cursor;
         pages += 1;
@@ -4274,7 +4313,7 @@ function createAdminCommandHandlers(deps) {
     });
   }
   async function handleFindCommand(env, threadId, queryText) {
-    const q = queryText.replace(/^\/find(@\w+)?\s*/i, "").trim();
+    const q = queryText.replace(/^\/find(@\w+)?\s*/i, "").trim().slice(0, 100);
     if (!q) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
@@ -4299,8 +4338,12 @@ function createAdminCommandHandlers(deps) {
         await tgCall2(env, "sendMessage", {
           chat_id: env.SUPERGROUP_ID,
           message_thread_id: threadId,
-          text: `\u672A\u627E\u5230\u5339\u914D\u300C${escapeHtml(q)}\u300D\u7684\u7528\u6237
-\u4E5F\u53EF\u8BD5 <code>/notes ${escapeHtml(q)}</code> \u641C\u5907\u6CE8`,
+          text: [
+            `\u672A\u627E\u5230\u5339\u914D\u300C${escapeHtml(q)}\u300D\u7684\u7528\u6237`,
+            "",
+            "\u2022 \u4EC5\u6536\u5F55 <b>\u79C1\u804A\u8FC7\u673A\u5668\u4EBA</b> \u7684\u7528\u6237\uFF1B\u53EF\u8BF7\u5BF9\u65B9\u5148\u5411\u673A\u5668\u4EBA\u53D1\u4E00\u6761\u6D88\u606F",
+            `\u2022 \u4E5F\u53EF\u8BD5 <code>/notes ${escapeHtml(q)}</code> \u641C\u7D22\u7BA1\u7406\u5458\u5907\u6CE8`
+          ].join("\n"),
           parse_mode: "HTML"
         });
         return;
@@ -4660,17 +4703,7 @@ function createAdminCommandHandlers(deps) {
 }
 
 // src/verify-page.js
-var VERIFY_PAGE_HTML = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
-<title>\u4EBA\u673A\u9A8C\u8BC1</title>
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-<style>
+var VERIFY_SHARED_STYLE = `
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
   --bg:#f0f2f5;--card:#ffffff;--text:#1a1a1a;--sub:#5b6472;--muted:#9aa3af;
@@ -4691,16 +4724,29 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC
 .icon{font-size:52px;margin-bottom:14px}
 h2{color:var(--text);margin-bottom:8px;font-size:20px;font-weight:600}
 p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
+#back-btn{display:inline-block;margin:20px auto 0;background:var(--accent);color:#fff;border:none;padding:13px 28px;border-radius:12px;font-size:16px;text-decoration:none;font-weight:600;transition:opacity .2s,transform .1s;box-shadow:0 2px 8px rgba(0,136,204,0.3)}
+#back-btn:hover{opacity:.92}
+#back-btn:active{transform:scale(.98)}
+.footer{margin-top:22px;font-size:11px;color:var(--muted)}
+`;
+var VERIFY_PAGE_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<title>\u4EBA\u673A\u9A8C\u8BC1</title>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<style>${VERIFY_SHARED_STYLE}
 .turnstile-container{display:flex;justify-content:center;margin-bottom:10px;min-height:65px}
 #status{display:inline-flex;align-items:center;gap:7px;font-size:13px;line-height:1.5;color:var(--sub);margin-top:14px;padding:9px 16px;border-radius:999px;background:var(--bg);border:1px solid var(--border);min-height:38px;transition:background .2s,color .2s}
 #status.success{background:var(--success-bg);color:var(--success-text);border-color:transparent}
 #status.error{background:var(--error-bg);color:var(--error-text);border-color:transparent}
 .spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:spin .8s linear infinite;flex:none}
 @keyframes spin{to{transform:rotate(360deg)}}
-#back-btn{display:none;margin:20px auto 0;background:var(--accent);color:#fff;border:none;padding:13px 28px;border-radius:12px;font-size:16px;text-decoration:none;font-weight:600;transition:opacity .2s,transform .1s;box-shadow:0 2px 8px rgba(0,136,204,0.3)}
-#back-btn:hover{opacity:.92}
-#back-btn:active{transform:scale(.98)}
-.footer{margin-top:22px;font-size:11px;color:var(--muted)}
+#back-btn{display:none}
 .footer span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
 </style>
 </head>
@@ -4848,30 +4894,8 @@ var VERIFY_ERROR_PAGE_HTML = `<!DOCTYPE html>
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
 <title>\u4EBA\u673A\u9A8C\u8BC1</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-:root{
-  --bg:#f0f2f5;--card:#ffffff;--text:#1a1a1a;--sub:#5b6472;--muted:#9aa3af;
-  --accent:#0088cc;--border:#e4e7ec;
-  --error-bg:#fdecec;--error-text:#b42318;
-}
-@media (prefers-color-scheme: dark){
-  :root{
-    --bg:#0f172a;--card:#1e293b;--text:#f1f5f9;--sub:#94a3b8;--muted:#64748b;
-    --accent:#38bdf8;--border:#334155;
-    --error-bg:#3b1212;--error-text:#fca5a5;
-  }
-}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px;color:var(--text)}
-.card{background:var(--card);border-radius:20px;padding:36px 24px 28px;max-width:400px;width:100%;text-align:center;box-shadow:0 4px 24px rgba(15,23,42,0.08);border:1px solid var(--border)}
-.icon{font-size:52px;margin-bottom:14px}
-h2{color:var(--text);margin-bottom:8px;font-size:20px;font-weight:600}
-p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
+<style>${VERIFY_SHARED_STYLE}
 .error{display:inline-flex;align-items:center;gap:7px;font-size:13px;line-height:1.5;color:var(--error-text);margin-top:14px;padding:9px 16px;border-radius:999px;background:var(--error-bg);border:1px solid transparent}
-#back-btn{display:inline-block;margin:20px auto 0;background:var(--accent);color:#fff;border:none;padding:13px 28px;border-radius:12px;font-size:16px;text-decoration:none;font-weight:600;transition:opacity .2s,transform .1s;box-shadow:0 2px 8px rgba(0,136,204,0.3)}
-#back-btn:hover{opacity:.92}
-#back-btn:active{transform:scale(.98)}
-.footer{margin-top:22px;font-size:11px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -4932,10 +4956,12 @@ var CONFIG = {
   // 是否通知管理员有骚扰消息
   SPAM_SILENCE_MODE: false,
   // 静默丢弃模式（不通知管理员）
-  ALERT_THROTTLE_MS: 6e4
+  ALERT_THROTTLE_MS: 6e4,
   // 管理告警节流：同类型 60 秒内最多一条
+  WORD_MAX_LENGTH: 50
+  // /addword 单词长度上限，防 KV 词库被超长输入污染
 };
-var GATEWAY_VERSION = "1.0.7";
+var GATEWAY_VERSION = "1.1.6";
 var threadHealthCache = /* @__PURE__ */ new Map();
 var topicCreateInFlight = /* @__PURE__ */ new Map();
 var adminStatusCache = /* @__PURE__ */ new Map();
@@ -4963,6 +4989,7 @@ var Logger = createLogger({}, console, {
 });
 var RECENT_SYSTEM_ERRORS_MAX = 12;
 var recentSystemErrors = [];
+var systemErrorKvThrottle = createThrottle({ windowMs: 3e4 });
 function recordSystemError(action, error, data = {}, env = null) {
   const entry = {
     ts: Date.now(),
@@ -4974,7 +5001,7 @@ function recordSystemError(action, error, data = {}, env = null) {
   if (recentSystemErrors.length > RECENT_SYSTEM_ERRORS_MAX) {
     recentSystemErrors.length = RECENT_SYSTEM_ERRORS_MAX;
   }
-  if (env?.TOPIC_MAP) {
+  if (env?.TOPIC_MAP && systemErrorKvThrottle("sys:recent_errors")) {
     Promise.resolve().then(async () => {
       let list = [];
       try {
@@ -5077,14 +5104,7 @@ async function evaluateLegacyPolicy(env, message, user = {}) {
     getVerificationState(env, user.userId ?? message.chat?.id),
     getStoredRules(env)
   ]);
-  const rules = blockedWords.filter(Boolean).map((pattern, index) => ({
-    ruleId: `legacy_blocked:${index}`,
-    ruleType: "blocked_keyword",
-    matchType: "contains",
-    pattern,
-    action: "reject",
-    priority: index
-  }));
+  const rules = buildLegacyBlockedRules(blockedWords);
   return evaluateMessagePolicy({
     message,
     user: {
@@ -5578,11 +5598,11 @@ async function notifyAdmin(env, alertType, message, threadId, parseMode = "HTML"
 }
 async function updateSpamStats(env, reasons) {
   try {
-    for (const reason of reasons) {
+    await Promise.all((reasons || []).map(async (reason) => {
       const countKey = `stats:spam:${reason}`;
       const current = parseInt(await env.TOPIC_MAP.get(countKey) || "0");
       await env.TOPIC_MAP.put(countKey, String(current + 1), { expirationTtl: 2592e3 });
-    }
+    }));
     const totalKey = "stats:spam:total";
     const total = parseInt(await env.TOPIC_MAP.get(totalKey) || "0");
     await env.TOPIC_MAP.put(totalKey, String(total + 1), { expirationTtl: 2592e3 });
@@ -5662,7 +5682,11 @@ var legacyApp = {
             message: "\u9A8C\u8BC1\u94FE\u63A5\u7F3A\u5C11\u5FC5\u8981\u53C2\u6570\u6216\u7CFB\u7EDF\u672A\u914D\u7F6E Turnstile\u3002",
             hint
           }), {
-            headers: { "Content-Type": "text/html; charset=utf-8" }
+            headers: {
+              "Content-Type": "text/html; charset=utf-8",
+              "X-Content-Type-Options": "nosniff",
+              "Referrer-Policy": "no-referrer"
+            }
           });
         }
         const workerUrl = url.origin;
@@ -5688,14 +5712,29 @@ var legacyApp = {
             // 过期提示分钟数对齐 TURNSTILE_VERIFY_TTL，避免页面文案与后端有效期漂移
             verifyExpireMinutes: CONFIG.TURNSTILE_VERIFY_TTL / 60
           }),
-          { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": csp } }
+          {
+            headers: {
+              "Content-Type": "text/html; charset=utf-8",
+              "Content-Security-Policy": csp,
+              "X-Content-Type-Options": "nosniff",
+              "Referrer-Policy": "no-referrer"
+            }
+          }
         );
       }
       return new Response("Not Found", { status: 404 });
     }
     if ((url.pathname === "/verify-callback" || url.pathname.endsWith("/verify-callback")) && request.method === "POST") {
+      let body;
       try {
-        const body = await request.json();
+        body = await request.json();
+      } catch {
+        return new Response(JSON.stringify({ success: false, error: "invalid_json" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      try {
         const { token, code, userId } = body || {};
         if (!token || !code || !userId) {
           return new Response(JSON.stringify({ success: false, error: "missing_params" }), {
@@ -5889,7 +5928,7 @@ async function handlePrivateMessage(msg, env, ctx) {
   if (!rateLimit.allowed) {
     await tgCall(env, "sendMessage", {
       chat_id: userId,
-      text: USER_COPY.rateLimited
+      text: USER_COPY.rateLimited(Math.max(1, Math.round(CONFIG.RATE_LIMIT_WINDOW / 60)))
     });
     return;
   }
@@ -5902,14 +5941,7 @@ async function handlePrivateMessage(msg, env, ctx) {
     getBlockedWords(env, false, Logger),
     getVerificationState(env, userId)
   ]);
-  const blockedRules = blockedWords.map((pattern, index) => ({
-    ruleId: `legacy_blocked:${index}`,
-    ruleType: "blocked_keyword",
-    matchType: "contains",
-    pattern,
-    action: "reject",
-    priority: index
-  }));
+  const blockedRules = buildLegacyBlockedRules(blockedWords);
   const policyResult = evaluateMessagePolicy({
     message: msg,
     user: {
@@ -6314,15 +6346,18 @@ async function _handleAdminReplyInner(msg, env, ctx) {
     }
     return;
   } else {
-    const allKeys = await getAllKeys(env, "user:");
-    let scanned = 0;
-    for (const { name } of allKeys) {
-      if (++scanned > 200) break;
-      const rec = await safeGetJSON(env, name, null);
-      if (rec && Number(rec.thread_id) === Number(threadId)) {
-        userId = Number(name.slice(5));
-        break;
-      }
+    const scanLimit = 200;
+    const scanBatch = 20;
+    const listed = await env.TOPIC_MAP.list({ prefix: "user:", limit: scanLimit });
+    const candidates = listed.keys || [];
+    for (let i = 0; i < candidates.length && !userId; i += scanBatch) {
+      const batch = candidates.slice(i, i + scanBatch);
+      const results = await Promise.all(batch.map(async ({ name }) => {
+        const rec = await safeGetJSON(env, name, null);
+        return rec && Number(rec.thread_id) === Number(threadId) ? name : null;
+      }));
+      const hit = results.find(Boolean);
+      if (hit) userId = Number(hit.slice(5));
     }
     if (!userId) {
       if (threadNotFoundCache.size >= THREAD_NOT_FOUND_MAX_ENTRIES) {

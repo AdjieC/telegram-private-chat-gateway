@@ -57,6 +57,7 @@ export function createAdminActions(deps) {
       SEP_LINE,
       `👤 ${name} · ${un}`,
       `UID <code>${userId}</code>`,
+      rec?.title ? `话题: ${escapeHtml(String(rec.title))}` : '',
       `状态  ${formatUserStatusChips({ banned: Boolean(ban), muted: Boolean(muted), closed: Boolean(rec?.closed) })}`,
       d1Status ? `D1: <code>${escapeHtml(d1Status)}</code>` : '',
       lastMsgLine,
@@ -150,6 +151,15 @@ export function createAdminActions(deps) {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
         text: ADMIN_COPY.wordUsageAdd,
+        parse_mode: "HTML",
+      });
+      return;
+    }
+    if (word.length > config.WORD_MAX_LENGTH) {
+      await tgCall(env, "sendMessage", {
+        chat_id: env.SUPERGROUP_ID,
+        message_thread_id: threadId,
+        text: `⚠️ 词过长（最多 ${config.WORD_MAX_LENGTH} 字），请缩短后重试。`,
         parse_mode: "HTML",
       });
       return;

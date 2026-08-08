@@ -6,6 +6,17 @@
 
 ### 打磨优化
 
+- **管理命令 KV 读取并发化**：话题反查降级扫描改为单次 list 取 200 键 + 每批 20 并发读（原无上限分页后再截断、逐条串行读）；`/notes` 备注分批并发读取；存储页 11 个 KV 前缀计数并行统计，缩短命令响应延迟。
+- **系统错误 KV 写入节流**（30 秒窗口）：错误风暴期间内存环形缓冲全量保留，KV 尽力写入降频，避免放大 KV 写入成本。
+- **spam 统计并行化**：各原因计数并行写入，缩短 waitUntil 内滞留时间。
+- **抽取 `buildLegacyBlockedRules`**：消息策略模块统一构造 legacy 屏蔽规则，消除 worker.js 两处重复。
+- **验证页共享样式抽取**：主页面与错误页 CSS 收敛为 `VERIFY_SHARED_STYLE` 常量，消除约 80% 重复。
+- **限流文案对齐窗口**：消息发送限流提示按 `RATE_LIMIT_WINDOW` 注入分钟数（与验证限流口径一致），不再与 `/help` FAQ 时长漂移。
+- **`/find` 无结果引导**：补充「仅收录私聊过机器人的用户」与 `/notes` 搜索提示。
+- **输入健壮性**：`/addword` 单词长度上限（`WORD_MAX_LENGTH` 50 字）防词库污染；`/find` 查询长度上限 100 字符防 LIKE 拖慢 D1。
+- **端点健壮性**：`/verify-callback` 非法 JSON 返回 400（原 500）；Turnstile siteverify 请求加 10 秒超时；验证页/错误页响应补充 `X-Content-Type-Options` 与 `Referrer-Policy` 安全头。
+- **面板与看板**：用户面板展示话题标题；错误页汇总最近错误条数；概览页未配置 `VERIFICATION_PAGE_URL` 时端点区降级为相对路径，避免渲染无效链接。
+
 - **验证体验**：答题验证通过后题目消息清空按钮（原残留可点击选项，再点只会提示「已过期」）；验证链接过期提示分钟数改为由 `TURNSTILE_VERIFY_TTL` 注入，消除页面文案与后端有效期漂移。
 - **验证页 UI**：`/verify` 缺参/未配置错误页复用验证页视觉语言（暗色模式 + 返回 Telegram 按钮），替代裸 HTML；Turnstile 组件主题移除硬编码 light，由脚本按系统偏好设置并随 `prefers-color-scheme` 实时重建。
 - **日志卫生**：`verification_passed` 仅记录选中索引，正确答案文本不再落入日志；告警节流改为窗口内丢弃计数汇总输出（`admin_alert_burst_summary`），消除风暴期逐条 DEBUG 噪声。

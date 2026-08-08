@@ -10,17 +10,8 @@
  */
 import { escapeHtml } from './admin-ui-format.js';
 
-const VERIFY_PAGE_HTML = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
-<title>人机验证</title>
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-<style>
+// 两个验证页面共用的基础样式（暗色模式、卡片、按钮、页脚），避免两套模板各自维护导致漂移
+const VERIFY_SHARED_STYLE = `
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
   --bg:#f0f2f5;--card:#ffffff;--text:#1a1a1a;--sub:#5b6472;--muted:#9aa3af;
@@ -41,16 +32,30 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC
 .icon{font-size:52px;margin-bottom:14px}
 h2{color:var(--text);margin-bottom:8px;font-size:20px;font-weight:600}
 p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
+#back-btn{display:inline-block;margin:20px auto 0;background:var(--accent);color:#fff;border:none;padding:13px 28px;border-radius:12px;font-size:16px;text-decoration:none;font-weight:600;transition:opacity .2s,transform .1s;box-shadow:0 2px 8px rgba(0,136,204,0.3)}
+#back-btn:hover{opacity:.92}
+#back-btn:active{transform:scale(.98)}
+.footer{margin-top:22px;font-size:11px;color:var(--muted)}
+`;
+
+const VERIFY_PAGE_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<title>人机验证</title>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<style>${VERIFY_SHARED_STYLE}
 .turnstile-container{display:flex;justify-content:center;margin-bottom:10px;min-height:65px}
 #status{display:inline-flex;align-items:center;gap:7px;font-size:13px;line-height:1.5;color:var(--sub);margin-top:14px;padding:9px 16px;border-radius:999px;background:var(--bg);border:1px solid var(--border);min-height:38px;transition:background .2s,color .2s}
 #status.success{background:var(--success-bg);color:var(--success-text);border-color:transparent}
 #status.error{background:var(--error-bg);color:var(--error-text);border-color:transparent}
 .spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:spin .8s linear infinite;flex:none}
 @keyframes spin{to{transform:rotate(360deg)}}
-#back-btn{display:none;margin:20px auto 0;background:var(--accent);color:#fff;border:none;padding:13px 28px;border-radius:12px;font-size:16px;text-decoration:none;font-weight:600;transition:opacity .2s,transform .1s;box-shadow:0 2px 8px rgba(0,136,204,0.3)}
-#back-btn:hover{opacity:.92}
-#back-btn:active{transform:scale(.98)}
-.footer{margin-top:22px;font-size:11px;color:var(--muted)}
+#back-btn{display:none}
 .footer span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
 </style>
 </head>
@@ -214,30 +219,8 @@ const VERIFY_ERROR_PAGE_HTML = `<!DOCTYPE html>
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
 <title>人机验证</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-:root{
-  --bg:#f0f2f5;--card:#ffffff;--text:#1a1a1a;--sub:#5b6472;--muted:#9aa3af;
-  --accent:#0088cc;--border:#e4e7ec;
-  --error-bg:#fdecec;--error-text:#b42318;
-}
-@media (prefers-color-scheme: dark){
-  :root{
-    --bg:#0f172a;--card:#1e293b;--text:#f1f5f9;--sub:#94a3b8;--muted:#64748b;
-    --accent:#38bdf8;--border:#334155;
-    --error-bg:#3b1212;--error-text:#fca5a5;
-  }
-}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px;color:var(--text)}
-.card{background:var(--card);border-radius:20px;padding:36px 24px 28px;max-width:400px;width:100%;text-align:center;box-shadow:0 4px 24px rgba(15,23,42,0.08);border:1px solid var(--border)}
-.icon{font-size:52px;margin-bottom:14px}
-h2{color:var(--text);margin-bottom:8px;font-size:20px;font-weight:600}
-p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
+<style>${VERIFY_SHARED_STYLE}
 .error{display:inline-flex;align-items:center;gap:7px;font-size:13px;line-height:1.5;color:var(--error-text);margin-top:14px;padding:9px 16px;border-radius:999px;background:var(--error-bg);border:1px solid transparent}
-#back-btn{display:inline-block;margin:20px auto 0;background:var(--accent);color:#fff;border:none;padding:13px 28px;border-radius:12px;font-size:16px;text-decoration:none;font-weight:600;transition:opacity .2s,transform .1s;box-shadow:0 2px 8px rgba(0,136,204,0.3)}
-#back-btn:hover{opacity:.92}
-#back-btn:active{transform:scale(.98)}
-.footer{margin-top:22px;font-size:11px;color:var(--muted)}
 </style>
 </head>
 <body>

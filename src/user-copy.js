@@ -26,7 +26,10 @@ export function policyReasonLabel(reason) {
 }
 
 export const USER_COPY = {
-  rateLimited: '⚠️ 发送过于频繁，请稍后再试。',
+  /** 消息发送限流（minutes 由调用方按 RATE_LIMIT_WINDOW 换算，与验证限流口径一致，防文案漂移） */
+  rateLimited(minutes) {
+    return `⚠️ 发送过于频繁，请约 ${minutes} 分钟后再试。`;
+  },
   systemBusy: '⚠️ 系统繁忙，请稍后再试。',
   bannedHourly:
     '🚫 您已被管理员封禁，暂时无法继续发送消息。如有疑问请等待管理员处理。',

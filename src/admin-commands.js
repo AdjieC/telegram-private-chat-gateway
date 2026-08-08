@@ -255,11 +255,10 @@ async function getCachedKvPrefixCounts(env) {
     ['stats:', '日统计'],
     ['sys:', '系统键'],
   ];
-  const rows = [];
-  for (const [prefix, label] of prefixes) {
+  const rows = await Promise.all(prefixes.map(async ([prefix, label]) => {
     const c = await countKvPrefix(env, prefix);
-    rows.push({ prefix, label, ...(c || { total: 0, truncated: false }) });
-  }
+    return { prefix, label, ...(c || { total: 0, truncated: false }) };
+  }));
   sysinfoKvCache.ts = now;
   sysinfoKvCache.data = rows;
   return rows;
@@ -374,9 +373,15 @@ async function renderOverviewStatsSection(env, page) {
 
   lines.push('');
   lines.push('🔗 <b>端点</b>');
-  lines.push(`<code>${escapeHtml(baseUrl)}/health</code>`);
-  lines.push(`<code>…/health/env</code> · <code>…/health/d1</code> · <code>…/verify</code>`);
-  lines.push(`Webhook <code>POST ${escapeHtml(baseUrl)}/</code>`);
+  if (baseUrl.startsWith('https://') || baseUrl.startsWith('http://')) {
+    lines.push(`<code>${escapeHtml(baseUrl)}/health</code>`);
+    lines.push(`<code>…/health/env</code> · <code>…/health/d1</code> · <code>…/verify</code>`);
+    lines.push(`Webhook <code>POST ${escapeHtml(baseUrl)}/</code>`);
+  } else {
+    // 未配置 VERIFICATION_PAGE_URL 时省略域名前缀，避免渲染出「(未配置...)/health」样式的无效链接
+    lines.push('<i>未配置 VERIFICATION_PAGE_URL，仅展示相对路径</i>');
+    lines.push('<code>/health</code> · <code>/health/env</code> · <code>/health/d1</code>');
+  }
 
   return { lines, activity };
 }
@@ -454,6 +459,7 @@ async function renderErrorsPage(env) {
     lines.push('✨ 暂无错误记录');
     lines.push('<i>冷启动后内存缓冲会清空；持续 5xx 时请查 /health 与 CF 日志</i>');
   } else {
+    lines.push(`🔴 最近 <b>${top.length}</b> 条错误记录（内存 + KV 合并去重）`);
     for (const err of top) {
       const act = escapeHtml(err.action || '?');
       const msg = escapeHtml(String(err.error || '').slice(0, 140));
@@ -589,19 +595,24 @@ async function handleNotesCommand(env, threadId, queryText = '') {
   try {
     do {
       const result = await env.TOPIC_MAP.list({ prefix: 'note:', cursor, limit: 100 });
-      for (const key of result.keys || []) {
-        const userId = String(key.name || '').slice(5);
-        if (!userId) continue;
-        const note = await env.TOPIC_MAP.get(key.name);
-        if (!note) continue;
-        const noteStr = String(note);
-        if (needle) {
-          const hitNote = noteStr.toLowerCase().includes(needle);
-          const hitId = userId.includes(needle);
-          if (!hitNote && !hitId) continue;
+      const batchKeys = (result.keys || [])
+        .map(key => String(key.name || ''))
+        .filter(name => {
+          const uid = name.slice(5);
+          return uid && (!needle || uid.includes(needle));
+        });
+      // 分批并发读取备注，避免逐条串行等待 KV
+      for (let i = 0; i < batchKeys.length && matches.length < 12; i += 20) {
+        const chunk = batchKeys.slice(i, i + 20);
+        const notes = await Promise.all(chunk.map(name => env.TOPIC_MAP.get(name)));
+        for (let j = 0; j < chunk.length && matches.length < 12; j += 1) {
+          const note = notes[j];
+          if (!note) continue;
+          const userId = String(chunk[j]).slice(5);
+          const noteStr = String(note);
+          if (needle && !noteStr.toLowerCase().includes(needle)) continue;
+          matches.push({ userId, note: noteStr });
         }
-        matches.push({ userId, note: noteStr });
-        if (matches.length >= 12) break;
       }
       cursor = result.list_complete ? undefined : result.cursor;
       pages += 1;
@@ -703,7 +714,8 @@ async function handleWhoamiCommand(env, threadId, senderId) {
 }
 
 async function handleFindCommand(env, threadId, queryText) {
-  const q = queryText.replace(/^\/find(@\w+)?\s*/i, '').trim();
+  // 查询长度上限：LIKE 模糊匹配过长的输入无意义且可能拖慢 D1
+  const q = queryText.replace(/^\/find(@\w+)?\s*/i, '').trim().slice(0, 100);
   if (!q) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
@@ -728,7 +740,12 @@ async function handleFindCommand(env, threadId, queryText) {
       await tgCall(env, 'sendMessage', {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: `未找到匹配「${escapeHtml(q)}」的用户\n也可试 <code>/notes ${escapeHtml(q)}</code> 搜备注`,
+        text: [
+          `未找到匹配「${escapeHtml(q)}」的用户`,
+          '',
+          '• 仅收录 <b>私聊过机器人</b> 的用户；可请对方先向机器人发一条消息',
+          `• 也可试 <code>/notes ${escapeHtml(q)}</code> 搜索管理员备注`,
+        ].join('\n'),
         parse_mode: 'HTML',
       });
       return;

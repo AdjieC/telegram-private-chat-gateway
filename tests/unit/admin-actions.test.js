@@ -17,6 +17,7 @@ function createActions(overrides = {}) {
     CLEANUP_LOCK_TTL_SECONDS: 1800,
     CLEANUP_BATCH_SIZE: 10,
     MAX_CLEANUP_DISPLAY: 20,
+    WORD_MAX_LENGTH: 50,
   };
   const actions = createAdminActions({
     tgCall: async (_env, method, body) => {
@@ -140,6 +141,18 @@ describe('admin-actions 管理动作', () => {
     expect(await env.TOPIC_MAP.get('note:42')).toBe(null);
   });
 
+  it('panel 展示用户话题标题与状态', async () => {
+    const { actions, calls, env } = createActions();
+    await env.TOPIC_MAP.put('user:42', JSON.stringify({ thread_id: 88, title: '测试用户', closed: false }));
+
+    await actions.panel(env, 88, 42);
+
+    const msg = calls.find(c => c.method === 'sendMessage');
+    expect(msg.body.text).toContain('用户面板');
+    expect(msg.body.text).toContain('话题: 测试用户');
+    expect(msg.body.text).toContain('状态正常');
+  });
+
   it('addWord/delWord 写 KV 词库并强制刷新缓存', async () => {
     const { actions, env } = createActions();
     await actions.addWord(env, 1, '/addword 测试词', 777);
@@ -147,6 +160,16 @@ describe('admin-actions 管理动作', () => {
 
     await actions.delWord(env, 1, '/delword 测试词', 777);
     expect(JSON.parse(await env.TOPIC_MAP.get('blocked_words_kv'))).toEqual([]);
+  });
+
+  it('addWord 拒绝超长词，不写入词库', async () => {
+    const { actions, calls, env } = createActions();
+    const longWord = '超'.repeat(51);
+    await actions.addWord(env, 1, `/addword ${longWord}`, 777);
+
+    expect(await env.TOPIC_MAP.get('blocked_words_kv')).toBe(null);
+    const msg = calls.find(c => c.method === 'sendMessage');
+    expect(msg.body.text).toContain('词过长');
   });
 
   it('cleanup 仅清理话题缺失的用户记录', async () => {

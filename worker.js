@@ -6,7 +6,7 @@ import {
   snapshotMessage,
 } from './src/conversation-service.js';
 import { createLogger } from './src/logger.js';
-import { evaluateMessagePolicy } from './src/message-policy.js';
+import { evaluateMessagePolicy, buildLegacyBlockedRules } from './src/message-policy.js';
 import { createTelegramClient, TelegramApiError } from './src/telegram-client.js';
 import { createD1Storage } from './src/storage/d1-storage.js';
 import { ensureMigrations } from './src/storage/migrations.js';
@@ -76,11 +76,12 @@ const CONFIG = {
   SPAM_REPEAT_MESSAGE_LIMIT: 3,         // 相同内容重复次数阈值
   SPAM_NOTIFY_ADMIN: true,              // 是否通知管理员有骚扰消息
   SPAM_SILENCE_MODE: false,             // 静默丢弃模式（不通知管理员）
-  ALERT_THROTTLE_MS: 60000              // 管理告警节流：同类型 60 秒内最多一条
+  ALERT_THROTTLE_MS: 60000,             // 管理告警节流：同类型 60 秒内最多一条
+  WORD_MAX_LENGTH: 50                   // /addword 单词长度上限，防 KV 词库被超长输入污染
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.0.7';
+const GATEWAY_VERSION = '1.1.6';
 
 // 线程健康检查缓存，减少频繁探测请求
 const threadHealthCache = new Map();
@@ -121,6 +122,8 @@ const Logger = createLogger({}, console, {
 // 进程内最近错误环形缓冲（isolate 生命周期内有效；并尽力写入 KV）
 const RECENT_SYSTEM_ERRORS_MAX = 12;
 const recentSystemErrors = [];
+// 系统错误写入 KV 节流：错误风暴期间内存环形缓冲全量保留，KV 尽力写入降频，避免放大 KV 写入成本
+const systemErrorKvThrottle = createThrottle({ windowMs: 30000 });
 
 function recordSystemError(action, error, data = {}, env = null) {
   const entry = {
@@ -133,7 +136,7 @@ function recordSystemError(action, error, data = {}, env = null) {
   if (recentSystemErrors.length > RECENT_SYSTEM_ERRORS_MAX) {
     recentSystemErrors.length = RECENT_SYSTEM_ERRORS_MAX;
   }
-  if (env?.TOPIC_MAP) {
+  if (env?.TOPIC_MAP && systemErrorKvThrottle('sys:recent_errors')) {
     Promise.resolve()
       .then(async () => {
         let list = [];
@@ -248,14 +251,7 @@ async function evaluateLegacyPolicy(env, message, user = {}) {
     getVerificationState(env, user.userId ?? message.chat?.id),
     getStoredRules(env),
   ]);
-  const rules = blockedWords.filter(Boolean).map((pattern, index) => ({
-    ruleId: `legacy_blocked:${index}`,
-    ruleType: 'blocked_keyword',
-    matchType: 'contains',
-    pattern,
-    action: 'reject',
-    priority: index,
-  }));
+  const rules = buildLegacyBlockedRules(blockedWords);
   return evaluateMessagePolicy({
     message,
     user: {
@@ -897,11 +893,12 @@ async function notifyAdmin(env, alertType, message, threadId, parseMode = 'HTML'
  */
 async function updateSpamStats(env, reasons) {
   try {
-    for (const reason of reasons) {
+    // 各原因计数并行写入，缩短 waitUntil 内滞留时间
+    await Promise.all((reasons || []).map(async (reason) => {
       const countKey = `stats:spam:${reason}`;
       const current = parseInt(await env.TOPIC_MAP.get(countKey) || "0");
       await env.TOPIC_MAP.put(countKey, String(current + 1), { expirationTtl: 2592000 }); // 30天
-    }
+    }));
     const totalKey = 'stats:spam:total';
     const total = parseInt(await env.TOPIC_MAP.get(totalKey) || "0");
     await env.TOPIC_MAP.put(totalKey, String(total + 1), { expirationTtl: 2592000 });
@@ -1012,7 +1009,11 @@ const legacyApp = {
             message: '验证链接缺少必要参数或系统未配置 Turnstile。',
             hint,
           }), {
-            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+            headers: {
+              'Content-Type': 'text/html; charset=utf-8',
+              'X-Content-Type-Options': 'nosniff',
+              'Referrer-Policy': 'no-referrer',
+            },
           });
         }
 
@@ -1045,7 +1046,14 @@ const legacyApp = {
           // 过期提示分钟数对齐 TURNSTILE_VERIFY_TTL，避免页面文案与后端有效期漂移
           verifyExpireMinutes: CONFIG.TURNSTILE_VERIFY_TTL / 60,
         }),
-          { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': csp } }
+          {
+            headers: {
+              'Content-Type': 'text/html; charset=utf-8',
+              'Content-Security-Policy': csp,
+              'X-Content-Type-Options': 'nosniff',
+              'Referrer-Policy': 'no-referrer',
+            },
+          }
         );
       }
 
@@ -1056,8 +1064,17 @@ const legacyApp = {
 
     // PR #12: Turnstile token 验证端点（由前端页面 JS fetch 调用）
     if ((url.pathname === "/verify-callback" || url.pathname.endsWith("/verify-callback")) && request.method === "POST") {
+      let body;
       try {
-        const body = await request.json();
+        body = await request.json();
+      } catch {
+        // 非法 JSON 属客户端错误，返回 400 而非 500，避免错误日志噪声
+        return new Response(JSON.stringify({ success: false, error: 'invalid_json' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      try {
         const { token, code, userId } = body || {};
 
         if (!token || !code || !userId) {
@@ -1293,7 +1310,7 @@ async function handlePrivateMessage(msg, env, ctx) {
   if (!rateLimit.allowed) {
     await tgCall(env, "sendMessage", {
       chat_id: userId,
-      text: USER_COPY.rateLimited,
+      text: USER_COPY.rateLimited(Math.max(1, Math.round(CONFIG.RATE_LIMIT_WINDOW / 60))),
     });
     return;
   }
@@ -1309,14 +1326,7 @@ async function handlePrivateMessage(msg, env, ctx) {
     getBlockedWords(env, false, Logger),
     getVerificationState(env, userId),
   ]);
-  const blockedRules = blockedWords.map((pattern, index) => ({
-    ruleId: `legacy_blocked:${index}`,
-    ruleType: 'blocked_keyword',
-    matchType: 'contains',
-    pattern,
-    action: 'reject',
-    priority: index,
-  }));
+  const blockedRules = buildLegacyBlockedRules(blockedWords);
   const policyResult = evaluateMessagePolicy({
     message: msg,
     user: {
@@ -1829,16 +1839,20 @@ async function _handleAdminReplyInner(msg, env, ctx) {
     }
     return;
   } else {
-    // 降级全量扫描（带数量限制，防止 DoS）
-    const allKeys = await getAllKeys(env, "user:");
-    let scanned = 0;
-    for (const { name } of allKeys) {
-      if (++scanned > 200) break; // 限制最大扫描数，超过视为不存在
-      const rec = await safeGetJSON(env, name, null);
-      if (rec && Number(rec.thread_id) === Number(threadId)) {
-        userId = Number(name.slice(5));
-        break;
-      }
+    // 降级扫描（带数量限制，防止 DoS；分批并发读取缩短反查延迟）。
+    // 直接单次 list 取前 scanLimit 个 user: 键，避免 getAllKeys 无上限分页后再截断的浪费
+    const scanLimit = 200; // 最大扫描数，超过视为不存在
+    const scanBatch = 20;  // 每批并发读数量，平衡延迟与 KV 压力
+    const listed = await env.TOPIC_MAP.list({ prefix: 'user:', limit: scanLimit });
+    const candidates = listed.keys || [];
+    for (let i = 0; i < candidates.length && !userId; i += scanBatch) {
+      const batch = candidates.slice(i, i + scanBatch);
+      const results = await Promise.all(batch.map(async ({ name }) => {
+        const rec = await safeGetJSON(env, name, null);
+        return rec && Number(rec.thread_id) === Number(threadId) ? name : null;
+      }));
+      const hit = results.find(Boolean);
+      if (hit) userId = Number(hit.slice(5));
     }
     // 扫描完仍未找到，加入负缓存
     if (!userId) {

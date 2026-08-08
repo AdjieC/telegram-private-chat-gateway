@@ -60,17 +60,27 @@ export function createVerificationModule(deps) {
       formData.append('remoteip', remoteIp);
     }
 
+    // 给 siteverify 请求加超时，避免网络悬挂拖住回调等待
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
     try {
       const resp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formData.toString()
+        body: formData.toString(),
+        signal: controller.signal,
       });
       const result = await resp.json();
       return { success: result.success === true, error: result['error-codes']?.join(', ') };
     } catch (e) {
+      if (e?.name === 'AbortError') {
+        logger.warn('turnstile_verify_timeout');
+        return { success: false, error: 'timeout' };
+      }
       logger.error('turnstile_verify_error', e);
       return { success: false, error: e.message };
+    } finally {
+      clearTimeout(timer);
     }
   }
 

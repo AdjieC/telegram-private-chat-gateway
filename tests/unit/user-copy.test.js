@@ -9,7 +9,8 @@ import {
 
 describe('user-copy', () => {
   it('用户侧拦截/限流文案齐全', () => {
-    expect(USER_COPY.rateLimited).toMatch(/频繁/);
+    expect(USER_COPY.rateLimited(1)).toMatch(/频繁/);
+    expect(USER_COPY.rateLimited(1)).toContain('1 分钟');
     expect(USER_COPY.systemBusy).toMatch(/繁忙/);
     expect(USER_COPY.bannedHourly).toMatch(/封禁/);
     expect(USER_COPY.mutedHourly).toMatch(/静音/);

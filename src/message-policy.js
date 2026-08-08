@@ -121,6 +121,20 @@ function ruleId(rule) {
   return value == null ? null : String(value);
 }
 
+/** 兼容层：将屏蔽词数组转为 legacy blocked_keyword 规则（入口与策略评估共用，避免两处构造漂移） */
+export function buildLegacyBlockedRules(blockedWords) {
+  return (Array.isArray(blockedWords) ? blockedWords : [])
+    .filter(Boolean)
+    .map((pattern, index) => ({
+      ruleId: `legacy_blocked:${index}`,
+      ruleType: 'blocked_keyword',
+      matchType: 'contains',
+      pattern,
+      action: 'reject',
+      priority: index,
+    }));
+}
+
 function enabledRules(rules) {
   return [...(Array.isArray(rules) ? rules : [])]
     .filter(rule => rule && rule.enabled !== false && rule.enabled !== 0)
