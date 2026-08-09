@@ -7,7 +7,7 @@ import {
 } from './src/conversation-service.js';
 import { createLogger } from './src/logger.js';
 import { evaluateMessagePolicy, buildLegacyBlockedRules } from './src/message-policy.js';
-import { createTelegramClient, TelegramApiError } from './src/telegram-client.js';
+import { createTelegramClient, TelegramApiError, classifyTelegramError } from './src/telegram-client.js';
 import { createD1Storage } from './src/storage/d1-storage.js';
 import { ensureMigrations } from './src/storage/migrations.js';
 import { createEphemeralStore } from './src/storage/kv-ephemeral-store.js';
@@ -88,7 +88,7 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.2.5';
+const GATEWAY_VERSION = '1.2.6';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -1136,12 +1136,14 @@ async function handlePrivateMessage(msg, env, ctx) {
   // 放在限流检查之后：被限流的消息不会进入验证/转发链路，无需触发 KV 写
   await saveUserProfileSnapshot(env, userId, msg.from);
 
-  // 拦截普通用户发送的指令（/help 已在入口处理）。
-  // 已知管理指令给一次性（每小时节流）友好提示，避免用户误发指令后毫无反馈
-  if (msg.text && msg.text.startsWith("/") && msg.text.trim() !== "/start") {
-    const command = removeCommandBotSuffix(msg.text.trim());
-    if (isAdminCommandText(command)) {
+  // 拦截普通用户发送的指令（/help 已在入口处理；/start 及深链参数走验证/无操作流程）。
+  // 已知管理指令与未知指令都给一次性（每小时节流）友好提示，避免用户误发后毫无反馈
+  const privateCommand = removeCommandBotSuffix((msg.text || '').trim());
+  if (msg.text && msg.text.startsWith("/") && !/^\/start(\s|$)/i.test(privateCommand)) {
+    if (isAdminCommandText(privateCommand)) {
       await sendHourlyNotice(env, userId, `cmd_hint:${userId}`, USER_COPY.adminCommandHint);
+    } else {
+      await sendHourlyNotice(env, userId, `cmd_unknown:${userId}`, USER_COPY.unknownCommandHint);
     }
     return;
   }
@@ -1209,9 +1211,9 @@ async function handlePrivateMessage(msg, env, ctx) {
   }
   if (policyResult.action === 'auto_reply_only') return;
 
-  // 已验证用户发送 /start 或 /cancel 视为无操作命令，不转发到管理话题（未验证用户不会走到这里）
+  // 已验证用户发送 /start（含深链参数）或 /cancel 视为无操作命令，不转发到管理话题（未验证用户不会走到这里）
   const commandText = removeCommandBotSuffix((msg.text || '').trim());
-  if (commandText === '/start' || commandText === '/cancel') return;
+  if (/^\/start(\s|$)/i.test(commandText) || commandText === '/cancel') return;
 
   // 入站统计异步写入：不阻塞用户可见的转发链路（KV 读改写约几十毫秒）
   if (ctx?.waitUntil) {
@@ -1474,7 +1476,12 @@ async function handleForwardFailure(res, msg, userId, threadId, env) {
     return;
   }
 
-  if (desc.includes("chat not found")) throw new Error(`群组ID错误: ${env.SUPERGROUP_ID}`);
+  // 与 telegram-client 共用同一错误分类，避免手写描述匹配漂移
+  const category = classifyTelegramError({
+    status: res.error_code,
+    description: res.description,
+  }).category;
+  if (category === 'chat_not_found') throw new Error(`群组ID错误: ${env.SUPERGROUP_ID}`);
   if (desc.includes("not enough rights")) throw new Error("机器人权限不足 (需 Manage Topics)");
 
   // forwardMessage 失败，使用 copyMessage 作为降级方案

@@ -688,6 +688,54 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     expect(telegram2.calls.some(c => c.method === 'sendMessage' && c.body.chat_id === newUserId)).toBe(true);
   });
 
+  it('未知指令给一次性提示，且 /start 深链参数仍触发验证', async () => {
+    const telegram = createTelegramMock();
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    const userId = 779;
+    await preVerify(env, userId);
+    await seedTopic(env, userId, 88);
+
+    // 未知指令：提示一次，不转发
+    await send(messageUpdate(privateMessage(userId, 901, { text: '/randomcmd' }), 9701), env, telegram);
+    let hints = telegram.calls.filter(c => c.method === 'sendMessage' && c.body.chat_id === userId);
+    expect(hints).toHaveLength(1);
+    expect(hints[0].body.text).toContain('未识别的指令');
+    expect(telegram.calls.filter(c => c.method === 'forwardMessage')).toHaveLength(0);
+
+    // 同一小时内再次发送未知指令：节流，不重复打扰
+    telegram.calls.length = 0;
+    await send(messageUpdate(privateMessage(userId, 902, { text: '/anothercmd' }), 9702), env, telegram);
+    expect(telegram.calls.some(c => c.method === 'sendMessage' && c.body.chat_id === userId)).toBe(false);
+
+    // 深链 /start payload：未验证用户触发验证而非未知指令提示
+    const freshEnv = createMockEnv();
+    const newUserId = 780;
+    const telegram2 = createTelegramMock();
+    vi.stubGlobal('fetch', telegram2.fetchImpl);
+    await send(messageUpdate(privateMessage(newUserId, 903, { text: '/start ref123' }), 9703), freshEnv, telegram2);
+    const toUser = telegram2.calls.filter(c => c.method === 'sendMessage' && c.body.chat_id === newUserId);
+    expect(toUser.some(c => c.body.text.includes('人机验证') || c.body.text.includes('验证'))).toBe(true);
+    expect(toUser.some(c => c.body.text.includes('未识别的指令'))).toBe(false);
+  });
+
+  it('forwardMessage 返回 chat not found 时按配置错误处理（分类复用），不向用户泄露细节', async () => {
+    const telegram = createTelegramMock({
+      forwardMessage: async () => ({ ok: false, error_code: 400, description: 'Bad Request: chat not found' }),
+    });
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    const userId = 888;
+    await preVerify(env, userId);
+    // 使用本文件未用过的 threadId，避免健康缓存跳过探测
+    await seedTopic(env, userId, 779);
+
+    await send(messageUpdate(privateMessage(userId, 801, { text: 'hi' }), 9801), env, telegram);
+    const busy = telegram.calls.find(c => c.method === 'sendMessage' && c.body.chat_id === userId);
+    expect(busy.body.text).toContain('系统繁忙');
+    expect(busy.body.text).not.toContain('chat not found');
+  });
+
   it('scheduled 失败被捕获记录而非产生未处理拒绝', async () => {
     const env = createMockEnv({ TG_BOT_DB: 'not-a-binding' });
     const pending = [];

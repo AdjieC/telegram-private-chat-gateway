@@ -169,6 +169,13 @@ describe('admin-actions 管理动作', () => {
     expect(await env.TOPIC_MAP.get('note:42')).toBe(null);
   });
 
+  it('note 超长内容截断到 500 字符，防 KV 备注被撑爆', async () => {
+    const { actions, env } = createActions();
+    await actions.note(env, 1, 43, `/note ${'长'.repeat(800)}`);
+    const saved = await env.TOPIC_MAP.get('note:43');
+    expect(saved).toHaveLength(500);
+  });
+
   it('panel 展示用户话题标题与状态', async () => {
     const { actions, calls, env } = createActions();
     await env.TOPIC_MAP.put('user:42', JSON.stringify({ thread_id: 88, title: '测试用户', closed: false }));

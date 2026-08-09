@@ -88,6 +88,13 @@ describe('verify-page', () => {
     expect(page.indexOf('Hostname')).toBeGreaterThan(page.indexOf('id="tech-detail"'));
   });
 
+  it('未知 Turnstile 错误码兜底为「未知错误」展示，不泄露原始码给用户主文案', () => {
+    // 未知错误码分支：detailEl 展示「错误码 + 未知错误」，用户主状态只显示友好提示
+    expect(page).toContain('未知错误');
+    // 主状态文案始终是友好提示，不直接出现错误码
+    expect(page).not.toContain('300099');
+  });
+
   it('页面标题随验证状态更新，便于多标签页识别', () => {
     expect(page).toContain("'✅ 验证成功'");
     expect(page).toContain("'❌ 验证失败'");

@@ -133,7 +133,9 @@ In the supergroup (sender must be group creator/admin, `ADMIN_IDS`, or `OWNER_ID
 | `/find query` | Find by UID / username / name |
 | `/notes query` | Search admin notes |
 | `/panel` `/info` | In-user topic: action panel and profile |
+| `/note query` | In-user topic: write / view notes |
 | `/ban` `/close` `/reset` | Require confirmation; also mute / open / trust, etc. |
+| `/cleanup` | Clean up invalid topics (requires confirmation) |
 | `/synccommands` | Owner-only: register Bot slash command menu |
 
 Stats and heat use **China time CST (UTC+8)**. End users only get `/start`, `/help`, and the verification flow.

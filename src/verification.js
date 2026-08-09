@@ -9,6 +9,9 @@ import { escapeHtml, generateVerifyCode } from './utils.js';
 // 验证请求速率限制窗口（秒）。文案中的「分钟数」由本常量换算，避免与提示语漂移。
 const VERIFY_RATE_WINDOW_SECONDS = 300;
 
+// Turnstile siteverify 调用超时（毫秒）：避免网络悬挂拖住回调等待
+const TURNSTILE_VERIFY_TIMEOUT_MS = 10000;
+
 // --- 本地题库 (15条) ---
 export const LOCAL_QUESTIONS = [
   {"question": "冰融化后会变成什么？", "correct_answer": "水", "incorrect_answers": ["石头", "木头", "火"]},
@@ -82,7 +85,7 @@ export function createVerificationModule(deps) {
 
     // 给 siteverify 请求加超时，避免网络悬挂拖住回调等待
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
+    const timer = setTimeout(() => controller.abort(), TURNSTILE_VERIFY_TIMEOUT_MS);
     try {
       const resp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
         method: 'POST',

@@ -1494,6 +1494,8 @@ var USER_COPY = {
   conversationClosed: "\u{1F6AB} \u5F53\u524D\u5BF9\u8BDD\u5DF2\u88AB\u7BA1\u7406\u5458\u5173\u95ED\u3002\u5982\u9700\u7EE7\u7EED\uFF0C\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u91CD\u65B0\u6253\u5F00\u3002",
   /** 普通用户私聊发送管理指令时的一次性提示（每小时节流，避免反复打扰） */
   adminCommandHint: "\u2139\uFE0F \u8BE5\u6307\u4EE4\u4EC5\u4F9B\u7BA1\u7406\u5458\u5728\u8D85\u7EA7\u7FA4\u8BDD\u9898\u5185\u4F7F\u7528\u3002\u5982\u9700\u8054\u7CFB\u7BA1\u7406\u5458\uFF0C\u76F4\u63A5\u53D1\u9001\u6D88\u606F\u5373\u53EF\u3002",
+  /** 普通用户私聊发送未知指令时的一次性提示（每小时节流） */
+  unknownCommandHint: "\u2139\uFE0F \u672A\u8BC6\u522B\u7684\u6307\u4EE4\u3002\u53D1\u9001 /help \u67E5\u770B\u53EF\u7528\u529F\u80FD\u3002",
   pendingDelivered(count) {
     return `\u{1F4E9} \u521A\u624D\u7684 <b>${count}</b> \u6761\u6D88\u606F\u5DF2\u5E2E\u60A8\u9001\u8FBE\u7BA1\u7406\u5458\u3002`;
   },
@@ -2986,6 +2988,7 @@ ${question}
 
 // src/verification.js
 var VERIFY_RATE_WINDOW_SECONDS = 300;
+var TURNSTILE_VERIFY_TIMEOUT_MS = 1e4;
 var LOCAL_QUESTIONS = [
   { "question": "\u51B0\u878D\u5316\u540E\u4F1A\u53D8\u6210\u4EC0\u4E48\uFF1F", "correct_answer": "\u6C34", "incorrect_answers": ["\u77F3\u5934", "\u6728\u5934", "\u706B"] },
   { "question": "\u6B63\u5E38\u4EBA\u6709\u51E0\u53EA\u773C\u775B\uFF1F", "correct_answer": "2", "incorrect_answers": ["1", "3", "4"] },
@@ -3039,7 +3042,7 @@ function createVerificationModule(deps) {
       formData.append("remoteip", remoteIp);
     }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1e4);
+    const timer = setTimeout(() => controller.abort(), TURNSTILE_VERIFY_TIMEOUT_MS);
     try {
       const resp = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
         method: "POST",
@@ -3523,6 +3526,7 @@ function createMediaGroupModule(deps) {
 // src/spam.js
 var MESSAGE_HASH_MAX_ENTRIES = 5e3;
 var SPAM_SNIPPET_MAX_LENGTH = 120;
+var SPAM_STATS_TTL_SECONDS = 30 * 24 * 3600;
 function createSpamModule(deps) {
   const {
     config,
@@ -3612,11 +3616,11 @@ function createSpamModule(deps) {
       await Promise.all((reasons || []).map(async (reason) => {
         const countKey = `stats:spam:${reason}`;
         const current = parseInt(await env.TOPIC_MAP.get(countKey) || "0");
-        await env.TOPIC_MAP.put(countKey, String(current + 1), { expirationTtl: 2592e3 });
+        await env.TOPIC_MAP.put(countKey, String(current + 1), { expirationTtl: SPAM_STATS_TTL_SECONDS });
       }));
       const totalKey = "stats:spam:total";
       const total = parseInt(await env.TOPIC_MAP.get(totalKey) || "0");
-      await env.TOPIC_MAP.put(totalKey, String(total + 1), { expirationTtl: 2592e3 });
+      await env.TOPIC_MAP.put(totalKey, String(total + 1), { expirationTtl: SPAM_STATS_TTL_SECONDS });
     } catch (e) {
       logger.warn("spam_stats_update_failed", { error: e.message });
     }
@@ -5422,7 +5426,7 @@ var CONFIG = {
   RETRY_COUNT_TTL_SECONDS: 3600
   // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.2.5";
+var GATEWAY_VERSION = "1.2.6";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
@@ -6262,10 +6266,12 @@ async function handlePrivateMessage(msg, env, ctx) {
     return;
   }
   await saveUserProfileSnapshot(env, userId, msg.from);
-  if (msg.text && msg.text.startsWith("/") && msg.text.trim() !== "/start") {
-    const command = removeCommandBotSuffix(msg.text.trim());
-    if (isAdminCommandText(command)) {
+  const privateCommand = removeCommandBotSuffix((msg.text || "").trim());
+  if (msg.text && msg.text.startsWith("/") && !/^\/start(\s|$)/i.test(privateCommand)) {
+    if (isAdminCommandText(privateCommand)) {
       await sendHourlyNotice(env, userId, `cmd_hint:${userId}`, USER_COPY.adminCommandHint);
+    } else {
+      await sendHourlyNotice(env, userId, `cmd_unknown:${userId}`, USER_COPY.unknownCommandHint);
     }
     return;
   }
@@ -6322,7 +6328,7 @@ async function handlePrivateMessage(msg, env, ctx) {
   }
   if (policyResult.action === "auto_reply_only") return;
   const commandText = removeCommandBotSuffix((msg.text || "").trim());
-  if (commandText === "/start" || commandText === "/cancel") return;
+  if (/^\/start(\s|$)/i.test(commandText) || commandText === "/cancel") return;
   if (ctx?.waitUntil) {
     ctx.waitUntil(bumpDailyStat(env, "messages_in", 1));
   } else {
@@ -6519,7 +6525,11 @@ async function handleForwardFailure(res, msg, userId, threadId, env) {
     });
     return;
   }
-  if (desc.includes("chat not found")) throw new Error(`\u7FA4\u7EC4ID\u9519\u8BEF: ${env.SUPERGROUP_ID}`);
+  const category = classifyTelegramError({
+    status: res.error_code,
+    description: res.description
+  }).category;
+  if (category === "chat_not_found") throw new Error(`\u7FA4\u7EC4ID\u9519\u8BEF: ${env.SUPERGROUP_ID}`);
   if (desc.includes("not enough rights")) throw new Error("\u673A\u5668\u4EBA\u6743\u9650\u4E0D\u8DB3 (\u9700 Manage Topics)");
   Logger.warn("forward_fallback_to_copy", {
     userId,

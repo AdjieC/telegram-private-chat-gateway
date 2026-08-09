@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### 行为与体验
+
+- **未知指令一次性提示**：普通用户私聊发送未识别指令时，每小时最多一次提示「发送 /help 查看可用功能」，不再静默丢弃。
+- **`/start` 深链参数修复**：`/start <payload>`（Telegram 深链）不再被指令拦截分支静默丢弃——未验证用户点深链可正常触发验证，已验证用户视为无操作命令不转发。
+
+### 一致性
+
+- **转发失败分类复用**：`handleForwardFailure` 的「chat not found」判断改用 `classifyTelegramError` 分类结果，替换手写描述匹配，与 `telegram-client` 共用同一分类源。
+
+### 配置与常量
+
+- **Turnstile 验证超时命名**：`verifyTurnstileToken` 的 10s 硬编码超时收敛为 `TURNSTILE_VERIFY_TIMEOUT_MS`。
+- **spam 统计保留期命名**：spam 分类统计的 30 天 KV TTL 收敛为 `SPAM_STATS_TTL_SECONDS`。
+
+### 测试与质量
+
+- **覆盖率阈值上调**：`vitest.config.js` 阈值由 funcs 50 / lines 45 / branches 40 上调至 funcs 75 / lines 65 / branches 55（实际 81 / 72 / 65），锁定后续测试覆盖不回落。
+- **测试补充**：`note` 500 字符截断、验证页未知错误码兜底、`chat not found` 转发失败处理、未知指令提示与深链验证。
+
+### 文档
+
+- **README 命令速览补全**：中英文 README 补充 `/note`、`/cleanup` 行，与运维指南对齐。
+
 ### 性能
 
 - **Webhook 请求体单次读取**：`validateTelegramWebhookRequest` 校验通过后直接返回解析后的 Update，`routeUpdate` 复用结果，消除此前每条 webhook 二次 `clone().json()` 的读取与解析；密钥校验仍保持在最前，未认证请求不泄露 env 在位信息。

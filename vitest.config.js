@@ -10,9 +10,9 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       include: ['worker.js', 'src/**/*.js'],
       thresholds: {
-        functions: 50,
-        lines: 45,
-        branches: 40
+        functions: 75,
+        lines: 65,
+        branches: 55
       }
     }
   }

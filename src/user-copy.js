@@ -56,6 +56,8 @@ export const USER_COPY = {
   /** 普通用户私聊发送管理指令时的一次性提示（每小时节流，避免反复打扰） */
   adminCommandHint:
     'ℹ️ 该指令仅供管理员在超级群话题内使用。如需联系管理员，直接发送消息即可。',
+  /** 普通用户私聊发送未知指令时的一次性提示（每小时节流） */
+  unknownCommandHint: 'ℹ️ 未识别的指令。发送 /help 查看可用功能。',
   pendingDelivered(count) {
     return `📩 刚才的 <b>${count}</b> 条消息已帮您送达管理员。`;
   },

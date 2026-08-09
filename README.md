@@ -131,7 +131,9 @@ https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<WORKER_URL>&secret_token
 | `/find 词` | 按 UID / 用户名 / 姓名查找 |
 | `/notes 词` | 搜索管理员备注 |
 | `/panel` `/info` | 用户话题内：快捷面板与资料 |
+| `/note 词` | 用户话题内：写/看备注 |
 | `/ban` `/close` `/reset` | 需二次确认；另有 mute / open / trust 等 |
+| `/cleanup` | 清理无效话题（需二次确认） |
 | `/synccommands` | Owner 同步 Bot 斜杠命令菜单 |
 
 日切与热力展示使用 **中国时间 CST（UTC+8）**。私聊用户仅 `/start` `/help`（及验证流程）。

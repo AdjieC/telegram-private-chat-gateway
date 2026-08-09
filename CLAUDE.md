@@ -169,21 +169,21 @@ npm run sync-docs
 | `checkRateLimit` | L785 | 速率限制检查 |
 | `sendHourlyNotice` | L1109 | 低频状态（封禁/静音）每小时最多提醒一次：避免用户反复发送时被重复打扰。 |
 | `handlePrivateMessage` | L1121 | — |
-| `forwardToTopic` | L1229 | 职责：前置检查 → 获取/创建话题 → 健康检查 → 执行转发 |
-| `checkThreadHealth` | L1325 | 话题健康检查 — 双层缓存（内存 + KV）+ 探测 |
-| `executeMessageForward` | L1388 | 执行消息转发 — forwardMessage → copyMessage 降级 + 重定向检测 |
-| `handleForwardRedirect` | L1432 | 处理转发重定向 — 删除误投消息 + 触发重建 |
-| `handleForwardFailure` | L1460 | 处理转发失败 — 话题丢失检测 + copyMessage 降级 + 通知管理员 |
-| `removeCommandBotSuffix` | L1513 | 例如：/listwords@callcosr_bot -> /listwords |
-| `handleAdminReply` | L1519 | — |
-| `isOwnerUser` | L1533 | --- 管理员命令处理函数 --- |
-| `resolveThreadIdForUser` | L1541 | — |
-| `_handleAdminReplyInner` | L1558 | 职责：权限检查 → 全局命令路由 → 用户反查 → 话题内指令路由 → 消息转发 |
-| `createTopic` | L1763 | 为话题建立 thread->user 映射，避免管理员命令时全量 KV 反查 |
-| `updateThreadStatus` | L1777 | 更新话题状态 |
-| `buildTopicTitle` | L1822 | 资料缺失时勿在调用方传入仅 { id } 的 from（会退化为 "User"）；应先 resolveUserFromForTopic。 |
-| `getTelegramClient` | L1851 | — |
-| `tgCall` | L1869 | 改进的 Telegram API 调用（添加超时和 HTTPS 强制） |
+| `forwardToTopic` | L1231 | 职责：前置检查 → 获取/创建话题 → 健康检查 → 执行转发 |
+| `checkThreadHealth` | L1327 | 话题健康检查 — 双层缓存（内存 + KV）+ 探测 |
+| `executeMessageForward` | L1390 | 执行消息转发 — forwardMessage → copyMessage 降级 + 重定向检测 |
+| `handleForwardRedirect` | L1434 | 处理转发重定向 — 删除误投消息 + 触发重建 |
+| `handleForwardFailure` | L1462 | 处理转发失败 — 话题丢失检测 + copyMessage 降级 + 通知管理员 |
+| `removeCommandBotSuffix` | L1520 | 例如：/listwords@callcosr_bot -> /listwords |
+| `handleAdminReply` | L1526 | — |
+| `isOwnerUser` | L1540 | --- 管理员命令处理函数 --- |
+| `resolveThreadIdForUser` | L1548 | — |
+| `_handleAdminReplyInner` | L1565 | 职责：权限检查 → 全局命令路由 → 用户反查 → 话题内指令路由 → 消息转发 |
+| `createTopic` | L1770 | 为话题建立 thread->user 映射，避免管理员命令时全量 KV 反查 |
+| `updateThreadStatus` | L1784 | 更新话题状态 |
+| `buildTopicTitle` | L1829 | 资料缺失时勿在调用方传入仅 { id } 的 from（会退化为 "User"）；应先 resolveUserFromForTopic。 |
+| `getTelegramClient` | L1858 | — |
+| `tgCall` | L1876 | 改进的 Telegram API 调用（添加超时和 HTTPS 强制） |
 
 ### src/utils.js 纯函数
 

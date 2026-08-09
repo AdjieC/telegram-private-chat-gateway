@@ -18,6 +18,9 @@ const MESSAGE_HASH_MAX_ENTRIES = 5000;
 /** 管理员告警附带的截断消息片段上限（仅正文，不含发送者资料） */
 const SPAM_SNIPPET_MAX_LENGTH = 120;
 
+/** spam 分类统计 KV 保留期（秒）：趋势参考数据，30 天后自动过期 */
+const SPAM_STATS_TTL_SECONDS = 30 * 24 * 3600;
+
 /**
  * @param {object} deps
  *   config  垃圾检测相关配置（SPAM_MESSAGE_HASH_TTL / SPAM_REPEAT_MESSAGE_LIMIT /
@@ -167,11 +170,11 @@ export function createSpamModule(deps) {
       await Promise.all((reasons || []).map(async (reason) => {
         const countKey = `stats:spam:${reason}`;
         const current = parseInt(await env.TOPIC_MAP.get(countKey) || "0");
-        await env.TOPIC_MAP.put(countKey, String(current + 1), { expirationTtl: 2592000 }); // 30天
+        await env.TOPIC_MAP.put(countKey, String(current + 1), { expirationTtl: SPAM_STATS_TTL_SECONDS });
       }));
       const totalKey = 'stats:spam:total';
       const total = parseInt(await env.TOPIC_MAP.get(totalKey) || "0");
-      await env.TOPIC_MAP.put(totalKey, String(total + 1), { expirationTtl: 2592000 });
+      await env.TOPIC_MAP.put(totalKey, String(total + 1), { expirationTtl: SPAM_STATS_TTL_SECONDS });
     } catch (e) {
       logger.warn('spam_stats_update_failed', { error: e.message });
     }
