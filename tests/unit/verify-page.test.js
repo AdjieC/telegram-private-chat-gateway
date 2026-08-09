@@ -103,6 +103,15 @@ describe('verify-page', () => {
     expect(page).toContain('if (window.turnstile)');
   });
 
+  it('Turnstile siteverify 常见错误码映射为用户可读文案', () => {
+    expect(page).toContain("'timeout-or-duplicate':");
+    expect(page).toContain('验证令牌已使用或过期');
+    expect(page).toContain("'invalid-input-secret':");
+    expect(page).toContain("'missing-input-response':");
+    // 未映射错误码仍走「验证失败 + detail」兜底
+    expect(page).toContain("'验证失败: ' + (data.detail || data.error || '未知错误')");
+  });
+
   it('页面标题随验证状态更新，便于多标签页识别', () => {
     expect(page).toContain("'✅ 验证成功'");
     expect(page).toContain("'❌ 验证失败'");

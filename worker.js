@@ -89,7 +89,7 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.2.8';
+const GATEWAY_VERSION = '1.2.9';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -111,6 +111,8 @@ const ADMIN_STATUS_MAX_ENTRIES = 1000;
 const THREAD_HEALTH_MAX_ENTRIES = 1000;
 /** 话题状态降级全量反查的最大分页数（每页 1000 键），防止超大命名空间拖垮请求 */
 const TOPIC_SCAN_MAX_PAGES = 20;
+/** Topic 创建锁等待轮询延时（毫秒）：获取锁失败后按序等待再重读 */
+const TOPIC_LOCK_RETRY_DELAYS_MS = [150, 225, 300];
 
 function setBoundedCache(cache, key, value, maxEntries) {
   cache.delete(key);
@@ -604,8 +606,8 @@ async function getOrCreateUserTopicRec(from, key, env, userId) {
       }
     }
 
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      await new Promise(resolve => setTimeout(resolve, 150 + attempt * 75));
+    for (const delay of TOPIC_LOCK_RETRY_DELAYS_MS) {
+      await new Promise(resolve => setTimeout(resolve, delay));
       const refreshed = await storage.getUser(userId);
       if (refreshed?.topicId) {
         const rec = { thread_id: refreshed.topicId, title: buildTopicTitle(resolvedFrom), closed: false };

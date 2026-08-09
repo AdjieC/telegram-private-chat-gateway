@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### 健壮性
+
+- **Turnstile siteverify 错误码可读化**：验证页为 `timeout-or-duplicate` / `invalid-input-secret` / `bad-request` / `missing-input-response` / `invalid-input-response` 等常见服务端错误码补充用户可读文案，未映射错误码仍走兜底展示。
+
+### 配置与常量
+
+- **Topic 锁轮询延时命名**：`TOPIC_LOCK_RETRY_DELAYS_MS`（150/225/300）。
+- **转发去重标记 TTL 命名**：`FORWARDED_MARK_TTL_SECONDS`（3600）。
+- **日统计保留期命名**：`DAILY_STATS_TTL_SECONDS`（21 天）。
+
+### 文档
+
+- **operations.md 结构修正**：「管理命令速查」由「常见故障」下的三级标题提升为独立二级章节（对照表非故障）。
+
+### 测试
+
+- 新增：429 连续失败以 `rate_limited` 终止、未授权用户 `/start` 不泄露菜单、spam 静默模式（不通知但统计照写）、`shiftHourBuckets` 24 整倍/负偏移、siteverify 错误码映射。
+
 ### 一致性
 
 - **命令参数提取统一**：新增 `commandArgument(text, command)`，`/addword` `/delword` 不再使用 `slice(9)`（不支持 `@bot` 后缀），`/note` `/find` `/notes` 一并接入，消除命令前缀长度漂移。

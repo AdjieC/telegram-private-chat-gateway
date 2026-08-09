@@ -3021,6 +3021,7 @@ ${question}
 // src/verification.js
 var VERIFY_RATE_WINDOW_SECONDS = 300;
 var TURNSTILE_VERIFY_TIMEOUT_MS = 1e4;
+var FORWARDED_MARK_TTL_SECONDS = 3600;
 var LOCAL_QUESTIONS = [
   { "question": "\u51B0\u878D\u5316\u540E\u4F1A\u53D8\u6210\u4EC0\u4E48\uFF1F", "correct_answer": "\u6C34", "incorrect_answers": ["\u77F3\u5934", "\u6728\u5934", "\u706B"] },
   { "question": "\u6B63\u5E38\u4EBA\u6709\u51E0\u53EA\u773C\u775B\uFF1F", "correct_answer": "2", "incorrect_answers": ["1", "3", "4"] },
@@ -3371,7 +3372,7 @@ function createVerificationModule(deps) {
           from: topicFrom
         };
         await forwardToTopic2(fakeMsg, userId, `user:${userId}`, env, ctx);
-        await env.TOPIC_MAP.put(forwardedKey, "1", { expirationTtl: 3600 });
+        await env.TOPIC_MAP.put(forwardedKey, "1", { expirationTtl: FORWARDED_MARK_TTL_SECONDS });
         return { forwarded: true };
       }));
       for (const r of results) {
@@ -3840,6 +3841,7 @@ function activitySourceLabel(source) {
 }
 
 // src/daily-stats.js
+var DAILY_STATS_TTL_SECONDS = 21 * 86400;
 function emptyDailyStats(day) {
   return {
     day,
@@ -3873,7 +3875,7 @@ async function bumpDailyStat(env, field, n = 1) {
       obj.hours[h] = Number(obj.hours[h] || 0) + Number(n || 0);
     }
     obj.updated_at = Date.now();
-    await env.TOPIC_MAP.put(key, JSON.stringify(obj), { expirationTtl: 21 * 86400 });
+    await env.TOPIC_MAP.put(key, JSON.stringify(obj), { expirationTtl: DAILY_STATS_TTL_SECONDS });
   } catch {
   }
 }
@@ -5321,7 +5323,14 @@ function onTurnstileSuccess(token) {
       var errMap = {
         'turnstile_failed': '\u4EBA\u673A\u9A8C\u8BC1\u672A\u901A\u8FC7\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5',
         'code_invalid_or_expired': '\u9A8C\u8BC1\u94FE\u63A5\u5DF2\u8FC7\u671F\uFF08\u7EA6 {{VERIFY_EXPIRE_MINUTES}} \u5206\u949F\uFF09\uFF0C\u8BF7\u8FD4\u56DE Telegram \u91CD\u65B0\u53D1\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5',
-        'server_not_configured': '\u670D\u52A1\u5668\u672A\u5B8C\u6210\u914D\u7F6E\uFF0C\u8BF7\u8054\u7CFB\u7BA1\u7406\u5458'
+        'server_not_configured': '\u670D\u52A1\u5668\u672A\u5B8C\u6210\u914D\u7F6E\uFF0C\u8BF7\u8054\u7CFB\u7BA1\u7406\u5458',
+        // Turnstile siteverify \u5E38\u89C1\u9519\u8BEF\u7801\uFF08\u6765\u81EA error-codes\uFF09\uFF1A
+        // https://developers.cloudflare.com/turnstile/troubleshooting/server-side-errors/error-codes/
+        'timeout-or-duplicate': '\u9A8C\u8BC1\u4EE4\u724C\u5DF2\u4F7F\u7528\u6216\u8FC7\u671F\uFF0C\u8BF7\u8FD4\u56DE Telegram \u91CD\u65B0\u83B7\u53D6\u94FE\u63A5',
+        'invalid-input-secret': '\u670D\u52A1\u5668\u9A8C\u8BC1\u914D\u7F6E\u5F02\u5E38\uFF0C\u8BF7\u8054\u7CFB\u7BA1\u7406\u5458',
+        'bad-request': '\u9A8C\u8BC1\u8BF7\u6C42\u5F02\u5E38\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5',
+        'missing-input-response': '\u672A\u6536\u5230\u9A8C\u8BC1\u7ED3\u679C\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5',
+        'invalid-input-response': '\u9A8C\u8BC1\u7ED3\u679C\u65E0\u6548\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5'
       };
       var errMsg = errMap[data.error] || ('\u9A8C\u8BC1\u5931\u8D25: ' + (data.detail || data.error || '\u672A\u77E5\u9519\u8BEF'));
       showStatus(errMsg, 'error');
@@ -5463,7 +5472,7 @@ var CONFIG = {
   RETRY_COUNT_TTL_SECONDS: 3600
   // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.2.8";
+var GATEWAY_VERSION = "1.2.9";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
@@ -5476,6 +5485,7 @@ var THREAD_NOT_FOUND_MAX_ENTRIES = 1e3;
 var ADMIN_STATUS_MAX_ENTRIES = 1e3;
 var THREAD_HEALTH_MAX_ENTRIES = 1e3;
 var TOPIC_SCAN_MAX_PAGES = 20;
+var TOPIC_LOCK_RETRY_DELAYS_MS = [150, 225, 300];
 function setBoundedCache(cache, key, value, maxEntries) {
   cache.delete(key);
   cache.set(key, value);
@@ -5892,8 +5902,8 @@ async function getOrCreateUserTopicRec(from, key, env, userId) {
         await storage.releaseTopicLock(userId, token, Date.now());
       }
     }
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 150 + attempt * 75));
+    for (const delay of TOPIC_LOCK_RETRY_DELAYS_MS) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
       const refreshed = await storage.getUser(userId);
       if (refreshed?.topicId) {
         const rec = { thread_id: refreshed.topicId, title: buildTopicTitle(resolvedFrom), closed: false };

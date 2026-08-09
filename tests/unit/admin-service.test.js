@@ -59,6 +59,20 @@ describe('管理员服务', () => {
     });
   });
 
+  it('完全未授权用户私聊 /start 返回 unauthorized 且不发送任何菜单', async () => {
+    const storage = {
+      getAdminUser: vi.fn().mockResolvedValue(null), // 不在管理员表，也非 Owner
+    };
+    const telegram = { call: vi.fn().mockResolvedValue({ ok: true }) };
+    const service = createAdminService({ storage, telegram });
+
+    await expect(service.handlePrivateAdminMessage({
+      text: '/start', chat: { id: 999 }, from: { id: 999 },
+    })).resolves.toMatchObject({ status: 'unauthorized' });
+    // 关键：不向未授权用户发送后台菜单（不泄露管理入口）
+    expect(telegram.call).not.toHaveBeenCalled();
+  });
+
   it('规则管理员可以进入后台，但不能执行用户封禁操作', async () => {
     const storage = {
       getAdminUser: vi.fn().mockResolvedValue({ role: 'rules_manager', enabled: true }),

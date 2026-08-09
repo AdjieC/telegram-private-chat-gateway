@@ -4,6 +4,9 @@
  */
 import { OPS_TZ_OFFSET_HOURS, opsDayKey, opsYesterdayKey } from './activity-summary.js';
 
+/** 日统计 KV 保留期（秒）：近 21 天趋势参考 */
+const DAILY_STATS_TTL_SECONDS = 21 * 86400;
+
 export function emptyDailyStats(day) {
   return {
     day,
@@ -38,7 +41,7 @@ export async function bumpDailyStat(env, field, n = 1) {
       obj.hours[h] = Number(obj.hours[h] || 0) + Number(n || 0);
     }
     obj.updated_at = Date.now();
-    await env.TOPIC_MAP.put(key, JSON.stringify(obj), { expirationTtl: 21 * 86400 });
+    await env.TOPIC_MAP.put(key, JSON.stringify(obj), { expirationTtl: DAILY_STATS_TTL_SECONDS });
   } catch { /* 统计失败不影响主流程 */ }
 }
 

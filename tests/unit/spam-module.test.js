@@ -135,6 +135,39 @@ describe('spam module', () => {
     expect(calls).toEqual([]);
   });
 
+  it('静默模式（SPAM_SILENCE_MODE）不通知管理员但统计照写', async () => {
+    const calls = [];
+    const store = new Map();
+    const m = createModule({
+      config: {
+        SPAM_MESSAGE_HASH_TTL: 3600,
+        SPAM_REPEAT_MESSAGE_LIMIT: 3,
+        NEW_USER_LINK_BLOCK_SECONDS: 86400,
+        SPAM_NOTIFY_ADMIN: true, // 即便 NOTIFY 开启，SILENCE 也应压制通知
+        SPAM_SILENCE_MODE: true,
+      },
+      tgCall: async (env, method) => { calls.push(method); return { ok: true }; },
+    });
+    const env = {
+      TOPIC_MAP: {
+        async get(key) { return store.get(key) ?? null; },
+        async put(key, value) { store.set(key, value); },
+      },
+      SUPERGROUP_ID: '-1001',
+    };
+    const waitUntil = vi.fn((p) => p);
+    await m.handleSpamMessage(env, 5, { text: '骚扰内容' }, {
+      isSpam: true, reasons: ['keyword'], details: { keyword: 'x' },
+    }, null, { waitUntil });
+    await waitUntil.mock.calls[0][0];
+
+    // 不发送任何管理员告警
+    expect(calls).toEqual([]);
+    // 分类统计仍写入
+    expect(store.has('stats:spam:keyword')).toBe(true);
+    expect(store.get('stats:spam:total')).toBe('1');
+  });
+
   it('handleSpamMessage 在通知开启时发送管理员告警', async () => {
     const calls = [];
     const m = createModule({

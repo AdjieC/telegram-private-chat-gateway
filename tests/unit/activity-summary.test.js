@@ -93,6 +93,22 @@ describe('activity-summary', () => {
     expect(peakHoursFromBuckets(local, 1)[0]).toMatchObject({ hour: 8, count: 5 });
   });
 
+  it('shiftHourBuckets 24 整倍偏移恒等，负偏移按模 24 归一', () => {
+    const hours = Array.from({ length: 24 }, () => 0);
+    hours[3] = 7; hours[20] = 9;
+
+    // 24 整倍偏移：结果不变
+    expect(shiftHourBuckets(hours, 24)).toEqual(hours);
+    expect(shiftHourBuckets(hours, 48)).toEqual(hours);
+
+    // 负偏移（如西时区 -5）等价于 +19
+    const west = shiftHourBuckets(hours, -5);
+    const east = shiftHourBuckets(hours, 19);
+    expect(west).toEqual(east);
+    expect(west[22]).toBe(7); // UTC 3 - 5 = 22
+    expect(west[15]).toBe(9); // UTC 20 - 5 = 15
+  });
+
   it('sparkline 可变长度', () => {
     expect(formatSparkline([0, 0, 0])).toBe('···');
     expect(formatSparkline([1, 4, 8])).toHaveLength(3);

@@ -96,6 +96,32 @@ describe('Telegram Client', () => {
     expect(sleep).toHaveBeenCalledWith(5000);
   });
 
+  it('429 连续两次失败后以 rate_limited 终止（attempts=2）', async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    // 每次返回独立 Response（同一 Response body 只能消费一次）
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(telegramResponse({
+        ok: false,
+        error_code: 429,
+        description: 'Too Many Requests',
+        parameters: { retry_after: 1 },
+      }, 429))
+      .mockResolvedValueOnce(telegramResponse({
+        ok: false,
+        error_code: 429,
+        description: 'Too Many Requests',
+        parameters: { retry_after: 1 },
+      }, 429));
+    const client = createClient(fetchImpl, { sleep });
+
+    await expect(client.call('sendMessage', {})).rejects.toMatchObject({
+      category: 'rate_limited',
+      attempts: 2,
+    });
+    expect(sleep).toHaveBeenCalledTimes(1); // 只等一次，第二次 429 直接终止
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it('429 的 retry_after 超出总时限时不等待也不继续重试', async () => {
     const sleep = vi.fn().mockResolvedValue(undefined);
     const fetchImpl = vi.fn().mockResolvedValue(telegramResponse({

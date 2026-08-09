@@ -12,6 +12,9 @@ const VERIFY_RATE_WINDOW_SECONDS = 300;
 // Turnstile siteverify 调用超时（毫秒）：避免网络悬挂拖住回调等待
 const TURNSTILE_VERIFY_TIMEOUT_MS = 10000;
 
+// 待转发消息去重标记保留期（秒）：防止同一 pendingId 在窗口内被重复转发
+const FORWARDED_MARK_TTL_SECONDS = 3600;
+
 // --- 本地题库 (15条) ---
 export const LOCAL_QUESTIONS = [
   {"question": "冰融化后会变成什么？", "correct_answer": "水", "incorrect_answers": ["石头", "木头", "火"]},
@@ -459,7 +462,7 @@ export function createVerificationModule(deps) {
           from: topicFrom,
         };
         await forwardToTopic(fakeMsg, userId, `user:${userId}`, env, ctx);
-        await env.TOPIC_MAP.put(forwardedKey, "1", { expirationTtl: 3600 });
+        await env.TOPIC_MAP.put(forwardedKey, "1", { expirationTtl: FORWARDED_MARK_TTL_SECONDS });
         return { forwarded: true };
       }));
       for (const r of results) {

@@ -170,7 +170,14 @@ function onTurnstileSuccess(token) {
       var errMap = {
         'turnstile_failed': '人机验证未通过，请刷新页面重试',
         'code_invalid_or_expired': '验证链接已过期（约 {{VERIFY_EXPIRE_MINUTES}} 分钟），请返回 Telegram 重新发消息获取新链接',
-        'server_not_configured': '服务器未完成配置，请联系管理员'
+        'server_not_configured': '服务器未完成配置，请联系管理员',
+        // Turnstile siteverify 常见错误码（来自 error-codes）：
+        // https://developers.cloudflare.com/turnstile/troubleshooting/server-side-errors/error-codes/
+        'timeout-or-duplicate': '验证令牌已使用或过期，请返回 Telegram 重新获取链接',
+        'invalid-input-secret': '服务器验证配置异常，请联系管理员',
+        'bad-request': '验证请求异常，请刷新页面重试',
+        'missing-input-response': '未收到验证结果，请刷新页面重试',
+        'invalid-input-response': '验证结果无效，请刷新页面重试'
       };
       var errMsg = errMap[data.error] || ('验证失败: ' + (data.detail || data.error || '未知错误'));
       showStatus(errMsg, 'error');
