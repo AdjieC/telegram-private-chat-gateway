@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### 行为与文案
+
+- **已验证用户 `/start` `/cancel` 不再转发**：无操作命令不再进入管理话题，未验证用户发 `/start` 仍正常触发验证。
+- **编辑消息被拦截同步提示用户**：用户把消息编辑成违规内容时，除管理员收到拦截原因外，用户侧也收到与新消息拦截一致的提示。
+- **验证页错误文案收拢**：缺参/未配置/重发引导三句文案移入 `VERIFY_COPY.pageErrorMissingParams`。
+
+### 健壮性与安全
+
+- **scheduled 错误捕获**：定时任务失败经 `Logger.error('scheduled_failed')` 进入系统错误缓冲（`/sysinfo` 错误页可见），不再产生 waitUntil 未处理拒绝。
+- **`ensureMigrations` 非对象 db 守卫**：误配为字符串的 `TG_BOT_DB` 直接给出明确错误，修复此前 `WeakMap.set` 抛错并留下孤儿未处理拒绝的缺陷。
+- **健康响应禁缓存**：`/` 与 `/health` 响应加 `Cache-Control: no-store`，避免存活检查被边缘缓存污染。
+- **日志脱敏键扩充**：新增 `token`/`secret`/`phone`/`password`/`auth_key`/`api_hash`/`access_hash`/`session_key`/`private_key` 等精确键名脱敏。
+
+### 工程重构
+
+- **`formatUserName` 统一姓名拼接**：兼容 Telegram（`first_name`/`last_name`）与 D1（`firstName`/`lastName`）双形态，面板/资料卡/看板共用。
+- **截断逻辑收敛**：`truncateText` 上移纯函数基座 `src/utils.js`，编辑通知与按钮标签共用同一截断规则。
+- **双语 README 核对**：中英文 README 命令表与部署章节确认无漂移。
+
 ### 功能一致性
 
 - **动态规则对新消息生效**：新消息路径统一走 `evaluateLegacyPolicy`，D1 存储规则（`blocked_keyword` / `auto_reply` 等）此前仅对编辑消息生效，现与新消息路径共用同一策略评估；屏蔽词命中日志对 D1 规则改为记录规则 ID，避免越界取词。

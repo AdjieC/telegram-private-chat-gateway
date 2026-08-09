@@ -94,7 +94,10 @@ export function createApp({ handleFetch = notFoundHandler } = {}) {
         request.method === 'GET'
         && (url.pathname === '/' || url.pathname === '/health')
       ) {
-        return new Response('OK');
+        // 健康探测响应禁止缓存，避免边缘缓存导致存活检查假阳性
+        return new Response('OK', {
+          headers: { 'Cache-Control': 'no-store' },
+        });
       }
 
       // 运行时 env 诊断：只返回是否存在，不返回密钥或群 ID 明文

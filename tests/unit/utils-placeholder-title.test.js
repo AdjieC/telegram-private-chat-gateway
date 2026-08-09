@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isPlaceholderTopicTitle,
   isAdminCommandText,
+  formatUserName,
   normalizeRecentErrorItem,
   RECENT_ERROR_ACTION_MAX,
   RECENT_ERROR_TEXT_MAX,
@@ -47,6 +48,21 @@ describe('isAdminCommandText（管理命令清单）', () => {
     expect(isAdminCommandText('/randomcmd')).toBe(false);
     expect(isAdminCommandText('')).toBe(false);
     expect(isAdminCommandText(null)).toBe(false);
+  });
+});
+
+describe('formatUserName（展示名拼接）', () => {
+  it('兼容 Telegram 与 D1 两种字段形态', () => {
+    expect(formatUserName({ first_name: '张', last_name: '三' })).toBe('张 三');
+    expect(formatUserName({ firstName: '李', lastName: '四' })).toBe('李 四');
+  });
+
+  it('缺失字段有兜底且忽略空白', () => {
+    expect(formatUserName({})).toBe('未知');
+    expect(formatUserName(null)).toBe('未知');
+    expect(formatUserName({ first_name: '  ' })).toBe('未知');
+    expect(formatUserName({ first_name: '王' })).toBe('王');
+    expect(formatUserName({ first_name: '王' }, '未命名')).toBe('王');
   });
 });
 

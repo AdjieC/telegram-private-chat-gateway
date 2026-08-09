@@ -165,6 +165,36 @@ export function isTestMessageInvalid(description) {
 }
 
 /**
+ * 展示用截断：超出上限时保留前段并追加省略号。
+ * 编辑通知（user-copy）与按钮标签（admin-ui-format）共用，避免两处截断规则漂移。
+ * @param {*} text - 原始文本（非字符串会被转为字符串）
+ * @param {number} [limit] - 保留字符上限（默认 1500，编辑通知两侧合计须低于 Telegram 上限）
+ * @returns {string}
+ */
+export function truncateText(text, limit = 1500) {
+  const s = String(text ?? '');
+  return s.length > limit ? `${s.slice(0, limit)}…` : s;
+}
+
+/**
+ * 从用户资料对象取展示名，兼容 Telegram（first_name/last_name）与 D1（firstName/lastName）两种形态。
+ * 管理面板/资料卡/看板共用，避免各处重复拼接导致规则漂移。
+ * @param {object|null} src - 用户资料
+ * @param {string} [fallback] - 无姓名时的兜底（默认「未知」）
+ * @returns {string}
+ */
+export function formatUserName(src, fallback = '未知') {
+  if (!src || typeof src !== 'object') return fallback;
+  const first = src.first_name ?? src.firstName;
+  const last = src.last_name ?? src.lastName;
+  const name = [first, last]
+    .filter(v => typeof v === 'string' && v.trim())
+    .map(v => v.trim())
+    .join(' ');
+  return name || fallback;
+}
+
+/**
  * 判断文本是否为管理命令（支持带参 / 带 @bot 后缀）。
  * worker.js 私聊拦截与群内权限提示共用同一命令清单，避免两处维护漂移。
  * @param {*} text - 命令文本（如 '/menu'、'/find 词'、'/menu@bot'）

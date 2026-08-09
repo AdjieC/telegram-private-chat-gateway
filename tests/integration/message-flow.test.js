@@ -665,4 +665,34 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     const untouched = JSON.parse(await env.TOPIC_MAP.get('user:555'));
     expect(untouched.closed).toBe(false);
   });
+
+  it('已验证用户发 /start 或 /cancel 不转发到管理话题', async () => {
+    const telegram = createTelegramMock();
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    const userId = 777;
+    await preVerify(env, userId);
+    await seedTopic(env, userId, 88);
+
+    await send(messageUpdate(privateMessage(userId, 701, { text: '/start' }), 9601), env, telegram);
+    await send(messageUpdate(privateMessage(userId, 702, { text: '/cancel' }), 9602), env, telegram);
+
+    expect(telegram.calls.filter(c => c.method === 'forwardMessage')).toHaveLength(0);
+    // 未验证用户发 /start 仍触发验证流程（不转发但下发验证）
+    const freshEnv = createMockEnv();
+    const newUserId = 778;
+    const telegram2 = createTelegramMock();
+    vi.stubGlobal('fetch', telegram2.fetchImpl);
+    await send(messageUpdate(privateMessage(newUserId, 703, { text: '/start' }), 9603), freshEnv, telegram2);
+    expect(telegram2.calls.filter(c => c.method === 'forwardMessage')).toHaveLength(0);
+    expect(telegram2.calls.some(c => c.method === 'sendMessage' && c.body.chat_id === newUserId)).toBe(true);
+  });
+
+  it('scheduled 失败被捕获记录而非产生未处理拒绝', async () => {
+    const env = createMockEnv({ TG_BOT_DB: 'not-a-binding' });
+    const pending = [];
+    worker.scheduled({}, env, { waitUntil: (p) => pending.push(p) });
+    // waitUntil 中的 promise 被 catch 消化，不应 reject 也不应留下孤儿未处理拒绝
+    await expect(Promise.all(pending)).resolves.toBeTruthy();
+  });
 });

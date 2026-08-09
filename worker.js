@@ -86,7 +86,7 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.2.2';
+const GATEWAY_VERSION = '1.2.3';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -813,9 +813,11 @@ const legacyApp = {
     // --- PR #12: GET 请求处理 ---
 
     if (request.method === "GET") {
-      // 健康检查
+      // 健康检查（app.js 短路处理；此处保持一致以防直接调用 legacyApp.fetch）
       if (url.pathname === "/" || url.pathname === "/health") {
-        return new Response("OK");
+        return new Response("OK", {
+          headers: { 'Cache-Control': 'no-store' },
+        });
       }
 
       // Turnstile 验证页面（用户点击 bot 按钮后跳转到的页面）
@@ -826,10 +828,10 @@ const legacyApp = {
 
         if (!code || !userId || !siteKey) {
           const hint = siteKey
-            ? '请返回 Telegram 后向机器人重新发送消息获取新链接。'
-            : '管理员尚未配置 TURNSTILE_SITE_KEY，可暂时改用本地题库验证。';
+            ? VERIFY_COPY.pageErrorMissingParams.hintResend
+            : VERIFY_COPY.pageErrorMissingParams.hintNoSiteKey;
           return new Response(renderVerifyErrorPage({
-            message: '验证链接缺少必要参数或系统未配置 Turnstile。',
+            message: VERIFY_COPY.pageErrorMissingParams.message,
             hint,
           }), {
             headers: {
@@ -1200,6 +1202,10 @@ async function handlePrivateMessage(msg, env, ctx) {
     }
   }
   if (policyResult.action === 'auto_reply_only') return;
+
+  // 已验证用户发送 /start 或 /cancel 视为无操作命令，不转发到管理话题（未验证用户不会走到这里）
+  const commandText = removeCommandBotSuffix((msg.text || '').trim());
+  if (commandText === '/start' || commandText === '/cancel') return;
 
   // 入站统计异步写入：不阻塞用户可见的转发链路（KV 读改写约几十毫秒）
   if (ctx?.waitUntil) {
@@ -1883,6 +1889,12 @@ const workerApp = createApp({
 export default {
   fetch: workerApp.fetch.bind(workerApp),
   scheduled(event, env, ctx) {
-    ctx.waitUntil(workerApp.scheduled(event, env, ctx));
+    // 定时任务失败需记录并进入系统错误缓冲（/sysinfo 错误页可见），
+    // 避免 waitUntil 未处理拒绝只留痕在 CF 日志里
+    ctx.waitUntil(
+      workerApp.scheduled(event, env, ctx).catch((error) => {
+        Logger.error('scheduled_failed', error);
+      }),
+    );
   },
 };

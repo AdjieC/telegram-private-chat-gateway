@@ -38,4 +38,11 @@ export const VERIFY_COPY = {
 
   /** 答错时在题目下追加的提示（编辑消息用） */
   wrongAnswerHint: '\n\n⚠️ 回答不正确，请再选一次。链接未过期前可继续尝试。',
+
+  /** 验证页缺参/未配置时的错误页文案（worker.js 渲染错误页时注入，收拢避免散落） */
+  pageErrorMissingParams: {
+    message: '验证链接缺少必要参数或系统未配置 Turnstile。',
+    hintResend: '请返回 Telegram 后向机器人重新发送消息获取新链接。',
+    hintNoSiteKey: '管理员尚未配置 TURNSTILE_SITE_KEY，可暂时改用本地题库验证。',
+  },
 };

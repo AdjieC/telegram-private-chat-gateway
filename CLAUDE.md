@@ -167,23 +167,23 @@ npm run sync-docs
 | `getAllKeys` | L754 | 获取所有 KV keys（处理分页；maxPages=0 表示不限制页数） |
 | `shuffleArray` | L770 | Fisher-Yates 洗牌算法 |
 | `checkRateLimit` | L780 | 速率限制检查 |
-| `sendHourlyNotice` | L1102 | 低频状态（封禁/静音）每小时最多提醒一次：避免用户反复发送时被重复打扰。 |
-| `handlePrivateMessage` | L1114 | — |
-| `forwardToTopic` | L1217 | 职责：前置检查 → 获取/创建话题 → 健康检查 → 执行转发 |
-| `checkThreadHealth` | L1313 | 话题健康检查 — 双层缓存（内存 + KV）+ 探测 |
-| `executeMessageForward` | L1376 | 执行消息转发 — forwardMessage → copyMessage 降级 + 重定向检测 |
-| `handleForwardRedirect` | L1420 | 处理转发重定向 — 删除误投消息 + 触发重建 |
-| `handleForwardFailure` | L1448 | 处理转发失败 — 话题丢失检测 + copyMessage 降级 + 通知管理员 |
-| `removeCommandBotSuffix` | L1501 | 例如：/listwords@callcosr_bot -> /listwords |
-| `handleAdminReply` | L1507 | — |
-| `isOwnerUser` | L1521 | --- 管理员命令处理函数 --- |
-| `resolveThreadIdForUser` | L1529 | — |
-| `_handleAdminReplyInner` | L1546 | 职责：权限检查 → 全局命令路由 → 用户反查 → 话题内指令路由 → 消息转发 |
-| `createTopic` | L1751 | 为话题建立 thread->user 映射，避免管理员命令时全量 KV 反查 |
-| `updateThreadStatus` | L1765 | 更新话题状态 |
-| `buildTopicTitle` | L1810 | 资料缺失时勿在调用方传入仅 { id } 的 from（会退化为 "User"）；应先 resolveUserFromForTopic。 |
-| `getTelegramClient` | L1839 | — |
-| `tgCall` | L1857 | 改进的 Telegram API 调用（添加超时和 HTTPS 强制） |
+| `sendHourlyNotice` | L1104 | 低频状态（封禁/静音）每小时最多提醒一次：避免用户反复发送时被重复打扰。 |
+| `handlePrivateMessage` | L1116 | — |
+| `forwardToTopic` | L1223 | 职责：前置检查 → 获取/创建话题 → 健康检查 → 执行转发 |
+| `checkThreadHealth` | L1319 | 话题健康检查 — 双层缓存（内存 + KV）+ 探测 |
+| `executeMessageForward` | L1382 | 执行消息转发 — forwardMessage → copyMessage 降级 + 重定向检测 |
+| `handleForwardRedirect` | L1426 | 处理转发重定向 — 删除误投消息 + 触发重建 |
+| `handleForwardFailure` | L1454 | 处理转发失败 — 话题丢失检测 + copyMessage 降级 + 通知管理员 |
+| `removeCommandBotSuffix` | L1507 | 例如：/listwords@callcosr_bot -> /listwords |
+| `handleAdminReply` | L1513 | — |
+| `isOwnerUser` | L1527 | --- 管理员命令处理函数 --- |
+| `resolveThreadIdForUser` | L1535 | — |
+| `_handleAdminReplyInner` | L1552 | 职责：权限检查 → 全局命令路由 → 用户反查 → 话题内指令路由 → 消息转发 |
+| `createTopic` | L1757 | 为话题建立 thread->user 映射，避免管理员命令时全量 KV 反查 |
+| `updateThreadStatus` | L1771 | 更新话题状态 |
+| `buildTopicTitle` | L1816 | 资料缺失时勿在调用方传入仅 { id } 的 from（会退化为 "User"）；应先 resolveUserFromForTopic。 |
+| `getTelegramClient` | L1845 | — |
+| `tgCall` | L1863 | 改进的 Telegram API 调用（添加超时和 HTTPS 强制） |
 
 ### src/utils.js 纯函数
 
@@ -200,14 +200,16 @@ npm run sync-docs
 | `normalizeTgDescription` | L136 | 标准化 Telegram API 描述字符串 |
 | `isTopicMissingOrDeleted` | L145 | 判断话题是否不存在或已被删除 |
 | `isTestMessageInvalid` | L161 | 判断探测消息是否因内容为空而失败 |
-| `isAdminCommandText` | L175 | worker.js 私聊拦截与群内权限提示共用同一命令清单，避免两处维护漂移。 |
-| `isPlaceholderTopicTitle` | L186 | 语义 = 旧 worker 规则（=== 'User' 或 /^User @/i）与旧 admin-actions 规则（=== 'User' 或 /^User(\s@|$)/i）的并集。 |
-| `withMessageThreadId` | L198 | 为请求 body 添加 message_thread_id 字段 |
-| `parseSpamKeywords` | L208 | 将 SPAM_KEYWORDS 环境变量解析为关键词数组 |
-| `generateVerifyCode` | L220 | 生成安全的验证 code（16 字节十六进制） |
-| `secureRandomId` | L233 | 字节值超出 [0, limit) 均匀区间时丢弃重采，保证每个字符等概率出现。 |
-| `createThrottle` | L252 | 用于管理告警等高频路径，防止故障期间告警风暴刷屏。 |
-| `normalizeRecentErrorItem` | L280 | 避免两处各自实现同一套截断规则导致展示漂移。 |
+| `truncateText` | L174 | 编辑通知（user-copy）与按钮标签（admin-ui-format）共用，避免两处截断规则漂移。 |
+| `formatUserName` | L186 | 管理面板/资料卡/看板共用，避免各处重复拼接导致规则漂移。 |
+| `isAdminCommandText` | L205 | worker.js 私聊拦截与群内权限提示共用同一命令清单，避免两处维护漂移。 |
+| `isPlaceholderTopicTitle` | L216 | 语义 = 旧 worker 规则（=== 'User' 或 /^User @/i）与旧 admin-actions 规则（=== 'User' 或 /^User(\s@|$)/i）的并集。 |
+| `withMessageThreadId` | L228 | 为请求 body 添加 message_thread_id 字段 |
+| `parseSpamKeywords` | L238 | 将 SPAM_KEYWORDS 环境变量解析为关键词数组 |
+| `generateVerifyCode` | L250 | 生成安全的验证 code（16 字节十六进制） |
+| `secureRandomId` | L263 | 字节值超出 [0, limit) 均匀区间时丢弃重采，保证每个字符等概率出现。 |
+| `createThrottle` | L282 | 用于管理告警等高频路径，防止故障期间告警风暴刷屏。 |
+| `normalizeRecentErrorItem` | L310 | 避免两处各自实现同一套截断规则导致展示漂移。 |
 
 <!-- AUTO-GENERATED END: functions -->
 

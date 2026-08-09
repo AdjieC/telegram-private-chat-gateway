@@ -56,6 +56,11 @@ export function createConversationService({
     const user = await storage.getUser(link.userId);
     const policyResult = await evaluate(message, user || { userId: link.userId });
     if (!policyResult.shouldForward) {
+      // 用户侧同步提示（对齐新消息被拦截的口径），管理员收到编辑拦截通知
+      await telegram.call('sendMessage', {
+        chat_id: message.chat.id,
+        text: USER_COPY.blockedWord,
+      });
       await telegram.call('sendMessage', {
         chat_id: link.targetChatId,
         message_thread_id: link.topicId,

@@ -15,7 +15,7 @@ import {
   shouldAppendUsername,
   formatDelta,
 } from './activity-summary.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, truncateText } from './utils.js';
 
 // re-export：历史引用（worker.js / admin-actions.js / spam.js 等）继续从本模块导入，
 // 定义统一收敛在纯函数基座 utils.js，避免重复实现
@@ -147,8 +147,8 @@ export function buildSysinfoKeyboard(page = 'overview') {
 
 /** 按钮标签截断：超出上限时保留前段并追加省略号，避免按钮被 Telegram 截断成无意义文本 */
 function truncateLabel(text, maxLen) {
-  const s = String(text ?? '');
-  return s.length > maxLen ? `${s.slice(0, maxLen - 1)}…` : s;
+  // 复用 utils.truncateText：limit 取 maxLen-1 使「截断后总长」恰好为 maxLen
+  return truncateText(text, maxLen - 1);
 }
 
 export function buildUserJumpKeyboard(users, { includeMenu = true, columns = 2 } = {}) {

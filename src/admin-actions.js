@@ -10,7 +10,12 @@ import {
   invalidateBlockedWordsCache,
 } from './blocked-words.js';
 import { ADMIN_COPY, USER_COPY } from './user-copy.js';
-import { parseSpamKeywords, withMessageThreadId, isPlaceholderTopicTitle } from './utils.js';
+import {
+  parseSpamKeywords,
+  withMessageThreadId,
+  isPlaceholderTopicTitle,
+  formatUserName,
+} from './utils.js';
 
 /**
  * @param {object} deps
@@ -62,7 +67,7 @@ export function createAdminActions(deps) {
       ),
     ]);
     const from = resolvedFrom;
-    const name = escapeHtml([from.first_name, from.last_name].filter(Boolean).join(' ').trim() || '未知');
+    const name = escapeHtml(formatUserName(from));
     const un = from.username ? `@${escapeHtml(from.username)}` : '无用户名';
     let lastMsgLine = '最近消息: 无';
     if (d1User?.lastMessageAt) lastMsgLine = `最近消息: ${formatTimeBoth(d1User.lastMessageAt)}`;
@@ -473,9 +478,7 @@ export function createAdminActions(deps) {
       }
     }
 
-    const displayName = escapeHtml(
-      [from.first_name, from.last_name].filter(Boolean).join(' ').trim() || '未知',
-    );
+    const displayName = escapeHtml(formatUserName(from));
     const usernameText = from.username
       ? `@${escapeHtml(from.username)}`
       : '无';

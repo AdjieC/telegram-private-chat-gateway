@@ -115,6 +115,11 @@ async function runMigrations(db, now) {
 }
 
 export function ensureMigrations(db, now = Date.now()) {
+  // 非对象 db（如误配为字符串变量）无法作为 WeakMap 键，直接给出明确错误；
+  // 否则 WeakMap.set 抛 TypeError 且 .catch 重抛会留下孤儿未处理拒绝
+  if (!db || (typeof db !== 'object' && typeof db !== 'function')) {
+    return Promise.reject(new Error("D1 'TG_BOT_DB' must be a Database binding"));
+  }
   if (!migrationPromises.has(db)) {
     const promise = runMigrations(db, now).catch(error => {
       migrationPromises.delete(db);

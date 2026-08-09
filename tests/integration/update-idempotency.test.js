@@ -56,6 +56,19 @@ describe('Update idempotency', () => {
       error_code: 'temporary',
     });
   });
+
+  it('retryable 记录重新投递时原子认领重试', async () => {
+    const { storage } = await createStorage();
+    await storage.claimUpdate('42', 'message', 1000);
+    await storage.markUpdateRetryable('42', 'temporary');
+
+    // Telegram 重投同一条 update：从 retryable 状态原子接管
+    await expect(storage.claimUpdate('42', 'message', 2000)).resolves.toBe('reclaimed');
+    await expect(storage.getProcessedUpdate('42')).resolves.toMatchObject({
+      status: 'processing',
+      error_code: null,
+    });
+  });
 });
 
 describe('Update 业务分发', () => {

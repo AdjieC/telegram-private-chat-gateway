@@ -270,6 +270,9 @@ async function runMigrations(db, now) {
   ).bind(1, "initial_schema", now).run();
 }
 function ensureMigrations(db, now = Date.now()) {
+  if (!db || typeof db !== "object" && typeof db !== "function") {
+    return Promise.reject(new Error("D1 'TG_BOT_DB' must be a Database binding"));
+  }
   if (!migrationPromises.has(db)) {
     const promise = runMigrations(db, now).catch((error) => {
       migrationPromises.delete(db);
@@ -972,7 +975,9 @@ function createApp({ handleFetch = notFoundHandler } = {}) {
     async fetch(request, env, ctx) {
       const url = new URL(request.url);
       if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
-        return new Response("OK");
+        return new Response("OK", {
+          headers: { "Cache-Control": "no-store" }
+        });
       }
       if (request.method === "GET" && url.pathname === "/health/env") {
         const { presence, keys, mistypedKeys, bindings } = inspectEnvPresence(env);
@@ -1153,6 +1158,17 @@ function isTopicMissingOrDeleted(description) {
 function isTestMessageInvalid(description) {
   const desc = normalizeTgDescription(description);
   return desc.includes("message text is empty") || desc.includes("bad request: message text is empty");
+}
+function truncateText(text, limit = 1500) {
+  const s = String(text ?? "");
+  return s.length > limit ? `${s.slice(0, limit)}\u2026` : s;
+}
+function formatUserName(src, fallback = "\u672A\u77E5") {
+  if (!src || typeof src !== "object") return fallback;
+  const first = src.first_name ?? src.firstName;
+  const last = src.last_name ?? src.lastName;
+  const name = [first, last].filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim()).join(" ");
+  return name || fallback;
 }
 var ADMIN_COMMAND_PATTERN = /^\/(help|menu|dashboard|sysinfo|system|status|stats|rank|activity|heat|whoami|find|notes|cleanup|listwords|addword|delword|panel|info|ban|unban|close|open|mute|unmute|trust|reset|note|synccommands)(@|\s|$)/i;
 function isAdminCommandText(text) {
@@ -1444,11 +1460,6 @@ function evaluateMessagePolicy({
 }
 
 // src/user-copy.js
-var EDIT_SNIPPET_LIMIT = 1500;
-function truncateText(text, limit = EDIT_SNIPPET_LIMIT) {
-  const s = String(text ?? "");
-  return s.length > limit ? `${s.slice(0, limit)}\u2026` : s;
-}
 var POLICY_REASON_LABELS = {
   blocked_keyword: "\u547D\u4E2D\u5C4F\u853D\u8BCD\u6216\u89C4\u5219",
   blocked_keyword_notify_only: "\u547D\u4E2D\u89C4\u5219\uFF08\u4EC5\u901A\u77E5\uFF09",
@@ -1888,6 +1899,10 @@ function createConversationService({
     const policyResult = await evaluate(message, user || { userId: link.userId });
     if (!policyResult.shouldForward) {
       await telegram.call("sendMessage", {
+        chat_id: message.chat.id,
+        text: USER_COPY.blockedWord
+      });
+      await telegram.call("sendMessage", {
         chat_id: link.targetChatId,
         message_thread_id: link.topicId,
         text: ADMIN_COPY.userEditBlocked(policyResult.reason || policyResult.action)
@@ -1937,7 +1952,18 @@ var REDACTED_KEYS = /* @__PURE__ */ new Set([
   "verifycode",
   "verifyid",
   "text",
-  "caption"
+  "caption",
+  // 通用凭据/敏感字段（精确键名匹配，防新增日志误带）
+  "token",
+  "secret",
+  "phone",
+  "password",
+  "passcode",
+  "auth_key",
+  "api_hash",
+  "access_hash",
+  "session_key",
+  "private_key"
 ]);
 function redactValue(key, value, seen) {
   if (REDACTED_KEYS.has(String(key).toLowerCase())) return "[REDACTED]";
@@ -2348,7 +2374,7 @@ function createAdminActions(deps) {
       )
     ]);
     const from = resolvedFrom;
-    const name = escapeHtml2([from.first_name, from.last_name].filter(Boolean).join(" ").trim() || "\u672A\u77E5");
+    const name = escapeHtml2(formatUserName(from));
     const un = from.username ? `@${escapeHtml2(from.username)}` : "\u65E0\u7528\u6237\u540D";
     let lastMsgLine = "\u6700\u8FD1\u6D88\u606F: \u65E0";
     if (d1User?.lastMessageAt) lastMsgLine = `\u6700\u8FD1\u6D88\u606F: ${formatTimeBoth2(d1User.lastMessageAt)}`;
@@ -2722,9 +2748,7 @@ function createAdminActions(deps) {
         logger.warn("info_topic_title_repair_failed", { userId, error: e?.message });
       }
     }
-    const displayName = escapeHtml2(
-      [from.first_name, from.last_name].filter(Boolean).join(" ").trim() || "\u672A\u77E5"
-    );
+    const displayName = escapeHtml2(formatUserName(from));
     const usernameText = from.username ? `@${escapeHtml2(from.username)}` : "\u65E0";
     const openLink = from.username ? `<a href="https://t.me/${escapeHtml2(from.username)}">\u6253\u5F00\u4E3B\u9875 @${escapeHtml2(from.username)}</a>` : `<a href="tg://user?id=${userId}">\u6253\u5F00\u7528\u6237\u8D44\u6599</a>`;
     const topicTitle = escapeHtml2(userRec?.title || resolvedTitle || "\u672A\u77E5");
@@ -2939,7 +2963,13 @@ ${question}
   successBody: "\u2705 <b>\u9A8C\u8BC1\u6210\u529F</b>\n\n\u60A8\u73B0\u5728\u53EF\u4EE5\u6B63\u5E38\u5BF9\u8BDD\u4E86\u3002\u76F4\u63A5\u53D1\u6D88\u606F\u5373\u53EF\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
   successBodyWithPending: "\u2705 <b>\u9A8C\u8BC1\u6210\u529F</b>\n\n\u6B63\u5728\u4E3A\u60A8\u9001\u8FBE\u521A\u624D\u7684\u6D88\u606F\uFF0C\u8BF7\u7A0D\u5019\u2026",
   /** 答错时在题目下追加的提示（编辑消息用） */
-  wrongAnswerHint: "\n\n\u26A0\uFE0F \u56DE\u7B54\u4E0D\u6B63\u786E\uFF0C\u8BF7\u518D\u9009\u4E00\u6B21\u3002\u94FE\u63A5\u672A\u8FC7\u671F\u524D\u53EF\u7EE7\u7EED\u5C1D\u8BD5\u3002"
+  wrongAnswerHint: "\n\n\u26A0\uFE0F \u56DE\u7B54\u4E0D\u6B63\u786E\uFF0C\u8BF7\u518D\u9009\u4E00\u6B21\u3002\u94FE\u63A5\u672A\u8FC7\u671F\u524D\u53EF\u7EE7\u7EED\u5C1D\u8BD5\u3002",
+  /** 验证页缺参/未配置时的错误页文案（worker.js 渲染错误页时注入，收拢避免散落） */
+  pageErrorMissingParams: {
+    message: "\u9A8C\u8BC1\u94FE\u63A5\u7F3A\u5C11\u5FC5\u8981\u53C2\u6570\u6216\u7CFB\u7EDF\u672A\u914D\u7F6E Turnstile\u3002",
+    hintResend: "\u8BF7\u8FD4\u56DE Telegram \u540E\u5411\u673A\u5668\u4EBA\u91CD\u65B0\u53D1\u9001\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5\u3002",
+    hintNoSiteKey: "\u7BA1\u7406\u5458\u5C1A\u672A\u914D\u7F6E TURNSTILE_SITE_KEY\uFF0C\u53EF\u6682\u65F6\u6539\u7528\u672C\u5730\u9898\u5E93\u9A8C\u8BC1\u3002"
+  }
 };
 
 // src/verification.js
@@ -3945,8 +3975,7 @@ function buildSysinfoKeyboard(page = "overview") {
   };
 }
 function truncateLabel(text, maxLen) {
-  const s = String(text ?? "");
-  return s.length > maxLen ? `${s.slice(0, maxLen - 1)}\u2026` : s;
+  return truncateText(text, maxLen - 1);
 }
 function buildUserJumpKeyboard(users, { includeMenu = true, columns = 2 } = {}) {
   const cols = Math.min(Math.max(Number(columns) || 2, 1), 3);
@@ -4331,7 +4360,7 @@ function createAdminCommandHandlers(deps) {
           lines.push("");
           lines.push("<b>\u6700\u8FD1\u6D3B\u8DC3</b>");
           for (const u of recent.slice(0, 5)) {
-            const name = escapeHtml([u.firstName, u.lastName].filter(Boolean).join(" ").trim() || "\u672A\u77E5");
+            const name = escapeHtml(formatUserName(u));
             const un = u.username ? `@${escapeHtml(u.username)}` : "\u65E0\u7528\u6237\u540D";
             lines.push(`\u2022 ${name} \xB7 ${un}`);
             lines.push(`  <code>${escapeHtml(u.userId)}</code> \xB7 ${formatTimeBoth(u.lastMessageAt)}`);
@@ -5369,7 +5398,7 @@ var CONFIG = {
   MEDIA_GROUP_CLEANUP_PROBABILITY: 0.05
   // 过期媒体组扫描概率：键自带 60s TTL，孤儿键极少，无需每条消息全量扫 KV
 };
-var GATEWAY_VERSION = "1.2.2";
+var GATEWAY_VERSION = "1.2.3";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
@@ -5961,16 +5990,18 @@ var legacyApp = {
     const url = new URL(request.url);
     if (request.method === "GET") {
       if (url.pathname === "/" || url.pathname === "/health") {
-        return new Response("OK");
+        return new Response("OK", {
+          headers: { "Cache-Control": "no-store" }
+        });
       }
       if (url.pathname === "/verify" || url.pathname.endsWith("/verify")) {
         const code = url.searchParams.get("code");
         const userId = url.searchParams.get("uid");
         const siteKey = (env.TURNSTILE_SITE_KEY || "").toString().trim();
         if (!code || !userId || !siteKey) {
-          const hint = siteKey ? "\u8BF7\u8FD4\u56DE Telegram \u540E\u5411\u673A\u5668\u4EBA\u91CD\u65B0\u53D1\u9001\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5\u3002" : "\u7BA1\u7406\u5458\u5C1A\u672A\u914D\u7F6E TURNSTILE_SITE_KEY\uFF0C\u53EF\u6682\u65F6\u6539\u7528\u672C\u5730\u9898\u5E93\u9A8C\u8BC1\u3002";
+          const hint = siteKey ? VERIFY_COPY.pageErrorMissingParams.hintResend : VERIFY_COPY.pageErrorMissingParams.hintNoSiteKey;
           return new Response(renderVerifyErrorPage({
-            message: "\u9A8C\u8BC1\u94FE\u63A5\u7F3A\u5C11\u5FC5\u8981\u53C2\u6570\u6216\u7CFB\u7EDF\u672A\u914D\u7F6E Turnstile\u3002",
+            message: VERIFY_COPY.pageErrorMissingParams.message,
             hint
           }), {
             headers: {
@@ -6264,6 +6295,8 @@ async function handlePrivateMessage(msg, env, ctx) {
     }
   }
   if (policyResult.action === "auto_reply_only") return;
+  const commandText = removeCommandBotSuffix((msg.text || "").trim());
+  if (commandText === "/start" || commandText === "/cancel") return;
   if (ctx?.waitUntil) {
     ctx.waitUntil(bumpDailyStat(env, "messages_in", 1));
   } else {
@@ -6823,7 +6856,11 @@ var workerApp = createApp({
 var worker_default = {
   fetch: workerApp.fetch.bind(workerApp),
   scheduled(event, env, ctx) {
-    ctx.waitUntil(workerApp.scheduled(event, env, ctx));
+    ctx.waitUntil(
+      workerApp.scheduled(event, env, ctx).catch((error) => {
+        Logger.error("scheduled_failed", error);
+      })
+    );
   }
 };
 export {

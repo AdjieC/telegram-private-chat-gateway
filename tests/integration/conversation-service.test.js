@@ -120,7 +120,11 @@ describe('会话服务（编辑消息映射/通知）', () => {
     );
 
     expect(result.status).toBe('blocked');
-    const notice = dependencies.telegram.calls('sendMessage').at(-1).body.text;
+    const calls = dependencies.telegram.calls('sendMessage');
+    // 用户侧同步提示（对齐新消息被拦截的口径），管理员收到原因通知
+    expect(calls[0].body).toMatchObject({ chat_id: 1 });
+    expect(calls[0].body.text).toContain('拦截');
+    const notice = calls.at(-1).body.text;
     expect(notice).toContain('命中屏蔽词或规则');
     expect(notice).not.toContain('违规新内容');
   });

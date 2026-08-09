@@ -39,7 +39,7 @@ import {
 } from './admin-ui-format.js';
 import { bumpDailyStat, getDailyStats, getRecentDailySeries } from './daily-stats.js';
 import { ADMIN_COPY } from './user-copy.js';
-import { normalizeRecentErrorItem } from './utils.js';
+import { normalizeRecentErrorItem, formatUserName } from './utils.js';
 
 /**
  * @param {object} deps
@@ -314,7 +314,7 @@ async function renderOverviewStatsSection(env, page) {
         lines.push('');
         lines.push('<b>最近活跃</b>');
         for (const u of recent.slice(0, 5)) {
-          const name = escapeHtml([u.firstName, u.lastName].filter(Boolean).join(' ').trim() || '未知');
+          const name = escapeHtml(formatUserName(u));
           const un = u.username ? `@${escapeHtml(u.username)}` : '无用户名';
           lines.push(`• ${name} · ${un}`);
           lines.push(`  <code>${escapeHtml(u.userId)}</code> · ${formatTimeBoth(u.lastMessageAt)}`);

@@ -9,6 +9,17 @@ const REDACTED_KEYS = new Set([
   'verifyid',
   'text',
   'caption',
+  // 通用凭据/敏感字段（精确键名匹配，防新增日志误带）
+  'token',
+  'secret',
+  'phone',
+  'password',
+  'passcode',
+  'auth_key',
+  'api_hash',
+  'access_hash',
+  'session_key',
+  'private_key',
 ]);
 
 function redactValue(key, value, seen) {

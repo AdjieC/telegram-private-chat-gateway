@@ -17,6 +17,14 @@ describe('verify-copy', () => {
     expect(VERIFY_COPY.expired).not.toBe(VERIFY_COPY.wrongAnswer);
   });
 
+  it('验证页错误页文案收拢（缺参/未配置/重发引导）', () => {
+    expect(VERIFY_COPY.pageErrorMissingParams.message).toMatch(/缺少必要参数/);
+    expect(VERIFY_COPY.pageErrorMissingParams.hintResend).toMatch(/重新发送消息/);
+    expect(VERIFY_COPY.pageErrorMissingParams.hintNoSiteKey).toMatch(/本地题库/);
+    expect(VERIFY_COPY.pageErrorMissingParams.hintResend)
+      .not.toBe(VERIFY_COPY.pageErrorMissingParams.hintNoSiteKey);
+  });
+
   it('验证限流文案按窗口分钟数生成', () => {
     expect(VERIFY_COPY.verifyRateLimited(5)).toContain('5 分钟');
     expect(VERIFY_COPY.verifyRateLimited(5)).toMatch(/频繁/);

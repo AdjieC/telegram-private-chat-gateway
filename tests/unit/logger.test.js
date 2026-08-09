@@ -73,6 +73,38 @@ describe('logger', () => {
     });
   });
 
+  it('扩充的凭据/敏感字段名全部脱敏', () => {
+    const redacted = redactLogData({
+      token: 'tk',
+      secret: 's',
+      phone: '13800000000',
+      password: 'p',
+      passcode: 'pc',
+      auth_key: 'ak',
+      api_hash: 'ah',
+      access_hash: 'x',
+      session_key: 'sk',
+      private_key: 'pk',
+      // 普通诊断字段不受影响
+      userId: 1,
+      method: 'sendMessage',
+    });
+    expect(redacted).toEqual({
+      token: '[REDACTED]',
+      secret: '[REDACTED]',
+      phone: '[REDACTED]',
+      password: '[REDACTED]',
+      passcode: '[REDACTED]',
+      auth_key: '[REDACTED]',
+      api_hash: '[REDACTED]',
+      access_hash: '[REDACTED]',
+      session_key: '[REDACTED]',
+      private_key: '[REDACTED]',
+      userId: 1,
+      method: 'sendMessage',
+    });
+  });
+
   it('onError 旁路收到错误且不影响主流程', () => {
     const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     const onError = vi.fn();

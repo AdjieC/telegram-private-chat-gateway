@@ -1,16 +1,13 @@
 /**
  * 用户侧与管理侧常用文案（非验证类；验证见 verify-copy.js）
  */
-import { escapeHtml } from './utils.js';
+import { escapeHtml, truncateText } from './utils.js';
 
 /** 编辑通知正文单侧截断上限：两侧合计须低于 Telegram 4096 字符消息上限 */
 export const EDIT_SNIPPET_LIMIT = 1500;
 
-/** 展示用截断：超出上限时保留前段并追加省略号 */
-export function truncateText(text, limit = EDIT_SNIPPET_LIMIT) {
-  const s = String(text ?? '');
-  return s.length > limit ? `${s.slice(0, limit)}…` : s;
-}
+// truncateText 定义在纯函数基座 utils.js（按钮标签复用同一截断规则），此处保持导出以兼容历史引用
+export { truncateText };
 
 /** 策略原因码 → 管理员可读中文（未知码保留原值便于排障） */
 export const POLICY_REASON_LABELS = {

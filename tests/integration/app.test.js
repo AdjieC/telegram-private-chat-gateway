@@ -24,6 +24,8 @@ describe('createApp', () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe('OK');
+    // 健康探测响应不缓存，避免存活检查被边缘缓存污染
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
 
   it('GET /health/env 报告运行时键在位情况且不含敏感值', async () => {
