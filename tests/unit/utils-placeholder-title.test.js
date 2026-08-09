@@ -3,6 +3,7 @@ import {
   isPlaceholderTopicTitle,
   isAdminCommandText,
   formatUserName,
+  commandArgument,
   normalizeRecentErrorItem,
   RECENT_ERROR_ACTION_MAX,
   RECENT_ERROR_TEXT_MAX,
@@ -63,6 +64,21 @@ describe('formatUserName（展示名拼接）', () => {
     expect(formatUserName({ first_name: '  ' })).toBe('未知');
     expect(formatUserName({ first_name: '王' })).toBe('王');
     expect(formatUserName({ first_name: '王' }, '未命名')).toBe('王');
+  });
+});
+
+describe('commandArgument（命令参数提取）', () => {
+  it('提取参数并兼容 @bot 后缀与空白', () => {
+    expect(commandArgument('/addword 赌博', 'addword')).toBe('赌博');
+    expect(commandArgument('/addword@mybot 赌博', 'addword')).toBe('赌博');
+    expect(commandArgument('/note   重要客户', 'note')).toBe('重要客户');
+    expect(commandArgument('/find 张三', 'find')).toBe('张三');
+  });
+
+  it('无参数时返回空字符串', () => {
+    expect(commandArgument('/addword', 'addword')).toBe('');
+    expect(commandArgument('', 'addword')).toBe('');
+    expect(commandArgument('/addword ', 'addword')).toBe('');
   });
 });
 

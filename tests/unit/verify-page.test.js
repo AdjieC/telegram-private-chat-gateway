@@ -145,9 +145,17 @@ describe('verify-page', () => {
     expect(errorPage).toContain(repo);
   });
 
+  it('移动端适配：viewport-fit=cover 与安全区 padding', () => {
+    expect(page).toContain('viewport-fit=cover');
+    expect(page).toContain('env(safe-area-inset-left)');
+    expect(page).toContain('env(safe-area-inset-bottom)');
+  });
+
   it('验证成功后隐藏 Turnstile 组件，避免残留交互', () => {
     expect(page).toContain("turnstileContainer.style.display = 'none'");
     expect(page).toContain("document.querySelector('.turnstile-container')");
+    // 键盘用户：成功后聚焦返回按钮
+    expect(page).toContain("backBtn.focus()");
   });
 });
 

@@ -15,6 +15,8 @@ import {
   withMessageThreadId,
   isPlaceholderTopicTitle,
   formatUserName,
+  commandArgument,
+  noticeKey,
 } from './utils.js';
 
 /**
@@ -124,7 +126,7 @@ export function createAdminActions(deps) {
 
   async function unmute(env, threadId, userId) {
     await env.TOPIC_MAP.delete(`muted:${userId}`);
-    await env.TOPIC_MAP.delete(`mute_notice:${userId}`);
+    await env.TOPIC_MAP.delete(noticeKey.mute(userId));
     if (env.TG_BOT_DB) {
       try { await createD1Storage(env.TG_BOT_DB).updateUserState(userId, { isMuted: false }); } catch { /* ignore */ }
     }
@@ -141,7 +143,7 @@ export function createAdminActions(deps) {
   }
 
   async function note(env, threadId, userId, text) {
-    const content = text.replace(/^\/note(@\w+)?\s*/i, '').trim();
+    const content = commandArgument(text, 'note');
     if (!content) {
       const existing = await env.TOPIC_MAP.get(`note:${userId}`);
       await tgCall(env, 'sendMessage', {
@@ -173,7 +175,7 @@ export function createAdminActions(deps) {
   }
 
   async function addWord(env, threadId, text, senderId) {
-    const word = text.slice(9).trim();
+    const word = commandArgument(text, 'addword');
     if (!word) {
       await tgCall(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
@@ -219,7 +221,7 @@ export function createAdminActions(deps) {
   }
 
   async function delWord(env, threadId, text, senderId) {
-    const word = text.slice(9).trim();
+    const word = commandArgument(text, 'delword');
     if (!word) {
       await tgCall(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
@@ -416,13 +418,13 @@ export function createAdminActions(deps) {
         parse_mode: 'HTML',
       });
     } else {
-      await env.TOPIC_MAP.put(`ban_notice:${userId}`, '1', { expirationTtl: 3600 });
+      await env.TOPIC_MAP.put(noticeKey.ban(userId), '1', { expirationTtl: 3600 });
     }
   }
 
   async function unban(env, threadId, userId) {
     await env.TOPIC_MAP.delete(`banned:${userId}`);
-    await env.TOPIC_MAP.delete(`ban_notice:${userId}`);
+    await env.TOPIC_MAP.delete(noticeKey.ban(userId));
     if (env.TG_BOT_DB) {
       try {
         await createD1Storage(env.TG_BOT_DB).updateUserState(userId, { status: 'active' });

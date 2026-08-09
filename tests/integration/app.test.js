@@ -244,6 +244,21 @@ describe('createApp', () => {
     expect(response.status).toBe(500);
   });
 
+  it('POST / webhook 请求体超过 1 MiB 在校验阶段返回 413', async () => {
+    const app = createApp();
+    const response = await app.fetch(new Request('https://worker.test/', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'test-webhook-secret-at-least-32-bytes',
+      },
+      body: JSON.stringify({ update_id: 1, message: { text: 'x'.repeat(1024 * 1024) } }),
+    }), createMockEnv(), { waitUntil() {} });
+
+    expect(response.status).toBe(413);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+  });
+
   it('scheduled 入口执行 D1 保留期清理', async () => {
     const env = createMockEnv();
     await ensureMigrations(env.TG_BOT_DB, 1000);

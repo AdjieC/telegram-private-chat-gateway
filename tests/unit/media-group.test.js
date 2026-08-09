@@ -85,6 +85,33 @@ describe('handleMediaGroup / delaySend（合并转发）', () => {
     expect(store.has('mg:p2t:g1')).toBe(false);
   });
 
+  it('首项无效被过滤时 caption 自动落到下一有效项', async () => {
+    vi.useFakeTimers();
+    const { module, calls, kv } = createModule();
+    const env = { TOPIC_MAP: kv };
+    const ctx = { waitUntil: vi.fn(p => p) };
+    const group = { media_group_id: 'g-caption', chat: { id: 100 } };
+
+    // 第一项 photo 无 file_id（无效），第二项 video 带 caption
+    await module.handleMediaGroup(
+      { ...group, message_id: 1, photo: [{ width: 100, height: 100 }] },
+      env, ctx, { direction: 'p2t', targetChat: '-100', threadId: 88 },
+    );
+    await module.handleMediaGroup(
+      { ...group, message_id: 2, video: { file_id: 'v1' }, caption: '第二项说明' },
+      env, ctx, { direction: 'p2t', targetChat: '-100', threadId: 88 },
+    );
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await Promise.all(ctx.waitUntil.mock.calls.map(([p]) => p));
+
+    const sends = calls.filter(c => c.method === 'sendMediaGroup');
+    expect(sends).toHaveLength(1);
+    expect(sends[0].body.media).toEqual([
+      { type: 'video', media: 'v1', caption: '第二项说明' },
+    ]);
+  });
+
   it('无法提取媒体的消息直接 copyMessage 兜底，不走合并', async () => {
     const { module, calls, kv } = createModule();
     const env = { TOPIC_MAP: kv };

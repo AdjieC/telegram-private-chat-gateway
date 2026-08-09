@@ -39,7 +39,7 @@ import {
 } from './admin-ui-format.js';
 import { bumpDailyStat, getDailyStats, getRecentDailySeries } from './daily-stats.js';
 import { ADMIN_COPY } from './user-copy.js';
-import { normalizeRecentErrorItem, formatUserName, GATEWAY_REPO } from './utils.js';
+import { normalizeRecentErrorItem, formatUserName, GATEWAY_REPO, commandArgument } from './utils.js';
 
 /**
  * @param {object} deps
@@ -177,7 +177,10 @@ async function handleHelpCommand(env, threadId, senderId = null) {
 
 <b>话题内</b>
 /panel /info /note 备注
-/ban(需确认) /unban /close /open /mute /unmute /trust /reset`;
+/ban(需确认) /unban /close /open /mute /unmute /trust /reset
+
+<b>来源</b>
+🔗 <a href="${escapeHtml(GATEWAY_REPO_LINK)}">项目地址 GitHub</a>`;
   await tgCall(env, "sendMessage", {
     chat_id: env.SUPERGROUP_ID,
     message_thread_id: threadId,
@@ -593,9 +596,7 @@ async function handleRankCommand(env, threadId, opts = {}) {
  * 备注搜索 /notes [关键词]；无关键词时列出最近备注
  */
 async function handleNotesCommand(env, threadId, queryText = '') {
-  const q = String(queryText || '')
-    .replace(/^\/notes(@\w+)?\s*/i, '')
-    .trim();
+  const q = commandArgument(queryText, 'notes');
   if (!env.TOPIC_MAP?.list) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
@@ -733,7 +734,7 @@ async function handleWhoamiCommand(env, threadId, senderId) {
 
 async function handleFindCommand(env, threadId, queryText) {
   // 查询长度上限：LIKE 模糊匹配过长的输入无意义且可能拖慢 D1
-  const q = queryText.replace(/^\/find(@\w+)?\s*/i, '').trim().slice(0, 100);
+  const q = commandArgument(queryText, 'find').slice(0, 100);
   if (!q) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,

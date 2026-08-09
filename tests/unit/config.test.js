@@ -4,6 +4,7 @@ import {
   formatEnvPresenceDetail,
   inspectEnvPresence,
   normalizeEnv,
+  readEnvValue,
   validateBaseEnv,
   validateWebhookEnv,
 } from '../../src/config.js';
@@ -91,5 +92,19 @@ describe('config', () => {
   it('生产 Webhook Secret 少于 32 字节时拒绝处理', () => {
     expect(() => validateWebhookEnv({ WEBHOOK_SECRET: '短密钥' }))
       .toThrow('WEBHOOK_SECRET must be at least 32 bytes');
+  });
+
+  it('readEnvValue：精确键为空白字符串时回退到 trim 别名键', () => {
+    // 精确键存在但为空字符串：继续尝试 trim 别名
+    expect(readEnvValue({ ' SUPERGROUP_ID': '-1001', SUPERGROUP_ID: '' }, 'SUPERGROUP_ID'))
+      .toBe('-1001');
+    // 精确键为纯空白：同样回退
+    expect(readEnvValue({ ' SPAM_KEYWORDS': 'a,b', SPAM_KEYWORDS: '   ' }, 'SPAM_KEYWORDS'))
+      .toBe('a,b');
+    // 无别名时返回精确键的空值
+    expect(readEnvValue({ SUPERGROUP_ID: '' }, 'SUPERGROUP_ID')).toBe('');
+    // 非空白精确键优先于别名
+    expect(readEnvValue({ SUPERGROUP_ID: '-1002', ' SUPERGROUP_ID': '-1001' }, 'SUPERGROUP_ID'))
+      .toBe('-1002');
   });
 });

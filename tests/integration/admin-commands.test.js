@@ -84,6 +84,17 @@ describe('admin-commands handlers', () => {
     expect(fallbackBody).not.toContain('undefined');
   });
 
+  it('管理帮助末尾包含可点击项目地址（来源突出与看板一致）', async () => {
+    const env = createMockEnv();
+    const calls = [];
+    const h = createHandlers(env, calls);
+    await h.handleHelpCommand(env, 1, 1);
+    const body = calls.find(c => c.method === 'sendMessage').body.text;
+    expect(body).toContain('管理帮助');
+    expect(body).toContain('项目地址 GitHub');
+    expect(body).toContain('https://github.com/Silentely/telegram-private-chat-gateway');
+  });
+
   it('错误页只展示转义后的摘要与关联 ID，隐藏 stack 和正文', async () => {
     const env = createMockEnv();
     await env.TOPIC_MAP.put('sys:recent_errors', JSON.stringify([{

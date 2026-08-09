@@ -126,19 +126,18 @@ export function createMediaGroupModule(deps) {
         return;
       }
 
-      const media = rec.items.map((it, i) => {
+      const media = [];
+      let captionAssigned = false;
+      for (const it of rec.items) {
         if (!it.type || !it.id) {
           logger.warn('media_group_invalid_item', { key, item: it });
-          return null;
+          continue;
         }
-        // 限制 caption 长度
-        const caption = i === 0 ? (it.cap || "").substring(0, 1024) : "";
-        return {
-          type: it.type,
-          media: it.id,
-          caption
-        };
-      }).filter(Boolean); // 过滤掉无效项
+        // caption 只允许出现在第一个有效项上：若首项无效被过滤，自动落到下一有效项
+        const caption = !captionAssigned ? (it.cap || '').substring(0, 1024) : '';
+        if (caption) captionAssigned = true;
+        media.push({ type: it.type, media: it.id, caption });
+      }
 
       if (media.length > 0) {
         try {

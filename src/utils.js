@@ -198,6 +198,29 @@ export function formatUserName(src, fallback = '未知') {
 }
 
 /**
+ * 提取命令参数：`/cmd 参数` 或 `/cmd@bot 参数` → `参数`（去首尾空白）。
+ * 替代各处手写 slice(9) / 正则，统一支持 @bot 后缀，避免命令前缀长度漂移。
+ * @param {*} text - 完整命令文本（如 '/addword 词'、'/note@bot 备注'）
+ * @param {string} command - 命令名（不含斜杠，如 'addword'）
+ * @returns {string}
+ */
+export function commandArgument(text, command) {
+  const pattern = new RegExp(`^\\/${command}(@[A-Za-z0-9_]+)?\\s*`, 'i');
+  return String(text ?? '').replace(pattern, '').trim();
+}
+
+/**
+ * 低频状态通知键（每小时节流，见 worker.js sendHourlyNotice）。
+ * worker.js 与 admin-actions.js 共用，避免通知键前缀拼写漂移。
+ */
+export const noticeKey = {
+  ban: (userId) => `ban_notice:${userId}`,
+  mute: (userId) => `mute_notice:${userId}`,
+  cmdHint: (userId) => `cmd_hint:${userId}`,
+  cmdUnknown: (userId) => `cmd_unknown:${userId}`,
+};
+
+/**
  * 判断文本是否为管理命令（支持带参 / 带 @bot 后缀）。
  * worker.js 私聊拦截与群内权限提示共用同一命令清单，避免两处维护漂移。
  * @param {*} text - 命令文本（如 '/menu'、'/find 词'、'/menu@bot'）

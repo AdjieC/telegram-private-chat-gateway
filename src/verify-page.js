@@ -27,7 +27,7 @@ const VERIFY_SHARED_STYLE = `
     --error-bg:#3b1212;--error-text:#fca5a5;
   }
 }
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px;color:var(--text)}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px;padding-left:max(20px,env(safe-area-inset-left));padding-right:max(20px,env(safe-area-inset-right));padding-top:max(20px,env(safe-area-inset-top));padding-bottom:max(20px,env(safe-area-inset-bottom));color:var(--text)}
 .card{background:var(--card);border-radius:20px;padding:36px 24px 28px;max-width:400px;width:100%;text-align:center;box-shadow:0 4px 24px rgba(15,23,42,0.08);border:1px solid var(--border)}
 .icon{font-size:52px;margin-bottom:14px}
 h2{color:var(--text);margin-bottom:8px;font-size:20px;font-weight:600}
@@ -49,7 +49,7 @@ const VERIFY_PAGE_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
@@ -163,6 +163,9 @@ function onTurnstileSuccess(token) {
       // 成功后隐藏验证组件，避免用户重复点击或误以为需要再验证
       var turnstileContainer = document.querySelector('.turnstile-container');
       if (turnstileContainer) turnstileContainer.style.display = 'none';
+      // 键盘/读屏器用户：聚焦返回按钮，直接回车即可返回
+      var backBtn = document.getElementById('back-btn');
+      if (backBtn) backBtn.focus();
     } else {
       var errMap = {
         'turnstile_failed': '人机验证未通过，请刷新页面重试',
@@ -245,7 +248,7 @@ const VERIFY_ERROR_PAGE_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">

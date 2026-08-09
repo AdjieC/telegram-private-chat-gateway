@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### 一致性
+
+- **命令参数提取统一**：新增 `commandArgument(text, command)`，`/addword` `/delword` 不再使用 `slice(9)`（不支持 `@bot` 后缀），`/note` `/find` `/notes` 一并接入，消除命令前缀长度漂移。
+- **通知键收敛**：`ban_notice` / `mute_notice` / `cmd_hint` / `cmd_unknown` 前缀统一由 `noticeKey` 构造函数生成，worker 与 admin-actions 共用。
+
+### 体验
+
+- **验证页移动端安全区适配**：`viewport-fit=cover` + `env(safe-area-inset-*)` 安全区 padding，适配刘海屏。
+- **验证页成功态聚焦返回按钮**：键盘/读屏器用户验证成功后可直接回车返回 Telegram。
+- **管理帮助突出来源**：`/help` 管理帮助末尾加入可点击项目地址，与 `/sysinfo` 页脚一致。
+
+### 健壮性
+
+- **媒体组 caption 归属改进**：首项无效被过滤时，caption 自动落到第一个有效项，不再丢失。
+
+### 测试
+
+- 新增：`POST /` webhook 超限 413 边界、`readEnvValue` trim 别名与空字符串回退、`commandArgument` 参数提取、媒体组 caption 迁移、管理帮助来源行。
+
 ### 行为与体验
 
 - **`/start` 深链参数不入待转发队列**：`/start <payload>` 验证通过后不再把指令文本转发给管理员，只触发验证流程。

@@ -47,6 +47,7 @@ import {
   secureRandomId,
   isAdminCommandText,
   GATEWAY_REPO,
+  noticeKey,
 } from './src/utils.js';
 
 // Telegram Private Chat Gateway — Cloudflare Workers 私聊安全接入与双向会话网关
@@ -88,7 +89,7 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.2.7';
+const GATEWAY_VERSION = '1.2.8';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -1141,9 +1142,9 @@ async function handlePrivateMessage(msg, env, ctx) {
   const privateCommand = removeCommandBotSuffix((msg.text || '').trim());
   if (msg.text && msg.text.startsWith("/") && !/^\/start(\s|$)/i.test(privateCommand)) {
     if (isAdminCommandText(privateCommand)) {
-      await sendHourlyNotice(env, userId, `cmd_hint:${userId}`, USER_COPY.adminCommandHint);
+      await sendHourlyNotice(env, userId, noticeKey.cmdHint(userId), USER_COPY.adminCommandHint);
     } else {
-      await sendHourlyNotice(env, userId, `cmd_unknown:${userId}`, USER_COPY.unknownCommandHint);
+      await sendHourlyNotice(env, userId, noticeKey.cmdUnknown(userId), USER_COPY.unknownCommandHint);
     }
     return;
   }
@@ -1161,12 +1162,12 @@ async function handlePrivateMessage(msg, env, ctx) {
 
   if (policyResult.reason === 'banned') {
     // 避免用户不知道已被封禁仍反复发送；每小时最多提醒一次
-    await sendHourlyNotice(env, userId, `ban_notice:${userId}`, USER_COPY.bannedHourly);
+    await sendHourlyNotice(env, userId, noticeKey.ban(userId), USER_COPY.bannedHourly);
     return;
   }
   // 静音：仍接收但不转发到管理群（每小时提示一次）
   if (isMuted) {
-    await sendHourlyNotice(env, userId, `mute_notice:${userId}`, USER_COPY.mutedHourly);
+    await sendHourlyNotice(env, userId, noticeKey.mute(userId), USER_COPY.mutedHourly);
     return;
   }
   if (policyResult.reason === 'blocked_keyword') {
