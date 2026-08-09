@@ -146,24 +146,13 @@ https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<WORKER_URL>&secret_token
 - [安全设计](docs/security.md)
 - [更新历史](CHANGELOG.md)
 
-## 项目状态
-
-- 当前版本：`1.0.0`
-- 运行环境：Cloudflare Workers ES Modules
-- 长期存储：Cloudflare D1
-- 短期状态：Cloudflare KV
-- 测试框架：Vitest
-- 主要语言：JavaScript
-
-项目提供单元测试、集成测试、覆盖率检查、单文件打包与提交时自动构建 dist。真实 Telegram Bot 权限、Cloudflare Bindings 和 Cron 应在预发布 Worker 中验证。
-
 ## 安全提示
 
 - 在 Cloudflare Dashboard 的 **Variables and Secrets** 中保存 `BOT_TOKEN`、`WEBHOOK_SECRET` 和 Turnstile Secret。
 - `WEBHOOK_SECRET` 必须是至少 32 字节的高熵随机值。
 - 不要在仓库、日志、Issue 或聊天记录中提交真实凭据。
 - 不要将 Vitest UI 或本地开发服务直接暴露到公网。
-- 发布前阅读[安全设计](docs/security.md)并完成[运维检查清单](docs/operations.md)。
+- 发布前在预发布 Worker 验证真实 Telegram Bot 权限、Cloudflare Bindings 和 Cron，再阅读[安全设计](docs/security.md)并完成[运维检查清单](docs/operations.md)。
 
 ## License
 

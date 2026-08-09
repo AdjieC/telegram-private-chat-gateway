@@ -742,11 +742,12 @@ function buildD1Storage(db) {
         const one = await this.getUser(q);
         return one ? [one] : [];
       }
-      const like = `%${q.replace(/%/g, "")}%`;
+      const escaped = q.replace(/[%_\\]/g, (match) => `\\${match}`);
+      const like = `%${escaped}%`;
       const result = await db.prepare(`
         SELECT user_id, username, first_name, last_name, last_message_at, topic_id, status, trust_level
         FROM users
-        WHERE username LIKE ? OR first_name LIKE ? OR last_name LIKE ?
+        WHERE username LIKE ? ESCAPE '\\' OR first_name LIKE ? ESCAPE '\\' OR last_name LIKE ? ESCAPE '\\'
         ORDER BY COALESCE(last_message_at, 0) DESC
         LIMIT ?
       `).bind(like, like, like, lim).all();
@@ -1153,6 +1154,10 @@ function isTestMessageInvalid(description) {
   const desc = normalizeTgDescription(description);
   return desc.includes("message text is empty") || desc.includes("bad request: message text is empty");
 }
+var ADMIN_COMMAND_PATTERN = /^\/(help|menu|dashboard|sysinfo|system|status|stats|rank|activity|heat|whoami|find|notes|cleanup|listwords|addword|delword|panel|info|ban|unban|close|open|mute|unmute|trust|reset|note|synccommands)(@|\s|$)/i;
+function isAdminCommandText(text) {
+  return ADMIN_COMMAND_PATTERN.test(String(text ?? ""));
+}
 function isPlaceholderTopicTitle(title) {
   const value = String(title ?? "").trim();
   if (!value) return true;
@@ -1463,6 +1468,7 @@ var CALLBACK_BUSY_COPY = {
   reset: "\u6B63\u5728\u91CD\u7F6E\u2026",
   resetok: "\u6B63\u5728\u91CD\u7F6E\u2026"
 };
+var FIND_USAGE_TEXT = "\u7528\u6CD5: <code>/find UID\u6216\u7528\u6237\u540D\u6216\u59D3\u540D</code>";
 var USER_COPY = {
   /** 消息发送限流（minutes 由调用方按 RATE_LIMIT_WINDOW 换算，与验证限流口径一致，防文案漂移） */
   rateLimited(minutes) {
@@ -1658,10 +1664,12 @@ ${existing}
   threadNotLinked: "\u26A0\uFE0F \u5F53\u524D\u8BDD\u9898\u672A\u5173\u8054\u7528\u6237\uFF08\u8BF7\u5728\u5BF9\u5E94\u7528\u6237 Forum Topic \u5185\u6267\u884C\uFF0C\u6216\u4F7F\u7528 /find\uFF09\u3002",
   /** 话题内未反查到用户（不可定位时的全局命令提示） */
   threadNotLinkedGlobal: "\u26A0\uFE0F \u5F53\u524D\u8BDD\u9898\u672A\u5173\u8054\u7528\u6237\u3002\u5168\u5C40\u547D\u4EE4\uFF1A/sysinfo /stats /rank /find /notes /help",
+  /** /find 无参用法提示 */
+  findUsage: FIND_USAGE_TEXT,
   /** /find 导航说明卡片（adm:nav:find 与文本命令共用） */
   findNavHelp: [
     "\u{1F50D} <b>\u67E5\u627E\u7528\u6237</b>",
-    "\u7528\u6CD5: <code>/find UID\u6216\u7528\u6237\u540D\u6216\u59D3\u540D</code>",
+    FIND_USAGE_TEXT,
     "\u5907\u6CE8: <code>/notes \u5173\u952E\u8BCD</code>",
     "\u6D3B\u8DC3: <code>/rank</code>"
   ].join("\n"),
@@ -1980,6 +1988,13 @@ function errorMessage(value) {
   if (value === void 0 || value === null) return "unknown";
   return String(value);
 }
+var LOG_MAX_BYTES = 32 * 1024;
+var LOG_TRUNCATED_SUFFIX = "\u2026[truncated]";
+function capLogLine(output) {
+  if (output.length <= LOG_MAX_BYTES) return output;
+  const keep = LOG_MAX_BYTES - LOG_TRUNCATED_SUFFIX.length;
+  return `${output.slice(0, keep)}${LOG_TRUNCATED_SUFFIX}`;
+}
 function createLogger(baseContext = {}, sink = console, options = {}) {
   const { onError } = options;
   function emit(level, action, data = {}) {
@@ -1991,7 +2006,7 @@ function createLogger(baseContext = {}, sink = console, options = {}) {
       ...baseContext,
       ...data
     });
-    const output = safeStringify(log);
+    const output = capLogLine(safeStringify(log));
     try {
       const target = typeof sink?.[method] === "function" ? sink[method] : sink?.log;
       if (typeof target === "function") target.call(sink, output);
@@ -3628,17 +3643,21 @@ function opsDayStartMs(now = Date.now(), offsetHours = OPS_TZ_OFFSET_HOURS) {
   const off = Number(offsetHours);
   return Date.UTC(y, m - 1, d) - off * 36e5;
 }
-function formatSparkline(values) {
+var BLOCK_CHARS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588";
+function toBlockLevels(values) {
   const list = (values || []).map((n) => Math.max(0, Number(n) || 0));
-  if (!list.length) return "";
   const max = Math.max(0, ...list);
-  if (max <= 0) return "\xB7".repeat(list.length);
-  const blocks = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588";
+  if (max <= 0) return list.map(() => "\xB7");
   return list.map((n) => {
     if (n <= 0) return "\xB7";
     const level = Math.min(8, Math.max(1, Math.ceil(n / max * 8)));
-    return blocks[level - 1];
-  }).join("");
+    return BLOCK_CHARS[level - 1];
+  });
+}
+function formatSparkline(values) {
+  const list = (values || []).map((n) => Math.max(0, Number(n) || 0));
+  if (!list.length) return "";
+  return toBlockLevels(list).join("");
 }
 function pickPeakDays(series, topN = 1) {
   const n = Math.min(Math.max(Number(topN) || 1, 1), 7);
@@ -3691,14 +3710,7 @@ function peakHoursFromBuckets(hours, topN = 3) {
 }
 function formatHeatBars(hours) {
   const list = Array.isArray(hours) && hours.length === 24 ? hours.map((n) => Math.max(0, Number(n) || 0)) : Array.from({ length: 24 }, () => 0);
-  const max = Math.max(0, ...list);
-  if (max <= 0) return "\xB7".repeat(24);
-  const blocks = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588";
-  return list.map((n) => {
-    if (n <= 0) return "\xB7";
-    const level = Math.min(8, Math.max(1, Math.ceil(n / max * 8)));
-    return blocks[level - 1];
-  }).join("");
+  return toBlockLevels(list).join("");
 }
 function formatHeatAxis() {
   return "0\xB7\xB7\xB7\xB7\xB76\xB7\xB7\xB7\xB712\xB7\xB7\xB7\xB718\xB7\xB7\xB723";
@@ -4692,7 +4704,7 @@ function createAdminCommandHandlers(deps) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: "\u7528\u6CD5: <code>/find UID\u6216\u7528\u6237\u540D\u6216\u59D3\u540D</code>",
+        text: ADMIN_COPY.findUsage,
         parse_mode: "HTML"
       });
       return;
@@ -5357,7 +5369,7 @@ var CONFIG = {
   MEDIA_GROUP_CLEANUP_PROBABILITY: 0.05
   // 过期媒体组扫描概率：键自带 60s TTL，孤儿键极少，无需每条消息全量扫 KV
 };
-var GATEWAY_VERSION = "1.2.1";
+var GATEWAY_VERSION = "1.2.2";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
@@ -6195,7 +6207,7 @@ async function handlePrivateMessage(msg, env, ctx) {
   }
   if (msg.text && msg.text.startsWith("/") && msg.text.trim() !== "/start") {
     const command = removeCommandBotSuffix(msg.text.trim());
-    if (/^\/(help|menu|dashboard|sysinfo|system|status|stats|rank|activity|heat|whoami|find|notes|cleanup|listwords|addword|delword|panel|info|ban|unban|close|open|mute|unmute|trust|reset|note|synccommands)(@|\s|$)/i.test(command)) {
+    if (isAdminCommandText(command)) {
       await sendHourlyNotice(env, userId, `cmd_hint:${userId}`, USER_COPY.adminCommandHint);
     }
     return;
@@ -6512,8 +6524,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
   const senderId = msg.from?.id;
   const isCommand = !!text && text.startsWith("/");
   if (!senderId || !await isAdminUser(env, senderId)) {
-    const known = /^\/(help|menu|dashboard|sysinfo|system|status|stats|rank|activity|heat|whoami|find|notes|cleanup|listwords|addword|delword|panel|info|ban|unban|close|open|mute|unmute|trust|reset|note|synccommands)(@|\s|$)/i;
-    if (isCommand && senderId && known.test(text)) {
+    if (isCommand && senderId && isAdminCommandText(text)) {
       await tgCall(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
@@ -6734,11 +6745,16 @@ async function updateThreadStatus(threadId, isClosed, env) {
     }
     const allKeys = await getAllKeys(env, "user:", 20);
     const updates = [];
-    for (const { name } of allKeys) {
-      const rec = await safeGetJSON(env, name, null);
-      if (rec && Number(rec.thread_id) === Number(threadId)) {
-        rec.closed = isClosed;
-        updates.push(env.TOPIC_MAP.put(name, JSON.stringify(rec)));
+    const scanBatch = 20;
+    for (let i = 0; i < allKeys.length; i += scanBatch) {
+      const batch = allKeys.slice(i, i + scanBatch);
+      const records = await Promise.all(batch.map(({ name }) => safeGetJSON(env, name, null)));
+      for (let j = 0; j < batch.length; j += 1) {
+        const rec = records[j];
+        if (rec && Number(rec.thread_id) === Number(threadId)) {
+          rec.closed = isClosed;
+          updates.push(env.TOPIC_MAP.put(batch[j].name, JSON.stringify(rec)));
+        }
       }
     }
     await Promise.all(updates);

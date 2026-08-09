@@ -70,6 +70,16 @@ function errorMessage(value) {
   return String(value);
 }
 
+/** 单条日志输出长度上限：超出部分截断并追加标记，避免超长负载撑爆 Cloudflare 日志配额 */
+const LOG_MAX_BYTES = 32 * 1024;
+const LOG_TRUNCATED_SUFFIX = '…[truncated]';
+
+function capLogLine(output) {
+  if (output.length <= LOG_MAX_BYTES) return output;
+  const keep = LOG_MAX_BYTES - LOG_TRUNCATED_SUFFIX.length;
+  return `${output.slice(0, keep)}${LOG_TRUNCATED_SUFFIX}`;
+}
+
 export function createLogger(baseContext = {}, sink = console, options = {}) {
   const { onError } = options;
 
@@ -82,7 +92,7 @@ export function createLogger(baseContext = {}, sink = console, options = {}) {
       ...baseContext,
       ...data,
     });
-    const output = safeStringify(log);
+    const output = capLogLine(safeStringify(log));
     try {
       const target = typeof sink?.[method] === 'function' ? sink[method] : sink?.log;
       if (typeof target === 'function') target.call(sink, output);

@@ -142,4 +142,19 @@ describe('logger', () => {
     circular.self = circular;
     expect(safeStringify(circular)).toMatch(/Circular|Unserializable|\[/);
   });
+
+  it('超长日志截断到长度上限并保留可读标记，正常日志不截断', () => {
+    const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const logger = createLogger({}, sink);
+
+    logger.info('big_payload', { payload: 'x'.repeat(100000) });
+    const big = sink.info.mock.calls[0][0];
+    expect(big.length).toBeLessThan(40 * 1024);
+    expect(big.endsWith('…[truncated]')).toBe(true);
+
+    logger.info('small', { a: 1 });
+    const small = sink.info.mock.calls[1][0];
+    expect(small).toContain('"a":1');
+    expect(small).not.toContain('truncated');
+  });
 });

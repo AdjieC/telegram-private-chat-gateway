@@ -1,13 +1,25 @@
 # Changelog
 
-本文件记录 Telegram Private Chat Gateway 的正式版本变化。
-
 ## [Unreleased]
 
 ### 功能一致性
 
 - **动态规则对新消息生效**：新消息路径统一走 `evaluateLegacyPolicy`，D1 存储规则（`blocked_keyword` / `auto_reply` 等）此前仅对编辑消息生效，现与新消息路径共用同一策略评估；屏蔽词命中日志对 D1 规则改为记录规则 ID，避免越界取词。
 - **话题健康重试计数接通**：`retry:userId` 计数器此前只读不写（上限分支为死代码），现由 `checkThreadHealth` 在连续未知错误时累计（1 小时 TTL），达到 `MAX_RETRY_ATTEMPTS` 后暂停转发并提示用户；健康探测成功时自动清零。
+- **`/find` 搜索通配符转义**：`searchUsers` 的 LIKE 查询将 `_`、`%` 视为字面量（`ESCAPE '\'`），修复下划线用户名被单字符通配符误匹配的问题。
+- **话题状态降级扫描分批并发**：`forum_topic_closed/reopened` 触发全量反查时改为每批 20 并发读取，避免降级路径逐条串行等待 KV 拖垮请求。
+
+### 工程重构
+
+- **管理命令清单统一**：私聊拦截与群内权限提示共用 `isAdminCommandText`，删除两处手工维护的相同正则。
+- **区块映射共享**：`activity-summary` 抽取 `toBlockLevels`，sparkline 与小时热力共用同一 8 档映射。
+- **`/find` 用法文案收拢**：空查询提示与导航卡片共用 `ADMIN_COPY.findUsage`。
+- **日志长度上限**：单条日志截断至 32 KiB 并追加 `…[truncated]` 标记，防止超长负载撑爆 Cloudflare 日志配额。
+- **mock KV 分页语义修复**：测试用 KV `list` 改为按游标推进，修复数据超过 limit 时调用方分页死循环的隐患。
+
+### 文档
+
+- **移除「项目状态」段**：README 与 README_EN 删除过时（仍写 `1.0.0`）的项目状态清单，预发布验证提示并入安全提示；docs 各篇去除「本文说明/面向…」样板开头；CLAUDE.md 移除过时版本陈述。
 
 ### 验证页体验
 

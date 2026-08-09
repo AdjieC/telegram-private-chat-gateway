@@ -48,20 +48,31 @@ export function opsDayStartMs(now = Date.now(), offsetHours = OPS_TZ_OFFSET_HOUR
 }
 
 /**
+ * 将数值序列映射为 8 档区块字符（0 值显示为「·」，最大值固定为 █）。
+ * formatSparkline 与 formatHeatBars 共用同一映射，避免两处漂移。
+ * @param {number[]} values
+ * @returns {string[]} 与输入等长的区块字符数组
+ */
+const BLOCK_CHARS = '▁▂▃▄▅▆▇█';
+export function toBlockLevels(values) {
+  const list = (values || []).map(n => Math.max(0, Number(n) || 0));
+  const max = Math.max(0, ...list);
+  if (max <= 0) return list.map(() => '·');
+  return list.map((n) => {
+    if (n <= 0) return '·';
+    const level = Math.min(8, Math.max(1, Math.ceil((n / max) * 8)));
+    return BLOCK_CHARS[level - 1];
+  });
+}
+
+/**
  * 可变长度迷你 sparkline（用于近 N 日）
  * @param {number[]} values
  */
 export function formatSparkline(values) {
   const list = (values || []).map(n => Math.max(0, Number(n) || 0));
   if (!list.length) return '';
-  const max = Math.max(0, ...list);
-  if (max <= 0) return '·'.repeat(list.length);
-  const blocks = '▁▂▃▄▅▆▇█';
-  return list.map((n) => {
-    if (n <= 0) return '·';
-    const level = Math.min(8, Math.max(1, Math.ceil((n / max) * 8)));
-    return blocks[level - 1];
-  }).join('');
+  return toBlockLevels(list).join('');
 }
 
 /**
@@ -167,15 +178,7 @@ export function formatHeatBars(hours) {
   const list = Array.isArray(hours) && hours.length === 24
     ? hours.map(n => Math.max(0, Number(n) || 0))
     : Array.from({ length: 24 }, () => 0);
-  const max = Math.max(0, ...list);
-  if (max <= 0) return '·'.repeat(24);
-  const blocks = '▁▂▃▄▅▆▇█';
-  return list.map((n) => {
-    if (n <= 0) return '·';
-    // 将 (0, max] 映射到 8 档，最大值固定为 █
-    const level = Math.min(8, Math.max(1, Math.ceil((n / max) * 8)));
-    return blocks[level - 1];
-  }).join('');
+  return toBlockLevels(list).join('');
 }
 
 /** 热力轴刻度（与 24 格对齐的近似标记） */

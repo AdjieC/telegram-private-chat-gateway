@@ -165,6 +165,18 @@ export function isTestMessageInvalid(description) {
 }
 
 /**
+ * 判断文本是否为管理命令（支持带参 / 带 @bot 后缀）。
+ * worker.js 私聊拦截与群内权限提示共用同一命令清单，避免两处维护漂移。
+ * @param {*} text - 命令文本（如 '/menu'、'/find 词'、'/menu@bot'）
+ * @returns {boolean}
+ */
+const ADMIN_COMMAND_PATTERN =
+  /^\/(help|menu|dashboard|sysinfo|system|status|stats|rank|activity|heat|whoami|find|notes|cleanup|listwords|addword|delword|panel|info|ban|unban|close|open|mute|unmute|trust|reset|note|synccommands)(@|\s|$)/i;
+export function isAdminCommandText(text) {
+  return ADMIN_COMMAND_PATTERN.test(String(text ?? ''));
+}
+
+/**
  * 判断话题标题是否为「资料缺失」占位标题（'User' / 'User @xxx' / 空），
  * 命中后应尝试用最新资料修复标题。worker.js 与 admin-actions.js 共用，避免两处规则漂移。
  * 语义 = 旧 worker 规则（=== 'User' 或 /^User @/i）与旧 admin-actions 规则（=== 'User' 或 /^User(\s@|$)/i）的并集。

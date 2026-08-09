@@ -484,11 +484,13 @@ function buildD1Storage(db) {
         const one = await this.getUser(q);
         return one ? [one] : [];
       }
-      const like = `%${q.replace(/%/g, '')}%`;
+      // LIKE 通配符转义：% 与 _ 均为元字符，输入中的同名符号应视为字面量
+      const escaped = q.replace(/[%_\\]/g, (match) => `\\${match}`);
+      const like = `%${escaped}%`;
       const result = await db.prepare(`
         SELECT user_id, username, first_name, last_name, last_message_at, topic_id, status, trust_level
         FROM users
-        WHERE username LIKE ? OR first_name LIKE ? OR last_name LIKE ?
+        WHERE username LIKE ? ESCAPE '\\' OR first_name LIKE ? ESCAPE '\\' OR last_name LIKE ? ESCAPE '\\'
         ORDER BY COALESCE(last_message_at, 0) DESC
         LIMIT ?
       `).bind(like, like, like, lim).all();

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   isPlaceholderTopicTitle,
+  isAdminCommandText,
   normalizeRecentErrorItem,
   RECENT_ERROR_ACTION_MAX,
   RECENT_ERROR_TEXT_MAX,
@@ -30,6 +31,22 @@ describe('isPlaceholderTopicTitle（占位话题标题检测）', () => {
     expect(isPlaceholderTopicTitle('user')).toBe(false);
     expect(isPlaceholderTopicTitle('USER')).toBe(false);
     expect(isPlaceholderTopicTitle('USER @abc')).toBe(true);
+  });
+});
+
+describe('isAdminCommandText（管理命令清单）', () => {
+  it('识别带参与带 @bot 后缀的管理命令', () => {
+    expect(isAdminCommandText('/menu')).toBe(true);
+    expect(isAdminCommandText('/find 张三')).toBe(true);
+    expect(isAdminCommandText('/menu@bot')).toBe(true);
+    expect(isAdminCommandText('/synccommands')).toBe(true);
+  });
+
+  it('不误判普通消息与未知命令', () => {
+    expect(isAdminCommandText('你好')).toBe(false);
+    expect(isAdminCommandText('/randomcmd')).toBe(false);
+    expect(isAdminCommandText('')).toBe(false);
+    expect(isAdminCommandText(null)).toBe(false);
   });
 });
 

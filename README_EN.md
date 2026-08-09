@@ -148,24 +148,13 @@ After deploying a new `dist/worker.single.js`, Owners should run `/synccommands`
 - [Security](docs/security.md)
 - [Changelog](CHANGELOG.md)
 
-## Project Status
-
-- Current version: `1.0.0`
-- Runtime: Cloudflare Workers ES Modules
-- Durable storage: Cloudflare D1
-- Temporary state: Cloudflare KV
-- Test framework: Vitest
-- Primary language: JavaScript
-
-The project includes unit tests, integration tests, coverage checks, single-file bundling, and a pre-commit hook that rebuilds `dist/`. Telegram Bot permissions, Cloudflare Bindings, and Cron should still be validated on a staging Worker.
-
 ## Security
 
 - Store `BOT_TOKEN`, `WEBHOOK_SECRET`, and the Turnstile Secret under Dashboard **Variables and Secrets**.
 - Use a high-entropy `WEBHOOK_SECRET` of at least 32 bytes.
 - Never commit real credentials to the repository, logs, issues, or chat messages.
 - Do not expose the Vitest UI or a local development server directly to the internet.
-- Review the [security design](docs/security.md) and [operations checklist](docs/operations.md) before release.
+- Validate real Telegram Bot permissions, Cloudflare Bindings, and Cron on a staging Worker before release, then review the [security design](docs/security.md) and [operations checklist](docs/operations.md).
 
 ## License
 

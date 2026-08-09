@@ -1,7 +1,5 @@
 # 部署指南
 
-本文说明如何从零部署 Telegram Private Chat Gateway。
-
 **官方推荐且文档唯一支持的发布方式：** 本地打包生成 `dist/worker.single.js`，在 Cloudflare Dashboard **手动粘贴** 到 Worker 并 Deploy；Bindings、变量、Cron 全部在 Dashboard 配置。
 
 不依赖 `wrangler deploy`、不依赖 Git 连接 Cloudflare 自动部署，避免空 `wrangler.toml` 覆盖线上绑定与变量。

@@ -1,6 +1,6 @@
 {
   "name": "telegram-private-chat-gateway",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "部署在 Cloudflare Workers 上的 Telegram 私聊安全接入与双向会话网关",
   "private": true,
   "type": "module",

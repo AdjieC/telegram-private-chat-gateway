@@ -125,7 +125,11 @@ export function createMockD1() {
         }
         if (/FROM users[\s\S]*WHERE username LIKE \?/i.test(normalized)) {
           const [like1] = bindings;
-          const needle = String(like1 || '').replace(/%/g, '').toLowerCase();
+          // 还原 LIKE 转义：\_ 与 \% 视为字面量（与 SQL ESCAPE '\' 语义一致），% 为通配符
+          const needle = String(like1 || '')
+            .replace(/\\(.)/g, '$1')
+            .replace(/%/g, '')
+            .toLowerCase();
           const rows = (tables.get('users') || []).filter(row => {
             const u = String(row.username || '').toLowerCase();
             const f = String(row.first_name || '').toLowerCase();

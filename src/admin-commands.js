@@ -732,7 +732,7 @@ async function handleFindCommand(env, threadId, queryText) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: '用法: <code>/find UID或用户名或姓名</code>',
+      text: ADMIN_COPY.findUsage,
       parse_mode: 'HTML',
     });
     return;

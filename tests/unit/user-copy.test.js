@@ -113,6 +113,8 @@ describe('user-copy', () => {
     expect(ADMIN_COPY.threadNotLinked).toContain('未关联用户');
     expect(ADMIN_COPY.threadNotLinkedGlobal).toContain('/sysinfo');
     expect(ADMIN_COPY.findNavHelp).toContain('/find');
+    expect(ADMIN_COPY.findUsage).toContain('/find');
+    expect(ADMIN_COPY.findNavHelp).toContain(ADMIN_COPY.findUsage);
     expect(ADMIN_COPY.listWordsUnavailable).toContain('/listwords');
     expect(ADMIN_COPY.syncCommandsDenied).toContain('OWNER_IDS');
     expect(ADMIN_COPY.commandsSynced(23)).toContain('23');

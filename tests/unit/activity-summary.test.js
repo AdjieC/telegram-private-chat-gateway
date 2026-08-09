@@ -11,6 +11,7 @@ import {
   formatHeatBars,
   formatHeatAxis,
   formatSparkline,
+  toBlockLevels,
   pickPeakDays,
   formatPeakDays,
   formatPeakHours,
@@ -96,6 +97,18 @@ describe('activity-summary', () => {
     expect(formatSparkline([0, 0, 0])).toBe('···');
     expect(formatSparkline([1, 4, 8])).toHaveLength(3);
     expect(formatSparkline([1, 4, 8])[2]).toBe('█');
+  });
+
+  it('toBlockLevels 与 sparkline/热力共用映射', () => {
+    // 全零 → 全部「·」；最大值 → █；长度与输入一致
+    expect(toBlockLevels([0, 0])).toEqual(['·', '·']);
+    expect(toBlockLevels([])).toEqual([]);
+    expect(toBlockLevels([2, 8])[1]).toBe('█');
+    expect(toBlockLevels([1, 2, 4]).join('')).toBe(formatSparkline([1, 2, 4]));
+    // 热力补足 24 格后与共享映射一致
+    const hours24 = Array.from({ length: 24 }, () => 0);
+    hours24[0] = 1; hours24[1] = 2; hours24[2] = 4;
+    expect(toBlockLevels(hours24).join('')).toBe(formatHeatBars(hours24));
   });
 
   it('峰值日选取与文案', () => {

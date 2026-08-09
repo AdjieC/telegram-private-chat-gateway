@@ -37,17 +37,20 @@ export function createMockKV(initialData = new Map()) {
       store.delete(key);
     },
 
-    async list({ prefix, limit = 1000 } = {}) {
-      const allKeys = [...store.keys()]
+    async list({ prefix, limit = 1000, cursor } = {}) {
+      const allNames = [...store.keys()]
         .filter(k => !prefix || k.startsWith(prefix))
         .filter(k => !isExpired(store.get(k)))
-        .map(name => ({ name }));
-      // 模拟分页
-      const keys = allKeys.slice(0, limit);
+        .sort();
+      // 真实 KV 分页语义：按游标推进，避免恒定返回 has_more 导致调用方死循环
+      const start = cursor ? Number(cursor) || 0 : 0;
+      const keys = allNames.slice(start, start + limit).map(name => ({ name }));
+      const next = start + limit;
+      const hasMore = next < allNames.length;
       return {
         keys,
-        list_complete: allKeys.length <= limit,
-        cursor: allKeys.length > limit ? 'has_more' : undefined,
+        list_complete: !hasMore,
+        cursor: hasMore ? String(next) : undefined,
       };
     },
 

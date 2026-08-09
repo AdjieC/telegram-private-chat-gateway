@@ -53,6 +53,23 @@ describe('D1 system stats', () => {
     ]);
   });
 
+  it('searchUsers 将 _ 与 % 视为字面量而非通配符', async () => {
+    const db = createMockD1();
+    await ensureMigrations(db, 1000);
+    const storage = createD1Storage(db);
+    await storage.upsertUser({ userId: '10', username: 'a_b', firstName: '甲' });
+    await storage.upsertUser({ userId: '11', username: 'axb', firstName: '乙' });
+
+    // 搜索含下划线的用户名：只命中字面量 a_b，不因 _ 通配误匹配 axb
+    const hits = await storage.searchUsers('a_b');
+    expect(hits.map(u => u.userId)).toEqual(['10']);
+
+    // 搜索含百分号的用户名：% 视为字面量
+    await storage.upsertUser({ userId: '12', username: 'rate100%', firstName: '丙' });
+    const percentHits = await storage.searchUsers('rate100%');
+    expect(percentHits.map(u => u.userId)).toEqual(['12']);
+  });
+
   it('活跃查询：since 用户与入站 message_links 行', async () => {
     const db = createMockD1();
     await ensureMigrations(db, 1000);

@@ -438,6 +438,31 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     expect(telegram.calls.some(c => c.method === 'sendMessage' && c.body.chat_id === userId)).toBe(false);
   });
 
+  it('封禁提醒按小时窗口重置（TTL 过期后可再次提醒）', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-08T00:00:00Z'));
+    const telegram = createTelegramMock();
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    const userId = 668;
+    await env.TOPIC_MAP.put(`banned:${userId}`, '1');
+
+    // 第一条：提醒一次
+    await send(messageUpdate(privateMessage(userId, 801, { text: '第一条' }), 8601), env, telegram);
+    expect(telegram.calls.filter(c => c.method === 'sendMessage' && c.body.chat_id === userId)).toHaveLength(1);
+
+    // 1 小时内重复发送：不再提醒
+    telegram.calls.length = 0;
+    await send(messageUpdate(privateMessage(userId, 802, { text: '第二条' }), 8602), env, telegram);
+    expect(telegram.calls.some(c => c.method === 'sendMessage' && c.body.chat_id === userId)).toBe(false);
+
+    // 越过 1 小时窗口：可再次提醒
+    vi.setSystemTime(new Date('2026-08-08T01:05:00Z'));
+    telegram.calls.length = 0;
+    await send(messageUpdate(privateMessage(userId, 803, { text: '第三条' }), 8603), env, telegram);
+    expect(telegram.calls.filter(c => c.method === 'sendMessage' && c.body.chat_id === userId)).toHaveLength(1);
+  });
+
   it('/addword 添加屏蔽词后命中消息被拦截', async () => {
     const telegram = createTelegramMock();
     vi.stubGlobal('fetch', telegram.fetchImpl);
@@ -614,5 +639,30 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     expect(notice.body.text).toContain('暂时无法接收');
     // 计数器被清除，后续可重试
     expect(await env.TOPIC_MAP.get(`retry:${userId}`)).toBe(null);
+  });
+
+  it('forum_topic_closed 走降级扫描并批量更新匹配用户', async () => {
+    const telegram = createTelegramMock();
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    // 预置多条用户记录，仅 444 关联 thread 88；不写 thread:88 映射以触发降级全量扫描
+    await env.TOPIC_MAP.put('user:444', JSON.stringify({ thread_id: 88, title: '用户444', closed: false }));
+    await env.TOPIC_MAP.put('user:555', JSON.stringify({ thread_id: 99, title: '用户555', closed: false }));
+
+    const { flush } = await send({
+      update_id: 9501,
+      message: {
+        message_id: 1,
+        chat: { id: SUPERGROUP_ID, type: 'supergroup' },
+        forum_topic_closed: true,
+        message_thread_id: 88,
+      },
+    }, env, telegram);
+    await flush();
+
+    const closed = JSON.parse(await env.TOPIC_MAP.get('user:444'));
+    expect(closed.closed).toBe(true);
+    const untouched = JSON.parse(await env.TOPIC_MAP.get('user:555'));
+    expect(untouched.closed).toBe(false);
   });
 });

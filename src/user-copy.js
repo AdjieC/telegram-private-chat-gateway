@@ -35,6 +35,9 @@ const CALLBACK_BUSY_COPY = {
   resetok: '正在重置…',
 };
 
+/** /find 无参用法提示（handleFindCommand 空查询与 findNavHelp 卡片共用，防文案漂移） */
+const FIND_USAGE_TEXT = '用法: <code>/find UID或用户名或姓名</code>';
+
 export const USER_COPY = {
   /** 消息发送限流（minutes 由调用方按 RATE_LIMIT_WINDOW 换算，与验证限流口径一致，防文案漂移） */
   rateLimited(minutes) {
@@ -228,10 +231,12 @@ export const ADMIN_COPY = {
   threadNotLinked: '⚠️ 当前话题未关联用户（请在对应用户 Forum Topic 内执行，或使用 /find）。',
   /** 话题内未反查到用户（不可定位时的全局命令提示） */
   threadNotLinkedGlobal: '⚠️ 当前话题未关联用户。全局命令：/sysinfo /stats /rank /find /notes /help',
+  /** /find 无参用法提示 */
+  findUsage: FIND_USAGE_TEXT,
   /** /find 导航说明卡片（adm:nav:find 与文本命令共用） */
   findNavHelp: [
     '🔍 <b>查找用户</b>',
-    '用法: <code>/find UID或用户名或姓名</code>',
+    FIND_USAGE_TEXT,
     '备注: <code>/notes 关键词</code>',
     '活跃: <code>/rank</code>',
   ].join('\n'),

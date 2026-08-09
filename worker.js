@@ -45,6 +45,7 @@ import {
   isPlaceholderTopicTitle,
   normalizeRecentErrorItem,
   secureRandomId,
+  isAdminCommandText,
 } from './src/utils.js';
 
 // Telegram Private Chat Gateway — Cloudflare Workers 私聊安全接入与双向会话网关
@@ -85,7 +86,7 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.2.1';
+const GATEWAY_VERSION = '1.2.2';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -1131,7 +1132,7 @@ async function handlePrivateMessage(msg, env, ctx) {
   // 已知管理指令给一次性（每小时节流）友好提示，避免用户误发指令后毫无反馈
   if (msg.text && msg.text.startsWith("/") && msg.text.trim() !== "/start") {
     const command = removeCommandBotSuffix(msg.text.trim());
-    if (/^\/(help|menu|dashboard|sysinfo|system|status|stats|rank|activity|heat|whoami|find|notes|cleanup|listwords|addword|delword|panel|info|ban|unban|close|open|mute|unmute|trust|reset|note|synccommands)(@|\s|$)/i.test(command)) {
+    if (isAdminCommandText(command)) {
       await sendHourlyNotice(env, userId, `cmd_hint:${userId}`, USER_COPY.adminCommandHint);
     }
     return;
@@ -1552,8 +1553,7 @@ async function _handleAdminReplyInner(msg, env, ctx) {
   // 仅允许管理员在群内操作与回信，防止任意群成员向用户私聊注入消息
   if (!senderId || !(await isAdminUser(env, senderId))) {
     // 仅对已知管理命令提示，避免普通聊天被误伤
-    const known = /^\/(help|menu|dashboard|sysinfo|system|status|stats|rank|activity|heat|whoami|find|notes|cleanup|listwords|addword|delword|panel|info|ban|unban|close|open|mute|unmute|trust|reset|note|synccommands)(@|\s|$)/i;
-    if (isCommand && senderId && known.test(text)) {
+    if (isCommand && senderId && isAdminCommandText(text)) {
       await tgCall(env, 'sendMessage', {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
@@ -1781,12 +1781,18 @@ async function updateThreadStatus(threadId, isClosed, env) {
 
     const allKeys = await getAllKeys(env, "user:", 20);
     const updates = [];
+    const scanBatch = 20;
 
-    for (const { name } of allKeys) {
-      const rec = await safeGetJSON(env, name, null);
-      if (rec && Number(rec.thread_id) === Number(threadId)) {
-        rec.closed = isClosed;
-        updates.push(env.TOPIC_MAP.put(name, JSON.stringify(rec)));
+    // 分批并发读取（每批 20），避免降级扫描时逐条串行等待 KV 拖垮请求
+    for (let i = 0; i < allKeys.length; i += scanBatch) {
+      const batch = allKeys.slice(i, i + scanBatch);
+      const records = await Promise.all(batch.map(({ name }) => safeGetJSON(env, name, null)));
+      for (let j = 0; j < batch.length; j += 1) {
+        const rec = records[j];
+        if (rec && Number(rec.thread_id) === Number(threadId)) {
+          rec.closed = isClosed;
+          updates.push(env.TOPIC_MAP.put(batch[j].name, JSON.stringify(rec)));
+        }
       }
     }
 

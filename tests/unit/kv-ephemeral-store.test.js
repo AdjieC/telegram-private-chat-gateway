@@ -87,3 +87,35 @@ describe('KV ephemeral store', () => {
     await expect(store.getAdminState('1')).resolves.toBe(null);
   });
 });
+
+describe('mock KV 分页（list 游标语义）', () => {
+  it('超过 limit 时按游标推进直至 list_complete，不会死循环', async () => {
+    const kv = createMockKV();
+    for (let i = 0; i < 25; i += 1) {
+      await kv.put(`user:${String(i).padStart(2, '0')}`, String(i));
+    }
+
+    const page1 = await kv.list({ prefix: 'user:', limit: 10 });
+    expect(page1.keys).toHaveLength(10);
+    expect(page1.list_complete).toBe(false);
+    expect(page1.cursor).toBe('10');
+
+    const page2 = await kv.list({ prefix: 'user:', limit: 10, cursor: page1.cursor });
+    expect(page2.keys).toHaveLength(10);
+    expect(page2.cursor).toBe('20');
+
+    const page3 = await kv.list({ prefix: 'user:', limit: 10, cursor: page2.cursor });
+    expect(page3.keys).toHaveLength(5);
+    expect(page3.list_complete).toBe(true);
+    expect(page3.cursor).toBeUndefined();
+  });
+
+  it('无前缀与过期键过滤保持一致', async () => {
+    const kv = createMockKV();
+    await kv.put('a:1', 'x');
+    await kv.put('b:2', 'y');
+    const all = await kv.list({});
+    expect(all.keys).toHaveLength(2);
+    expect(all.list_complete).toBe(true);
+  });
+});
