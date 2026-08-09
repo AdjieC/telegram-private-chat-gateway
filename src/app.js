@@ -57,6 +57,13 @@ export function constantTimeEqual(left, right) {
   return mismatch === 0;
 }
 
+/**
+ * 校验 Telegram Webhook 请求并返回解析后的 Update 对象。
+ * 返回解析结果供 routeUpdate 直接复用，避免调用方再次 clone().json() 读取请求体。
+ * @param {Request} request
+ * @param {object} env
+ * @returns {Promise<object>} 解析后的 Update
+ */
 export async function validateTelegramWebhookRequest(request, env) {
   validateWebhookEnv(env);
 
@@ -70,16 +77,31 @@ export async function validateTelegramWebhookRequest(request, env) {
     throw new HttpRequestError(401, 'Unauthorized');
   }
 
+  let bodyText;
   try {
-    JSON.parse(await readRequestBodyWithLimit(request.clone()));
+    // 读取受限（1 MiB）的请求体：超限抛 413，其余读取异常按 400 处理
+    bodyText = await readRequestBodyWithLimit(request.clone());
   } catch (error) {
     if (error instanceof HttpRequestError) throw error;
+    throw new HttpRequestError(400, 'Bad Request');
+  }
+  try {
+    return JSON.parse(bodyText);
+  } catch {
     throw new HttpRequestError(400, 'Bad Request');
   }
 }
 
 async function notFoundHandler() {
-  return new Response('Not Found', { status: 404 });
+  return httpError(404, 'Not Found');
+}
+
+/** 统一错误响应：附带 no-store，避免错误/诊断响应被边缘缓存复用 */
+function httpError(status, message, extraHeaders = {}) {
+  return new Response(message, {
+    status,
+    headers: { 'Cache-Control': 'no-store', ...extraHeaders },
+  });
 }
 
 /**
@@ -112,7 +134,7 @@ export function createApp({ handleFetch = notFoundHandler } = {}) {
           note: mistypedKeys.length
             ? 'Some variable names have leading/trailing spaces; rename them exactly (e.g. SUPERGROUP_ID).'
             : 'values are never included; TG_BOT_DB must be a D1 Binding with prepare(), not a Text variable',
-        });
+        }, { headers: { 'Cache-Control': 'no-store' } });
       }
 
       // D1 连通与 schema migration 诊断（不经 Telegram，便于排查 1101/500）
@@ -131,14 +153,14 @@ export function createApp({ handleFetch = notFoundHandler } = {}) {
             schemaVersion: version?.version ?? null,
             schemaName: version?.name ?? null,
             binding: shape,
-          });
+          }, { headers: { 'Cache-Control': 'no-store' } });
         } catch (error) {
           return Response.json({
             ok: false,
             error: error?.message || String(error),
             name: error?.name || 'Error',
             binding: inspectEnvPresence(env).bindings.TG_BOT_DB,
-          }, { status: 500 });
+          }, { status: 500, headers: { 'Cache-Control': 'no-store' } });
         }
       }
 
@@ -149,51 +171,40 @@ export function createApp({ handleFetch = notFoundHandler } = {}) {
             await readRequestBodyWithLimit(request.clone());
           } catch (error) {
             if (error instanceof HttpRequestError) {
-              return new Response(error.message, { status: error.status });
+              return httpError(error.status, error.message);
             }
             throw error;
           }
         }
         if (request.method === 'POST' && url.pathname === '/') {
+          let update;
           try {
-            await validateTelegramWebhookRequest(request, normalizedEnv);
+            // validate 已解析并返回 Update，消除此前二次 clone().json() 读取请求体。
+            // 密钥校验保持在最前：未认证请求不泄露任何 env 在位信息
+            update = await validateTelegramWebhookRequest(request, normalizedEnv);
           } catch (error) {
             if (error instanceof HttpRequestError) {
-              return new Response(error.message, { status: error.status });
+              return httpError(error.status, error.message);
             }
-            return new Response(`Error: ${error.message}`, { status: 500 });
+            return httpError(500, `Error: ${error.message}`);
           }
-        }
 
-        try {
-          validateBaseEnv(normalizedEnv);
-        } catch (error) {
-          // 附加运行时在位信息，区分「Dashboard 有配置」与「当前部署版本 env 为空」
-          return new Response(
-            `Error: ${error.message}${formatEnvPresenceDetail(normalizedEnv)}`,
-            { status: 500 },
-          );
-        }
+          try {
+            validateBaseEnv(normalizedEnv);
+          } catch (error) {
+            // 附加运行时在位信息，区分「Dashboard 有配置」与「当前部署版本 env 为空」
+            return httpError(500, `Error: ${error.message}${formatEnvPresenceDetail(normalizedEnv)}`);
+          }
 
-        if (request.method === 'POST' && url.pathname === '/') {
           try {
             assertD1Binding(normalizedEnv.TG_BOT_DB, 'TG_BOT_DB');
           } catch (error) {
-            return new Response(`Error: ${error.message}`, { status: 500 });
+            return httpError(500, `Error: ${error.message}`);
           }
           try {
             await ensureMigrations(normalizedEnv.TG_BOT_DB);
           } catch (error) {
-            return new Response(
-              `Error: D1 migration failed: ${error?.message || String(error)}`,
-              { status: 500 },
-            );
-          }
-          let update;
-          try {
-            update = await request.clone().json();
-          } catch (error) {
-            return new Response('Bad Request', { status: 400 });
+            return httpError(500, `Error: D1 migration failed: ${error?.message || String(error)}`);
           }
           try {
             return await routeUpdate(update, {
@@ -202,20 +213,22 @@ export function createApp({ handleFetch = notFoundHandler } = {}) {
               handleUpdate: (parsedUpdate) => handleFetch(request, normalizedEnv, ctx, parsedUpdate),
             });
           } catch (error) {
-            return new Response(
-              `Error: update routing failed: ${error?.message || String(error)}`,
-              { status: 500 },
-            );
+            return httpError(500, `Error: update routing failed: ${error?.message || String(error)}`);
           }
+        }
+
+        // 非 webhook 路径（GET /verify、POST /verify-callback 等）同样要求基础绑定
+        try {
+          validateBaseEnv(normalizedEnv);
+        } catch (error) {
+          // 附加运行时在位信息，区分「Dashboard 有配置」与「当前部署版本 env 为空」
+          return httpError(500, `Error: ${error.message}${formatEnvPresenceDetail(normalizedEnv)}`);
         }
 
         return await handleFetch(request, normalizedEnv, ctx);
       } catch (error) {
         // 避免变成 Cloudflare 1101 空白异常页，便于 webhook 与排障
-        return new Response(
-          `Error: unhandled ${error?.name || 'Error'}: ${error?.message || String(error)}`,
-          { status: 500 },
-        );
+        return httpError(500, `Error: unhandled ${error?.name || 'Error'}: ${error?.message || String(error)}`);
       }
     },
 

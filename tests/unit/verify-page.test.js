@@ -129,6 +129,11 @@ describe('verify-page', () => {
     const errorPage = renderVerifyErrorPage({ message: '原因' });
     expect(errorPage).toContain(repo);
   });
+
+  it('验证成功后隐藏 Turnstile 组件，避免残留交互', () => {
+    expect(page).toContain("turnstileContainer.style.display = 'none'");
+    expect(page).toContain("document.querySelector('.turnstile-container')");
+  });
 });
 
 describe('verify-page error page', () => {

@@ -138,14 +138,12 @@ Telegram Webhook 只接受 `application/json`。所有公开 POST 请求体最�
 
 日志输出前递归脱敏：
 
-- `BOT_TOKEN`
-- `TURNSTILE_SECRET_KEY`
-- `WEBHOOK_SECRET`
-- Bot、Turnstile 和 Webhook token 字段
+- `BOT_TOKEN`、`TURNSTILE_SECRET_KEY`、`WEBHOOK_SECRET`
 - `verifyCode`、`verifyId`
 - `text`、`caption`
+- 通用凭据字段：`token`、`secret`、`phone`、`password`、`passcode`、`auth_key`、`api_hash`、`access_hash`、`session_key`、`private_key`
 
-字段名匹配不区分大小写，以覆盖 Telegram Update、验证回调和第三方 SDK 常见的命名变体。标准错误日志仍保留 `error` 与 `stack` 以便排障；调用者不得把完整 Request、完整 Telegram Update 或包含凭据的字符串作为错误消息写入日志。
+字段名匹配不区分大小写，以覆盖 Telegram Update、验证回调和第三方 SDK 常见的命名变体。标准错误日志仍保留 `error` 与 `stack` 以便排障；调用者不得把完整 Request、完整 Telegram Update 或包含凭据的字符串作为错误消息写入日志。单条日志输出截断至 32 KiB，超出部分追加 `…[truncated]` 标记，防止超长负载撑爆 Cloudflare 日志配额。
 
 recent-error 内存/KV 聚合只保留 `ts`、`action`、`error` 及可选 `userId`、`updateId`、`correlationId`，不会保存 `stack`、正文、caption、原始 Error 对象或未知字段。
 

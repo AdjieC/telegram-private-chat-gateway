@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### 性能
+
+- **Webhook 请求体单次读取**：`validateTelegramWebhookRequest` 校验通过后直接返回解析后的 Update，`routeUpdate` 复用结果，消除此前每条 webhook 二次 `clone().json()` 的读取与解析；密钥校验仍保持在最前，未认证请求不泄露 env 在位信息。
+
+### 健壮性与安全
+
+- **Telegram 错误分类扩充**：`classifyTelegramError` 新增 `chat_not_found` / `user_not_found` / `message_missing` / `message_too_long` 分类，日志与重试决策更可操作。
+- **HTTP 错误/诊断响应统一 `no-store`**：Webhook 校验错误、404、500 与 `/health/env`、`/health/d1` 响应统一禁止缓存，防止错误被边缘缓存复用。
+
+### 体验
+
+- **验证页成功态隐藏验证组件**：验证通过后 Turnstile 挂载点隐藏，避免用户重复点击或误以为仍需验证。
+
+### 文档
+
+- **可调项补充**：`operations.md` 可调项表新增 `RETRY_COUNT_TTL_SECONDS`。
+- **脱敏说明同步**：`security.md` 日志脱敏键清单补充通用凭据字段（`token`/`phone`/`password`/`api_hash` 等）与 32 KiB 单条截断。
+
+### 工程重构
+
+- **假条件移除**：`/sysinfo`「Worker 运行中」不再使用恒真的 `statusChip(true)`，改为直接陈述。
+- **测试补充**：网络重试超出总时限立即放弃、`validateTelegramWebhookRequest` 返回解析结果、非法 JSON 400、错误响应 `no-store`、错误分类稳定。
+
 ### 来源突出
 
 - **部署产物突出来源**：验证页（成功页与错误页）页脚、管理看板 `/sysinfo` 每页页脚均加入可点击的 GitHub 项目地址；README 双语顶部补充「项目地址」行。仓库 URL 收敛为 `src/utils.js` 的 `GATEWAY_REPO` 单一来源（验证页 / worker / 管理命令共用）。

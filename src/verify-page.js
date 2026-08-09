@@ -160,6 +160,9 @@ function onTurnstileSuccess(token) {
       }
       showStatus(msg, 'success');
       document.querySelector('.desc').textContent = '验证完成，请返回 Telegram 查看机器人消息。';
+      // 成功后隐藏验证组件，避免用户重复点击或误以为需要再验证
+      var turnstileContainer = document.querySelector('.turnstile-container');
+      if (turnstileContainer) turnstileContainer.style.display = 'none';
     } else {
       var errMap = {
         'turnstile_failed': '人机验证未通过，请刷新页面重试',

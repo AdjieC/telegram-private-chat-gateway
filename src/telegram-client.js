@@ -35,6 +35,23 @@ export function classifyTelegramError({ status, description = '', retryAfter }) 
   ) {
     return { category: 'topic_missing', retryable: false };
   }
+  if (normalized.includes('chat not found')) {
+    return { category: 'chat_not_found', retryable: false };
+  }
+  if (normalized.includes('user not found')) {
+    return { category: 'user_not_found', retryable: false };
+  }
+  if (
+    normalized.includes('message id is not specified')
+    || normalized.includes('message to forward not found')
+    || normalized.includes('message to copy not found')
+    || normalized.includes('message is too old')
+  ) {
+    return { category: 'message_missing', retryable: false };
+  }
+  if (normalized.includes('message is too long')) {
+    return { category: 'message_too_long', retryable: false };
+  }
   return { category: 'invalid_request', retryable: false };
 }
 

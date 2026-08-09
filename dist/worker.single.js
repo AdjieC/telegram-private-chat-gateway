@@ -960,15 +960,27 @@ async function validateTelegramWebhookRequest(request, env) {
   if (!constantTimeEqual(providedSecret, env.WEBHOOK_SECRET)) {
     throw new HttpRequestError(401, "Unauthorized");
   }
+  let bodyText;
   try {
-    JSON.parse(await readRequestBodyWithLimit(request.clone()));
+    bodyText = await readRequestBodyWithLimit(request.clone());
   } catch (error) {
     if (error instanceof HttpRequestError) throw error;
     throw new HttpRequestError(400, "Bad Request");
   }
+  try {
+    return JSON.parse(bodyText);
+  } catch {
+    throw new HttpRequestError(400, "Bad Request");
+  }
 }
 async function notFoundHandler() {
-  return new Response("Not Found", { status: 404 });
+  return httpError(404, "Not Found");
+}
+function httpError(status, message, extraHeaders = {}) {
+  return new Response(message, {
+    status,
+    headers: { "Cache-Control": "no-store", ...extraHeaders }
+  });
 }
 function createApp({ handleFetch = notFoundHandler } = {}) {
   return {
@@ -988,7 +1000,7 @@ function createApp({ handleFetch = notFoundHandler } = {}) {
           mistypedKeys,
           bindings,
           note: mistypedKeys.length ? "Some variable names have leading/trailing spaces; rename them exactly (e.g. SUPERGROUP_ID)." : "values are never included; TG_BOT_DB must be a D1 Binding with prepare(), not a Text variable"
-        });
+        }, { headers: { "Cache-Control": "no-store" } });
       }
       if (request.method === "GET" && url.pathname === "/health/d1") {
         try {
@@ -1005,14 +1017,14 @@ function createApp({ handleFetch = notFoundHandler } = {}) {
             schemaVersion: version?.version ?? null,
             schemaName: version?.name ?? null,
             binding: shape
-          });
+          }, { headers: { "Cache-Control": "no-store" } });
         } catch (error) {
           return Response.json({
             ok: false,
             error: error?.message || String(error),
             name: error?.name || "Error",
             binding: inspectEnvPresence(env).bindings.TG_BOT_DB
-          }, { status: 500 });
+          }, { status: 500, headers: { "Cache-Control": "no-store" } });
         }
       }
       try {
@@ -1022,48 +1034,35 @@ function createApp({ handleFetch = notFoundHandler } = {}) {
             await readRequestBodyWithLimit(request.clone());
           } catch (error) {
             if (error instanceof HttpRequestError) {
-              return new Response(error.message, { status: error.status });
+              return httpError(error.status, error.message);
             }
             throw error;
           }
         }
         if (request.method === "POST" && url.pathname === "/") {
+          let update;
           try {
-            await validateTelegramWebhookRequest(request, normalizedEnv);
+            update = await validateTelegramWebhookRequest(request, normalizedEnv);
           } catch (error) {
             if (error instanceof HttpRequestError) {
-              return new Response(error.message, { status: error.status });
+              return httpError(error.status, error.message);
             }
-            return new Response(`Error: ${error.message}`, { status: 500 });
+            return httpError(500, `Error: ${error.message}`);
           }
-        }
-        try {
-          validateBaseEnv(normalizedEnv);
-        } catch (error) {
-          return new Response(
-            `Error: ${error.message}${formatEnvPresenceDetail(normalizedEnv)}`,
-            { status: 500 }
-          );
-        }
-        if (request.method === "POST" && url.pathname === "/") {
+          try {
+            validateBaseEnv(normalizedEnv);
+          } catch (error) {
+            return httpError(500, `Error: ${error.message}${formatEnvPresenceDetail(normalizedEnv)}`);
+          }
           try {
             assertD1Binding(normalizedEnv.TG_BOT_DB, "TG_BOT_DB");
           } catch (error) {
-            return new Response(`Error: ${error.message}`, { status: 500 });
+            return httpError(500, `Error: ${error.message}`);
           }
           try {
             await ensureMigrations(normalizedEnv.TG_BOT_DB);
           } catch (error) {
-            return new Response(
-              `Error: D1 migration failed: ${error?.message || String(error)}`,
-              { status: 500 }
-            );
-          }
-          let update;
-          try {
-            update = await request.clone().json();
-          } catch (error) {
-            return new Response("Bad Request", { status: 400 });
+            return httpError(500, `Error: D1 migration failed: ${error?.message || String(error)}`);
           }
           try {
             return await routeUpdate(update, {
@@ -1072,18 +1071,17 @@ function createApp({ handleFetch = notFoundHandler } = {}) {
               handleUpdate: (parsedUpdate) => handleFetch(request, normalizedEnv, ctx, parsedUpdate)
             });
           } catch (error) {
-            return new Response(
-              `Error: update routing failed: ${error?.message || String(error)}`,
-              { status: 500 }
-            );
+            return httpError(500, `Error: update routing failed: ${error?.message || String(error)}`);
           }
+        }
+        try {
+          validateBaseEnv(normalizedEnv);
+        } catch (error) {
+          return httpError(500, `Error: ${error.message}${formatEnvPresenceDetail(normalizedEnv)}`);
         }
         return await handleFetch(request, normalizedEnv, ctx);
       } catch (error) {
-        return new Response(
-          `Error: unhandled ${error?.name || "Error"}: ${error?.message || String(error)}`,
-          { status: 500 }
-        );
+        return httpError(500, `Error: unhandled ${error?.name || "Error"}: ${error?.message || String(error)}`);
       }
     },
     async scheduled(_event, env) {
@@ -2092,6 +2090,18 @@ function classifyTelegramError({ status, description = "", retryAfter }) {
   }
   if (normalized.includes("thread not found") || normalized.includes("topic not found") || normalized.includes("message thread not found") || normalized.includes("topic deleted")) {
     return { category: "topic_missing", retryable: false };
+  }
+  if (normalized.includes("chat not found")) {
+    return { category: "chat_not_found", retryable: false };
+  }
+  if (normalized.includes("user not found")) {
+    return { category: "user_not_found", retryable: false };
+  }
+  if (normalized.includes("message id is not specified") || normalized.includes("message to forward not found") || normalized.includes("message to copy not found") || normalized.includes("message is too old")) {
+    return { category: "message_missing", retryable: false };
+  }
+  if (normalized.includes("message is too long")) {
+    return { category: "message_too_long", retryable: false };
   }
   return { category: "invalid_request", retryable: false };
 }
@@ -4343,7 +4353,7 @@ function createAdminCommandHandlers(deps) {
     lines.push(`\u{1F5A5} <b>\u7CFB\u7EDF \xB7 ${page === "stats" ? "\u4ECA\u65E5\u7EDF\u8BA1" : "\u6982\u89C8"}</b>`);
     lines.push(`<code>v${GATEWAY_VERSION2}</code>`);
     lines.push(SEP_LINE);
-    lines.push(`${statusChip(true, "Worker \u8FD0\u884C\u4E2D")}`);
+    lines.push("\u2705 Worker \u8FD0\u884C\u4E2D");
     lines.push(`${statusChip(hasKv, "KV \u5DF2\u7ED1\u5B9A", "KV \u7F3A\u5931")} \xB7 ${statusChip(hasD1, "D1 \u5DF2\u7ED1\u5B9A", "D1 \u7F3A\u5931")}`);
     lines.push(`\u9A8C\u8BC1: ${turnstileOn ? "\u{1F6E1} Turnstile" : "\u{1F4DD} \u672C\u5730\u9898\u5E93"} \xB7 Owner: ${parseIdAllowlist2(env.OWNER_IDS).length > 0 ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E"}`);
     lines.push(`\u8D85\u7EA7\u7FA4 ID: ${String(env.SUPERGROUP_ID || "").startsWith("-100") ? "\u2705 \u683C\u5F0F\u6B63\u786E" : "\u274C \u9700 -100 \u5F00\u5934"}`);
@@ -5263,6 +5273,9 @@ function onTurnstileSuccess(token) {
       }
       showStatus(msg, 'success');
       document.querySelector('.desc').textContent = '\u9A8C\u8BC1\u5B8C\u6210\uFF0C\u8BF7\u8FD4\u56DE Telegram \u67E5\u770B\u673A\u5668\u4EBA\u6D88\u606F\u3002';
+      // \u6210\u529F\u540E\u9690\u85CF\u9A8C\u8BC1\u7EC4\u4EF6\uFF0C\u907F\u514D\u7528\u6237\u91CD\u590D\u70B9\u51FB\u6216\u8BEF\u4EE5\u4E3A\u9700\u8981\u518D\u9A8C\u8BC1
+      var turnstileContainer = document.querySelector('.turnstile-container');
+      if (turnstileContainer) turnstileContainer.style.display = 'none';
     } else {
       var errMap = {
         'turnstile_failed': '\u4EBA\u673A\u9A8C\u8BC1\u672A\u901A\u8FC7\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5',
@@ -5409,7 +5422,7 @@ var CONFIG = {
   RETRY_COUNT_TTL_SECONDS: 3600
   // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.2.4";
+var GATEWAY_VERSION = "1.2.5";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();

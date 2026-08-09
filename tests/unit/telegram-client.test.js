@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   createTelegramClient,
   TelegramApiError,
+  classifyTelegramError,
 } from '../../src/telegram-client.js';
 import { telegramResponse } from '../helpers/mock-telegram.js';
 
@@ -29,6 +30,20 @@ describe('Telegram Client', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
+  it('网络错误重试超出总时限时立即放弃，不继续等待', async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const fetchImpl = vi.fn().mockRejectedValue(new Error('network-down'));
+    // 首次失败即已超过总时限：不再睡眠重试，直接抛 network 分类
+    const client = createClient(fetchImpl, { sleep, maxTotalMs: 1 });
+
+    await expect(client.call('sendMessage', {})).rejects.toMatchObject({
+      category: 'network',
+      attempts: 1,
+    });
+    expect(sleep).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('Telegram 400 不重试并抛出分类错误', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(telegramResponse({
       ok: false,
@@ -38,7 +53,7 @@ describe('Telegram Client', () => {
     const client = createClient(fetchImpl);
 
     await expect(client.call('sendMessage', {})).rejects.toMatchObject({
-      category: 'invalid_request',
+      category: 'chat_not_found',
       retryable: false,
       status: 400,
       method: 'sendMessage',
@@ -153,5 +168,31 @@ describe('Telegram Client', () => {
       attempts: 2,
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('classifyTelegramError（错误分类）', () => {
+  it('可操作错误分类不重试：chat/user/message 与超长', () => {
+    expect(classifyTelegramError({ status: 400, description: 'Bad Request: chat not found' }))
+      .toEqual({ category: 'chat_not_found', retryable: false });
+    expect(classifyTelegramError({ status: 400, description: 'Bad Request: user not found' }))
+      .toEqual({ category: 'user_not_found', retryable: false });
+    expect(classifyTelegramError({ status: 400, description: 'Bad Request: message to forward not found' }))
+      .toEqual({ category: 'message_missing', retryable: false });
+    expect(classifyTelegramError({ status: 400, description: 'Bad Request: message is too long' }))
+      .toEqual({ category: 'message_too_long', retryable: false });
+  });
+
+  it('既有分类保持稳定：限流/服务端/Topic/403', () => {
+    expect(classifyTelegramError({ status: 429, description: 'Too Many Requests', retryAfter: 3 }))
+      .toMatchObject({ category: 'rate_limited', retryable: true });
+    expect(classifyTelegramError({ status: 500, description: 'Internal' }))
+      .toMatchObject({ category: 'server_error', retryable: true });
+    expect(classifyTelegramError({ status: 400, description: 'topic deleted' }))
+      .toMatchObject({ category: 'topic_missing', retryable: false });
+    expect(classifyTelegramError({ status: 403, description: 'bot was blocked by the user' }))
+      .toMatchObject({ category: 'user_unreachable', retryable: false });
+    expect(classifyTelegramError({ status: 400, description: 'weird error' }))
+      .toMatchObject({ category: 'invalid_request', retryable: false });
   });
 });

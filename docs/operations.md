@@ -82,6 +82,7 @@ crons = ["0 3 * * *"]
 | `MEDIA_GROUP_DELAY_MS` | 3000 | 媒体组合并等待窗口（毫秒） |
 | `RATE_LIMIT_MESSAGE` / `RATE_LIMIT_VERIFY` | 45 / 3 | 消息发送与验证请求限流阈值（窗口内） |
 | `CLEANUP_BATCH_SIZE` | 10 | `/cleanup` 并发处理批次大小 |
+| `RETRY_COUNT_TTL_SECONDS` | 3600 | 话题健康重试计数有效期；连续未知错误达到上限前暂停转发，健康恢复后自动清零 |
 | `TURNSTILE_VERIFY_TTL` | 600 | Turnstile 验证 code 有效期（秒），验证页过期提示文案自动跟随 |
 
 ## 数据备份

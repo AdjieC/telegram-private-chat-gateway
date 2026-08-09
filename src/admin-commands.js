@@ -288,7 +288,8 @@ async function renderOverviewStatsSection(env, page) {
   lines.push(`🖥 <b>系统 · ${page === 'stats' ? '今日统计' : '概览'}</b>`);
   lines.push(`<code>v${GATEWAY_VERSION}</code>`);
   lines.push(SEP_LINE);
-  lines.push(`${statusChip(true, 'Worker 运行中')}`);
+  // 能收到本消息即证明 Worker 存活，无需 statusChip(true) 的假条件
+  lines.push('✅ Worker 运行中');
   lines.push(`${statusChip(hasKv, 'KV 已绑定', 'KV 缺失')} · ${statusChip(hasD1, 'D1 已绑定', 'D1 缺失')}`);
   lines.push(`验证: ${turnstileOn ? '🛡 Turnstile' : '📝 本地题库'} · Owner: ${
     parseIdAllowlist(env.OWNER_IDS).length > 0 ? '已配置' : '未配置'

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createApp, constantTimeEqual } from '../../src/app.js';
+import { createApp, constantTimeEqual, validateTelegramWebhookRequest } from '../../src/app.js';
 import { createMockEnv } from '../helpers/mock-env.js';
 import { ensureMigrations } from '../../src/storage/migrations.js';
 
@@ -263,5 +263,58 @@ describe('createApp', () => {
   it('scheduled 缺少 D1 时明确失败', async () => {
     await expect(createApp().scheduled({}, createMockEnv({ TG_BOT_DB: undefined })))
       .rejects.toThrow("D1 'TG_BOT_DB' not bound");
+  });
+});
+
+describe('validateTelegramWebhookRequest', () => {
+  it('校验通过时返回解析后的 Update（供 routeUpdate 复用，消除二次读取）', async () => {
+    const env = createMockEnv();
+    const request = new Request('https://worker.test/', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'test-webhook-secret-at-least-32-bytes',
+      },
+      body: JSON.stringify({ update_id: 42, message: { message_id: 7 } }),
+    });
+    await expect(validateTelegramWebhookRequest(request, env)).resolves.toEqual({
+      update_id: 42,
+      message: { message_id: 7 },
+    });
+  });
+
+  it('非法 JSON 抛 400 而非返回未定义', async () => {
+    const env = createMockEnv();
+    const request = new Request('https://worker.test/', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'test-webhook-secret-at-least-32-bytes',
+      },
+      body: '{bad json',
+    });
+    await expect(validateTelegramWebhookRequest(request, env)).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  it('错误与 404 响应统一携带 no-store，防止错误被缓存', async () => {
+    const app = createApp();
+    const notFound = await app.fetch(new Request('https://worker.test/nope'), createMockEnv(), { waitUntil() {} });
+    expect(notFound.status).toBe(404);
+    expect(notFound.headers.get('Cache-Control')).toBe('no-store');
+
+    const badWebhook = await app.fetch(
+      new Request('https://worker.test/', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      }),
+      createMockEnv(),
+      { waitUntil() {} },
+    );
+    // 无 secret 头 → 401，且带 no-store
+    expect(badWebhook.status).toBe(401);
+    expect(badWebhook.headers.get('Cache-Control')).toBe('no-store');
   });
 });
