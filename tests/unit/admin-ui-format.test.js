@@ -75,6 +75,19 @@ describe('admin-ui-format', () => {
     const label = kb.inline_keyboard[0][0].text;
     expect(label).toContain('…');
     expect(label.length).toBeLessThan(longName.length + 3);
+    // 2 列布局按钮标签上限 14 字符（含省略号）+ 「👤 」前缀：锁定 truncateText 复用行为
+    const prefixLength = '👤 '.length; // emoji 占 2 个码元 + 空格
+    expect(label.length).toBe(prefixLength + 14);
+  });
+
+  it('单列布局按钮标签上限放宽到 24 字符', () => {
+    const longName = '很长很长很长很长很长很长很长很长很长很长很长很长很长很长';
+    const kb = buildUserJumpKeyboard([
+      { userId: '1', firstName: longName },
+    ], { includeMenu: false, columns: 1 });
+    const label = kb.inline_keyboard[0][0].text;
+    expect(label.length).toBe('👤 '.length + 24);
+    expect(label.endsWith('…')).toBe(true);
   });
 
   it('formatRankingBlock 标注封禁/关闭状态徽标', () => {

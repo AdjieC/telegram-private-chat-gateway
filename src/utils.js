@@ -164,6 +164,9 @@ export function isTestMessageInvalid(description) {
     desc.includes("bad request: message text is empty");
 }
 
+/** 项目源码地址：部署产物（验证页 / 管理看板）中突出来源，单一来源防散落 */
+export const GATEWAY_REPO = 'https://github.com/Silentely/telegram-private-chat-gateway';
+
 /**
  * 展示用截断：超出上限时保留前段并追加省略号。
  * 编辑通知（user-copy）与按钮标签（admin-ui-format）共用，避免两处截断规则漂移。

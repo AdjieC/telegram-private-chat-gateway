@@ -46,6 +46,7 @@ import {
   normalizeRecentErrorItem,
   secureRandomId,
   isAdminCommandText,
+  GATEWAY_REPO,
 } from './src/utils.js';
 
 // Telegram Private Chat Gateway — Cloudflare Workers 私聊安全接入与双向会话网关
@@ -82,11 +83,12 @@ const CONFIG = {
   SPAM_SILENCE_MODE: false,             // 静默丢弃模式（不通知管理员）
   ALERT_THROTTLE_MS: 60000,             // 管理告警节流：同类型 60 秒内最多一条
   WORD_MAX_LENGTH: 50,                  // /addword 单词长度上限，防 KV 词库被超长输入污染
-  MEDIA_GROUP_CLEANUP_PROBABILITY: 0.05 // 过期媒体组扫描概率：键自带 60s TTL，孤儿键极少，无需每条消息全量扫 KV
+  MEDIA_GROUP_CLEANUP_PROBABILITY: 0.05, // 过期媒体组扫描概率：键自带 60s TTL，孤儿键极少，无需每条消息全量扫 KV
+  RETRY_COUNT_TTL_SECONDS: 3600,        // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.2.3';
+const GATEWAY_VERSION = '1.2.4';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -106,6 +108,8 @@ const THREAD_NOT_FOUND_TTL_MS = 5 * 60 * 1000;
 const THREAD_NOT_FOUND_MAX_ENTRIES = 1000;
 const ADMIN_STATUS_MAX_ENTRIES = 1000;
 const THREAD_HEALTH_MAX_ENTRIES = 1000;
+/** 话题状态降级全量反查的最大分页数（每页 1000 键），防止超大命名空间拖垮请求 */
+const TOPIC_SCAN_MAX_PAGES = 20;
 
 function setBoundedCache(cache, key, value, maxEntries) {
   cache.delete(key);
@@ -226,6 +230,7 @@ const {
 const adminHandlers = createAdminCommandHandlers({
   tgCall,
   gatewayVersion: GATEWAY_VERSION,
+  gatewayRepo: GATEWAY_REPO,
   recordSystemError,
   isOwnerUser,
   isAdminUser,
@@ -1117,9 +1122,6 @@ async function handlePrivateMessage(msg, env, ctx) {
   const userId = msg.chat.id;
   const key = `user:${userId}`;
 
-  // 尽早缓存资料，供验证通过后的消息回放建话题使用
-  await saveUserProfileSnapshot(env, userId, msg.from);
-
   // 速率限制检查
   const rateLimit = await checkRateLimit(userId, env, 'message', CONFIG.RATE_LIMIT_MESSAGE, CONFIG.RATE_LIMIT_WINDOW);
   if (!rateLimit.allowed) {
@@ -1129,6 +1131,10 @@ async function handlePrivateMessage(msg, env, ctx) {
     });
     return;
   }
+
+  // 尽早缓存资料，供验证通过后的消息回放建话题使用。
+  // 放在限流检查之后：被限流的消息不会进入验证/转发链路，无需触发 KV 写
+  await saveUserProfileSnapshot(env, userId, msg.from);
 
   // 拦截普通用户发送的指令（/help 已在入口处理）。
   // 已知管理指令给一次性（每小时节流）友好提示，避免用户误发指令后毫无反馈
@@ -1359,9 +1365,9 @@ async function checkThreadHealth(threadId, env, { userId, retryKey }) {
       userId, threadId, errorDescription: probe.description
     });
     // 累计瞬态失败：连续未知错误达到上限后由 forwardToTopic 暂停转发并提示用户。
-    // 计数器带 1 小时 TTL，健康探测成功时会被清除，避免历史失败永久生效。
+    // 计数器带 TTL，健康探测成功时会被清除，避免历史失败永久生效。
     const currentRetry = parseInt((await env.TOPIC_MAP.get(retryKey)) ?? '0', 10);
-    await env.TOPIC_MAP.put(retryKey, String(currentRetry + 1), { expirationTtl: 3600 });
+    await env.TOPIC_MAP.put(retryKey, String(currentRetry + 1), { expirationTtl: CONFIG.RETRY_COUNT_TTL_SECONDS });
     return { action: "ok", status: "unknown" };
   }
 
@@ -1785,7 +1791,7 @@ async function updateThreadStatus(threadId, isClosed, env) {
       await env.TOPIC_MAP.delete(`thread:${threadId}`);
     }
 
-    const allKeys = await getAllKeys(env, "user:", 20);
+    const allKeys = await getAllKeys(env, "user:", TOPIC_SCAN_MAX_PAGES);
     const updates = [];
     const scanBatch = 20;
 

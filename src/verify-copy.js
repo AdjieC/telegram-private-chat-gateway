@@ -26,7 +26,7 @@ export const VERIFY_COPY = {
   invalidOption: '❌ 无效选项',
   wrongAnswer: '❌ 回答错误，请再试一次',
   successToast: '✅ 验证通过',
-  systemError: '⚠️ 系统繁忙，请稍后重试',
+  systemError: '⚠️ 系统繁忙，请稍后重试。',
   /** 验证通过后自动送达失败（用户需重发） */
   pendingSendFailed: '⚠️ 自动送达失败，请重新发送您的消息。',
 

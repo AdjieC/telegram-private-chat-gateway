@@ -51,6 +51,39 @@ describe('admin-commands handlers', () => {
     expect(send?.body?.text).toMatch(/今日/);
   });
 
+  it('sysinfo 页脚突出来源：项目地址可点击链接', async () => {
+    const env = createMockEnv();
+    const calls = [];
+    const h = createHandlers(env, calls);
+    await h.handleSysinfoCommand(env, 1, { page: 'overview' });
+    const body = calls.find(c => c.method === 'sendMessage').body.text;
+    expect(body).toContain('项目地址');
+    expect(body).toContain('<a href="https://github.com/Silentely/telegram-private-chat-gateway">');
+    // 未注入 gatewayRepo 时使用默认源码地址，不出现 undefined
+    const fallbackCalls = [];
+    const h2 = createAdminCommandHandlers({
+      tgCall: async (_env, method, body) => {
+        fallbackCalls.push({ method, body });
+        return { ok: true, result: { message_id: 1 } };
+      },
+      gatewayVersion: '1.0.0-test',
+      recordSystemError: () => {},
+      isOwnerUser: () => true,
+      isAdminUser: async () => true,
+      parseIdAllowlist: () => [],
+      safeGetJSON: async () => null,
+      resolveThreadIdForUser: async () => 10,
+      getRecentSystemErrors: () => [],
+      createD1Storage,
+      ensureMigrations,
+      userActions: {},
+    });
+    await h2.handleSysinfoCommand(env, 1, { page: 'overview' });
+    const fallbackBody = fallbackCalls.find(c => c.method === 'sendMessage').body.text;
+    expect(fallbackBody).toContain('github.com/Silentely/telegram-private-chat-gateway');
+    expect(fallbackBody).not.toContain('undefined');
+  });
+
   it('错误页只展示转义后的摘要与关联 ID，隐藏 stack 和正文', async () => {
     const env = createMockEnv();
     await env.TOPIC_MAP.put('sys:recent_errors', JSON.stringify([{

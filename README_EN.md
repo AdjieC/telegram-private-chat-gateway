@@ -7,6 +7,8 @@
 
 [English](README_EN.md) | [简体中文](README.md)
 
+**Repository:** <https://github.com/Silentely/telegram-private-chat-gateway>
+
 Telegram Private Chat Gateway securely routes bot private chats into Telegram Forum Topics. Each user receives an isolated conversation, while administrators can reply, manage user state, and audit sensitive operations from one group without maintaining a server.
 
 ## Why Use It

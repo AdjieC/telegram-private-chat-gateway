@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { VERIFY_COPY } from '../../src/verify-copy.js';
+import { USER_COPY } from '../../src/user-copy.js';
 
 describe('verify-copy', () => {
+  it('系统繁忙文案与用户侧口径一致（防两处漂移）', () => {
+    expect(VERIFY_COPY.systemError).toBe(USER_COPY.systemBusy);
+  });
+
   it('挑战与成功文案使用统一 HTML 口径', () => {
     expect(VERIFY_COPY.turnstileChallenge).toMatch(/人机验证/);
     expect(VERIFY_COPY.turnstileChallenge).toMatch(/<b>/);

@@ -40,7 +40,8 @@ export const USER_COPY = {
   rateLimited(minutes) {
     return `⚠️ 发送过于频繁，本次消息未送达，请约 ${minutes} 分钟后再试。`;
   },
-  systemBusy: '⚠️ 系统繁忙，请稍后再试。',
+  /** 通用系统繁忙提示（与验证侧 VERIFY_COPY.systemError 口径一致，防两处措辞漂移） */
+  systemBusy: '⚠️ 系统繁忙，请稍后重试。',
   /** 话题健康连续失败达到上限：暂停转发并给出可行动提示（区别于一次性 systemBusy） */
   retryExceeded:
     '⚠️ 系统暂时无法接收您的消息，请稍后再试。若持续如此请联系管理员。',

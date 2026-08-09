@@ -14,6 +14,7 @@ describe('user-copy', () => {
     // 明确告知本次消息未送达，避免用户误以为消息已发送
     expect(USER_COPY.rateLimited(1)).toContain('本次消息未送达');
     expect(USER_COPY.systemBusy).toMatch(/繁忙/);
+    expect(USER_COPY.systemBusy).toBe('⚠️ 系统繁忙，请稍后重试。');
     expect(USER_COPY.retryExceeded).toMatch(/暂时无法接收/);
     expect(USER_COPY.retryExceeded).toContain('管理员');
     expect(USER_COPY.bannedHourly).toMatch(/封禁/);

@@ -8,7 +8,7 @@
  * - 状态提示为胶囊样式，区分加载中 / 成功 / 失败三种状态
  * - 无障碍：状态区 aria-live，按钮可聚焦
  */
-import { escapeHtml } from './utils.js';
+import { escapeHtml, GATEWAY_REPO } from './utils.js';
 
 // 两个验证页面共用的基础样式（暗色模式、卡片、按钮、页脚），避免两套模板各自维护导致漂移
 const VERIFY_SHARED_STYLE = `
@@ -37,6 +37,8 @@ p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
 #back-btn:focus-visible{outline:3px solid var(--text);outline-offset:3px}
 #back-btn:active{transform:scale(.98)}
 .footer{margin-top:22px;font-size:11px;color:var(--muted)}
+.footer a{color:var(--sub);text-decoration:none}
+.footer a:hover{text-decoration:underline}
 @media (prefers-reduced-motion: reduce){
   *{animation:none!important;transition:none!important}
   #back-btn:active{transform:none}
@@ -82,7 +84,8 @@ const VERIFY_PAGE_HTML = `<!DOCTYPE html>
     <div id="tech-detail"></div>
   </details>
   <div class="footer" data-user-id="{{USER_ID}}" data-code="{{CODE}}">
-    <span id="footer-status">私聊网关 · 人机验证</span>
+    <span id="footer-status">私聊网关 · 人机验证</span><br>
+    <a href="${GATEWAY_REPO}" target="_blank" rel="noopener noreferrer">项目地址 GitHub ↗</a>
   </div>
 </div>
 <script>
@@ -256,7 +259,9 @@ const VERIFY_ERROR_PAGE_HTML = `<!DOCTYPE html>
   <p class="desc">{{DESC}}</p>
   <div class="error">❌ 无法继续验证</div>
   <a id="back-btn" href="tg://resolve">📱 返回 Telegram</a>
-  <div class="footer">请返回 Telegram 后向机器人重新发送消息获取新链接</div>
+  <div class="footer">请返回 Telegram 后向机器人重新发送消息获取新链接<br>
+    <a href="${GATEWAY_REPO}" target="_blank" rel="noopener noreferrer">项目地址 GitHub ↗</a>
+  </div>
 </div>
 </body>
 </html>`;

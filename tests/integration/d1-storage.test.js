@@ -123,6 +123,28 @@ describe('D1 system stats', () => {
     expect(map.get('10')?.username).toBe('hot');
     expect(map.has('missing')).toBe(false);
   });
+
+  it('getUsersByIds 空列表返回空 Map，超限去重后按 30 个上限查询', async () => {
+    const db = createMockD1();
+    await ensureMigrations(db, 1000);
+    const storage = createD1Storage(db);
+
+    await expect(storage.getUsersByIds([])).resolves.toEqual(new Map());
+
+    // 预置 0/29/30 三个用户，验证前 30 个被查询、第 31 个被截断
+    await storage.upsertUser({ userId: '0', username: 'u0' });
+    await storage.upsertUser({ userId: '29', username: 'u29' });
+    await storage.upsertUser({ userId: '30', username: 'u30' });
+
+    // 超限 + 重复：只保留去重后的前 30 个，查询不报错
+    const ids = Array.from({ length: 40 }, (_, i) => String(i));
+    ids.push('0'); // 重复项
+    const map = await storage.getUsersByIds(ids);
+    expect(map.size).toBeLessThanOrEqual(30);
+    expect(map.get('0')?.username).toBe('u0');
+    expect(map.get('29')?.username).toBe('u29');
+    expect(map.has('30')).toBe(false);
+  });
 });
 
 describe('D1 migrations', () => {

@@ -7,6 +7,8 @@
 
 [English](README_EN.md) | [简体中文](README.md)
 
+**项目地址：** <https://github.com/Silentely/telegram-private-chat-gateway>
+
 Telegram Private Chat Gateway 将机器人收到的私聊安全地接入 Telegram Forum Topic。每位用户拥有独立会话，管理员可以在群组内统一回复、管理用户状态并审计关键操作，而无需维护服务器。
 
 ## 为什么使用

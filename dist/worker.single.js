@@ -1159,6 +1159,7 @@ function isTestMessageInvalid(description) {
   const desc = normalizeTgDescription(description);
   return desc.includes("message text is empty") || desc.includes("bad request: message text is empty");
 }
+var GATEWAY_REPO = "https://github.com/Silentely/telegram-private-chat-gateway";
 function truncateText(text, limit = 1500) {
   const s = String(text ?? "");
   return s.length > limit ? `${s.slice(0, limit)}\u2026` : s;
@@ -1485,7 +1486,8 @@ var USER_COPY = {
   rateLimited(minutes) {
     return `\u26A0\uFE0F \u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\uFF0C\u672C\u6B21\u6D88\u606F\u672A\u9001\u8FBE\uFF0C\u8BF7\u7EA6 ${minutes} \u5206\u949F\u540E\u518D\u8BD5\u3002`;
   },
-  systemBusy: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+  /** 通用系统繁忙提示（与验证侧 VERIFY_COPY.systemError 口径一致，防两处措辞漂移） */
+  systemBusy: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002",
   /** 话题健康连续失败达到上限：暂停转发并给出可行动提示（区别于一次性 systemBusy） */
   retryExceeded: "\u26A0\uFE0F \u7CFB\u7EDF\u6682\u65F6\u65E0\u6CD5\u63A5\u6536\u60A8\u7684\u6D88\u606F\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002\u82E5\u6301\u7EED\u5982\u6B64\u8BF7\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
   bannedHourly: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
@@ -2956,7 +2958,7 @@ ${question}
   invalidOption: "\u274C \u65E0\u6548\u9009\u9879",
   wrongAnswer: "\u274C \u56DE\u7B54\u9519\u8BEF\uFF0C\u8BF7\u518D\u8BD5\u4E00\u6B21",
   successToast: "\u2705 \u9A8C\u8BC1\u901A\u8FC7",
-  systemError: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5",
+  systemError: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002",
   /** 验证通过后自动送达失败（用户需重发） */
   pendingSendFailed: "\u26A0\uFE0F \u81EA\u52A8\u9001\u8FBE\u5931\u8D25\uFF0C\u8BF7\u91CD\u65B0\u53D1\u9001\u60A8\u7684\u6D88\u606F\u3002",
   /** 编辑/私聊成功正文 */
@@ -4128,6 +4130,7 @@ function createAdminCommandHandlers(deps) {
   const {
     tgCall: tgCall2,
     gatewayVersion: GATEWAY_VERSION2,
+    gatewayRepo: GATEWAY_REPO_LINK = GATEWAY_REPO,
     recordSystemError: recordSystemError2,
     isOwnerUser: isOwnerUser2,
     isAdminUser: isAdminUser2,
@@ -4533,6 +4536,7 @@ function createAdminCommandHandlers(deps) {
       lines = await renderErrorsPage(env);
     }
     lines.push("");
+    lines.push(`\u{1F517} \u9879\u76EE\u5730\u5740: <a href="${escapeHtml(GATEWAY_REPO_LINK)}">${escapeHtml(GATEWAY_REPO_LINK)}</a>`);
     lines.push(`\u23F1 ${Date.now() - started} ms \xB7 \u70B9\u4E0B\u65B9\u5207\u6362\u5206\u9875`);
     let text = lines.join("\n");
     if (text.length > 3500) text = `${text.slice(0, 3500)}
@@ -5137,6 +5141,8 @@ p.desc{color:var(--sub);font-size:14px;margin-bottom:26px;line-height:1.7}
 #back-btn:focus-visible{outline:3px solid var(--text);outline-offset:3px}
 #back-btn:active{transform:scale(.98)}
 .footer{margin-top:22px;font-size:11px;color:var(--muted)}
+.footer a{color:var(--sub);text-decoration:none}
+.footer a:hover{text-decoration:underline}
 @media (prefers-reduced-motion: reduce){
   *{animation:none!important;transition:none!important}
   #back-btn:active{transform:none}
@@ -5181,7 +5187,8 @@ var VERIFY_PAGE_HTML = `<!DOCTYPE html>
     <div id="tech-detail"></div>
   </details>
   <div class="footer" data-user-id="{{USER_ID}}" data-code="{{CODE}}">
-    <span id="footer-status">\u79C1\u804A\u7F51\u5173 \xB7 \u4EBA\u673A\u9A8C\u8BC1</span>
+    <span id="footer-status">\u79C1\u804A\u7F51\u5173 \xB7 \u4EBA\u673A\u9A8C\u8BC1</span><br>
+    <a href="${GATEWAY_REPO}" target="_blank" rel="noopener noreferrer">\u9879\u76EE\u5730\u5740 GitHub \u2197</a>
   </div>
 </div>
 <script>
@@ -5340,7 +5347,9 @@ var VERIFY_ERROR_PAGE_HTML = `<!DOCTYPE html>
   <p class="desc">{{DESC}}</p>
   <div class="error">\u274C \u65E0\u6CD5\u7EE7\u7EED\u9A8C\u8BC1</div>
   <a id="back-btn" href="tg://resolve">\u{1F4F1} \u8FD4\u56DE Telegram</a>
-  <div class="footer">\u8BF7\u8FD4\u56DE Telegram \u540E\u5411\u673A\u5668\u4EBA\u91CD\u65B0\u53D1\u9001\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5</div>
+  <div class="footer">\u8BF7\u8FD4\u56DE Telegram \u540E\u5411\u673A\u5668\u4EBA\u91CD\u65B0\u53D1\u9001\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5<br>
+    <a href="${GATEWAY_REPO}" target="_blank" rel="noopener noreferrer">\u9879\u76EE\u5730\u5740 GitHub \u2197</a>
+  </div>
 </div>
 </body>
 </html>`;
@@ -5395,10 +5404,12 @@ var CONFIG = {
   // 管理告警节流：同类型 60 秒内最多一条
   WORD_MAX_LENGTH: 50,
   // /addword 单词长度上限，防 KV 词库被超长输入污染
-  MEDIA_GROUP_CLEANUP_PROBABILITY: 0.05
+  MEDIA_GROUP_CLEANUP_PROBABILITY: 0.05,
   // 过期媒体组扫描概率：键自带 60s TTL，孤儿键极少，无需每条消息全量扫 KV
+  RETRY_COUNT_TTL_SECONDS: 3600
+  // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.2.3";
+var GATEWAY_VERSION = "1.2.4";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
@@ -5410,6 +5421,7 @@ var THREAD_NOT_FOUND_TTL_MS = 5 * 60 * 1e3;
 var THREAD_NOT_FOUND_MAX_ENTRIES = 1e3;
 var ADMIN_STATUS_MAX_ENTRIES = 1e3;
 var THREAD_HEALTH_MAX_ENTRIES = 1e3;
+var TOPIC_SCAN_MAX_PAGES = 20;
 function setBoundedCache(cache, key, value, maxEntries) {
   cache.delete(key);
   cache.set(key, value);
@@ -5516,6 +5528,7 @@ var {
 var adminHandlers = createAdminCommandHandlers({
   tgCall,
   gatewayVersion: GATEWAY_VERSION,
+  gatewayRepo: GATEWAY_REPO,
   recordSystemError,
   isOwnerUser,
   isAdminUser,
@@ -6227,7 +6240,6 @@ async function sendHourlyNotice(env, userId, noticeKey, text) {
 async function handlePrivateMessage(msg, env, ctx) {
   const userId = msg.chat.id;
   const key = `user:${userId}`;
-  await saveUserProfileSnapshot(env, userId, msg.from);
   const rateLimit = await checkRateLimit(userId, env, "message", CONFIG.RATE_LIMIT_MESSAGE, CONFIG.RATE_LIMIT_WINDOW);
   if (!rateLimit.allowed) {
     await tgCall(env, "sendMessage", {
@@ -6236,6 +6248,7 @@ async function handlePrivateMessage(msg, env, ctx) {
     });
     return;
   }
+  await saveUserProfileSnapshot(env, userId, msg.from);
   if (msg.text && msg.text.startsWith("/") && msg.text.trim() !== "/start") {
     const command = removeCommandBotSuffix(msg.text.trim());
     if (isAdminCommandText(command)) {
@@ -6413,7 +6426,7 @@ async function checkThreadHealth(threadId, env, { userId, retryKey }) {
       errorDescription: probe.description
     });
     const currentRetry = parseInt(await env.TOPIC_MAP.get(retryKey) ?? "0", 10);
-    await env.TOPIC_MAP.put(retryKey, String(currentRetry + 1), { expirationTtl: 3600 });
+    await env.TOPIC_MAP.put(retryKey, String(currentRetry + 1), { expirationTtl: CONFIG.RETRY_COUNT_TTL_SECONDS });
     return { action: "ok", status: "unknown" };
   }
   await env.TOPIC_MAP.delete(retryKey);
@@ -6776,7 +6789,7 @@ async function updateThreadStatus(threadId, isClosed, env) {
       }
       await env.TOPIC_MAP.delete(`thread:${threadId}`);
     }
-    const allKeys = await getAllKeys(env, "user:", 20);
+    const allKeys = await getAllKeys(env, "user:", TOPIC_SCAN_MAX_PAGES);
     const updates = [];
     const scanBatch = 20;
     for (let i = 0; i < allKeys.length; i += scanBatch) {

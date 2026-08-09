@@ -39,7 +39,7 @@ import {
 } from './admin-ui-format.js';
 import { bumpDailyStat, getDailyStats, getRecentDailySeries } from './daily-stats.js';
 import { ADMIN_COPY } from './user-copy.js';
-import { normalizeRecentErrorItem, formatUserName } from './utils.js';
+import { normalizeRecentErrorItem, formatUserName, GATEWAY_REPO } from './utils.js';
 
 /**
  * @param {object} deps
@@ -48,6 +48,7 @@ export function createAdminCommandHandlers(deps) {
   const {
     tgCall,
     gatewayVersion: GATEWAY_VERSION,
+    gatewayRepo: GATEWAY_REPO_LINK = GATEWAY_REPO,
     recordSystemError,
     isOwnerUser,
     isAdminUser,
@@ -506,6 +507,8 @@ async function buildSysinfoPageText(env, page = 'overview') {
   }
 
   lines.push('');
+  // 突出来源：部署产物中保留项目地址（Telegram HTML 消息支持 <a href> 内联链接）
+  lines.push(`🔗 项目地址: <a href="${escapeHtml(GATEWAY_REPO_LINK)}">${escapeHtml(GATEWAY_REPO_LINK)}</a>`);
   lines.push(`⏱ ${Date.now() - started} ms · 点下方切换分页`);
   let text = lines.join('\n');
   if (text.length > 3500) text = `${text.slice(0, 3500)}\n…`;

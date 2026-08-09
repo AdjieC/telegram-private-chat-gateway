@@ -118,6 +118,17 @@ describe('verify-page', () => {
   it('装饰性图标对读屏器隐藏', () => {
     expect(page).toContain('<div class="icon" aria-hidden="true">');
   });
+
+  it('页脚突出项目来源（GitHub 链接，新窗口 + noopener）', () => {
+    const repo = 'https://github.com/Silentely/telegram-private-chat-gateway';
+    expect(page).toContain(repo);
+    expect(page).toContain('target="_blank"');
+    expect(page).toContain('rel="noopener noreferrer"');
+    expect(page).toContain('项目地址 GitHub');
+    // 错误页同样携带来源链接
+    const errorPage = renderVerifyErrorPage({ message: '原因' });
+    expect(errorPage).toContain(repo);
+  });
 });
 
 describe('verify-page error page', () => {
@@ -132,7 +143,9 @@ describe('verify-page error page', () => {
   it('无 hint 时只渲染 message，且默认值兜底', () => {
     const page = renderVerifyErrorPage();
     expect(page).toContain('验证链接无效或已失效');
-    expect(page).not.toContain('<br>');
+    // desc 区无 <br> 分隔（hint 缺失时不出现空行噪音）；页脚来源链接的 <br> 不属于 desc
+    const desc = page.match(/<p class="desc">([\s\S]*?)<\/p>/)?.[1] || '';
+    expect(desc).not.toContain('<br>');
     expect(page).not.toContain('{{DESC}}');
   });
 

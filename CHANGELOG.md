@@ -2,10 +2,21 @@
 
 ## [Unreleased]
 
+### 来源突出
+
+- **部署产物突出来源**：验证页（成功页与错误页）页脚、管理看板 `/sysinfo` 每页页脚均加入可点击的 GitHub 项目地址；README 双语顶部补充「项目地址」行。仓库 URL 收敛为 `src/utils.js` 的 `GATEWAY_REPO` 单一来源（验证页 / worker / 管理命令共用）。
+
 ### 行为与文案
 
+- **资料快照写入后移**：`saveUserProfileSnapshot` 移到限流检查之后，被限流的消息不再触发 KV 写。
+- **系统繁忙文案统一**：`USER_COPY.systemBusy` 与 `VERIFY_COPY.systemError` 统一为「系统繁忙，请稍后重试。」，测试锁定两处一致。
 - **已验证用户 `/start` `/cancel` 不再转发**：无操作命令不再进入管理话题，未验证用户发 `/start` 仍正常触发验证。
 - **编辑消息被拦截同步提示用户**：用户把消息编辑成违规内容时，除管理员收到拦截原因外，用户侧也收到与新消息拦截一致的提示。
+
+### 配置与常量
+
+- **重试计数 TTL 收敛**：话题健康重试计数有效期由硬编码 `3600` 收敛为 `CONFIG.RETRY_COUNT_TTL_SECONDS`。
+- **降级扫描页数命名**：`updateThreadStatus` 全量反查页数上限收敛为 `TOPIC_SCAN_MAX_PAGES`。
 - **验证页错误文案收拢**：缺参/未配置/重发引导三句文案移入 `VERIFY_COPY.pageErrorMissingParams`。
 
 ### 健壮性与安全
