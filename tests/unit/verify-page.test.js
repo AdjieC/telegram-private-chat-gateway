@@ -95,6 +95,14 @@ describe('verify-page', () => {
     expect(page).not.toContain('300099');
   });
 
+  it('失败/网络错误后复位 submitted 并重置 Turnstile，允许用户重试', () => {
+    // 服务端失败（turnstile_failed 等）与网络失败两条路径都要复位并重置组件
+    const occurrences = page.match(/submitted = false;/g) || [];
+    expect(occurrences.length).toBeGreaterThanOrEqual(2);
+    expect(page).toContain('window.turnstile.reset()');
+    expect(page).toContain('if (window.turnstile)');
+  });
+
   it('页面标题随验证状态更新，便于多标签页识别', () => {
     expect(page).toContain("'✅ 验证成功'");
     expect(page).toContain("'❌ 验证失败'");

@@ -110,9 +110,10 @@ describe('管理员服务', () => {
       updateUserState: vi.fn().mockResolvedValue({ userId: '42', ...changes }),
       appendAudit: vi.fn(),
     };
+    const telegram = { call: vi.fn().mockResolvedValue({ ok: true }) };
     const service = createAdminService({
       storage,
-      telegram: { call: vi.fn().mockResolvedValue({ ok: true }) },
+      telegram,
     });
 
     await service.handleCallbackQuery({
@@ -120,6 +121,11 @@ describe('管理员服务', () => {
     });
 
     expect(storage.updateUserState).toHaveBeenCalledWith('42', changes);
+    // 回执按动作与操作前状态显示新状态，而非笼统「已处理」
+    const toast = telegram.call.mock.calls[0][1].text;
+    expect(['已封禁', '已解封', '已信任', '已取消信任', '已关闭对话', '已打开对话', '已静音', '已取消静音'])
+      .toContain(toast);
+    expect(toast).not.toBe('已处理');
   });
 
   it('拒绝格式非法或未知的 Callback', async () => {

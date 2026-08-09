@@ -842,6 +842,12 @@ function createUpdateHandler({ conversation, supergroupId }) {
     return { status: "unsupported" };
   };
 }
+function webhookResponse(message, status = 200) {
+  return new Response(message, {
+    status,
+    headers: { "Cache-Control": "no-store" }
+  });
+}
 async function routeUpdate(update, {
   storage,
   handleUpdate,
@@ -849,18 +855,18 @@ async function routeUpdate(update, {
 }) {
   const updateId = update?.update_id;
   if (updateId === void 0 || updateId === null) {
-    return new Response("Bad Request", { status: 400 });
+    return webhookResponse("Bad Request", 400);
   }
   let claim;
   try {
     claim = await storage.claimUpdate(updateId, getUpdateType(update), now());
   } catch (error) {
-    return new Response(
+    return webhookResponse(
       `Error: claimUpdate failed: ${error?.message || String(error)}`,
-      { status: 500 }
+      500
     );
   }
-  if (claim === "duplicate") return new Response("OK");
+  if (claim === "duplicate") return webhookResponse("OK");
   try {
     const response = await handleUpdate(update);
     if (response instanceof Response && response.status >= 500) {
@@ -873,20 +879,20 @@ async function routeUpdate(update, {
     try {
       await storage.completeUpdate(updateId, now());
     } catch (error) {
-      return new Response(
+      return webhookResponse(
         `Error: completeUpdate failed: ${error?.message || String(error)}`,
-        { status: 500 }
+        500
       );
     }
-    return response instanceof Response ? response : new Response("OK");
+    return response instanceof Response ? response : webhookResponse("OK");
   } catch (error) {
     try {
       await storage.markUpdateRetryable(updateId, error?.category || "temporary");
     } catch {
     }
-    return new Response(
+    return webhookResponse(
       `Error: handleUpdate failed: ${error?.message || String(error)}`,
-      { status: 500 }
+      500
     );
   }
 }
@@ -1671,6 +1677,21 @@ ${existing}
   processed: "\u5DF2\u5904\u7406",
   backendConnected: "\u540E\u53F0\u8FDE\u63A5\u6B63\u5E38",
   permissionExpired: "\u6743\u9650\u5DF2\u5931\u6548",
+  /** v1 资料卡回调回执：按动作与操作前状态显示新状态（取代笼统「已处理」） */
+  v1ActionResult(action, before) {
+    switch (action) {
+      case "trust":
+        return before?.trustLevel === "trusted" ? "\u5DF2\u53D6\u6D88\u4FE1\u4EFB" : "\u5DF2\u4FE1\u4EFB";
+      case "ban":
+        return before?.status === "banned" ? "\u5DF2\u89E3\u5C01" : "\u5DF2\u5C01\u7981";
+      case "close":
+        return before?.status === "closed" ? "\u5DF2\u6253\u5F00\u5BF9\u8BDD" : "\u5DF2\u5173\u95ED\u5BF9\u8BDD";
+      case "mute":
+        return before?.isMuted ? "\u5DF2\u53D6\u6D88\u9759\u97F3" : "\u5DF2\u9759\u97F3";
+      default:
+        return "\u5DF2\u5904\u7406";
+    }
+  },
   /** 群内非管理员执行管理命令时的提示 */
   noPermissionHint: "\u26D4 \u65E0\u7BA1\u7406\u6743\u9650\uFF1A\u4EC5\u7FA4\u4E3B/\u7BA1\u7406\u5458\u6216 ADMIN_IDS \u53EF\u4F7F\u7528\u8BE5\u6307\u4EE4\u3002",
   /** 话题内未反查到用户（可定位） */
@@ -1781,8 +1802,9 @@ function createAdminService({
       return { status: "invalid" };
     }
     const allowed = adminId && await authorize(adminId, permission);
+    let before = null;
     if (allowed && resourceId) {
-      const before = await storage.getUser(resourceId);
+      before = await storage.getUser(resourceId);
       if (!before) {
         await telegram.call("answerCallbackQuery", {
           callback_query_id: query.id,
@@ -1805,7 +1827,7 @@ function createAdminService({
         createdAt: now()
       });
     }
-    const responseText = resourceId ? ADMIN_COPY.processed : ADMIN_COPY.backendConnected;
+    const responseText = resourceId ? ADMIN_COPY.v1ActionResult(parts[2], before) : ADMIN_COPY.backendConnected;
     await telegram.call("answerCallbackQuery", {
       callback_query_id: query.id,
       text: allowed ? responseText : ADMIN_COPY.permissionExpired,
@@ -4283,18 +4305,18 @@ function createAdminCommandHandlers(deps) {
       reply_markup: buildAdminHomeKeyboard(isOwnerUser2(env, senderId))
     });
   }
+  const KV_COUNT_MAX_PAGES = 20;
   async function countKvPrefix(env, prefix) {
     if (!env?.TOPIC_MAP?.list) return null;
     let total = 0;
     let cursor;
     let pages = 0;
-    const maxPages = 20;
     do {
       const result = await env.TOPIC_MAP.list({ prefix, cursor, limit: 1e3 });
       total += (result.keys || []).length;
       cursor = result.list_complete ? void 0 : result.cursor;
       pages += 1;
-    } while (cursor && pages < maxPages);
+    } while (cursor && pages < KV_COUNT_MAX_PAGES);
     return { total, truncated: Boolean(cursor) };
   }
   async function collectRecentErrors(env) {
@@ -5426,7 +5448,7 @@ var CONFIG = {
   RETRY_COUNT_TTL_SECONDS: 3600
   // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.2.6";
+var GATEWAY_VERSION = "1.2.7";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
@@ -6313,7 +6335,7 @@ async function handlePrivateMessage(msg, env, ctx) {
     return;
   }
   if (policyResult.action === "require_verification") {
-    const isStart = msg.text && msg.text.trim() === "/start";
+    const isStart = msg.text && /^\/start(\s|$)/i.test(removeCommandBotSuffix(msg.text.trim()));
     const pendingMsgId = isStart ? null : msg.message_id;
     await verificationModule.sendVerificationChallenge(userId, env, pendingMsgId, msg.from);
     return;

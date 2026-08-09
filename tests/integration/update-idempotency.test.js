@@ -41,6 +41,15 @@ describe('Update idempotency', () => {
       .resolves.toBe('reclaimed');
   });
 
+  it('处理中且未超时的 Update 重复投递返回 duplicate', async () => {
+    const { storage } = await createStorage();
+    await storage.claimUpdate('42', 'message', 1000);
+
+    // 5 分钟窗口内再次到达：不可重复处理，也不触发接管
+    await expect(storage.claimUpdate('42', 'message', 1000 + 4 * 60 * 1000))
+      .resolves.toBe('duplicate');
+  });
+
   it('临时失败标记 retryable 并返回 500', async () => {
     const { storage } = await createStorage();
     const handleUpdate = vi.fn().mockRejectedValue(new Error('BOT_TOKEN=secret'));

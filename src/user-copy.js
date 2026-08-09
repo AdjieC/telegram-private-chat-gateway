@@ -225,6 +225,16 @@ export const ADMIN_COPY = {
   processed: '已处理',
   backendConnected: '后台连接正常',
   permissionExpired: '权限已失效',
+  /** v1 资料卡回调回执：按动作与操作前状态显示新状态（取代笼统「已处理」） */
+  v1ActionResult(action, before) {
+    switch (action) {
+      case 'trust': return before?.trustLevel === 'trusted' ? '已取消信任' : '已信任';
+      case 'ban': return before?.status === 'banned' ? '已解封' : '已封禁';
+      case 'close': return before?.status === 'closed' ? '已打开对话' : '已关闭对话';
+      case 'mute': return before?.isMuted ? '已取消静音' : '已静音';
+      default: return '已处理';
+    }
+  },
   /** 群内非管理员执行管理命令时的提示 */
   noPermissionHint: '⛔ 无管理权限：仅群主/管理员或 ADMIN_IDS 可使用该指令。',
   /** 话题内未反查到用户（可定位） */

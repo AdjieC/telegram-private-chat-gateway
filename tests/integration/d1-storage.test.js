@@ -145,6 +145,38 @@ describe('D1 system stats', () => {
     expect(map.get('29')?.username).toBe('u29');
     expect(map.has('30')).toBe(false);
   });
+
+  it('保留期清理边界：恰好等于阈值的记录保留，早于阈值删除', async () => {
+    const db = createMockD1();
+    await ensureMigrations(db, 1000);
+    const storage = createD1Storage(db);
+    const now = 100 * 86400_000;
+
+    // 恰好等于阈值（保留）与超过阈值（删除）各一条
+    await storage.claimUpdate('kept', 'message', now - 7 * 86400_000);
+    await storage.claimUpdate('old', 'message', now - 8 * 86400_000);
+    await storage.saveMessageLink({
+      direction: 'u2a', sourceChatId: '1', sourceMessageId: '1',
+      targetChatId: '2', targetMessageId: '3', userId: '9',
+      createdAt: now - 30 * 86400_000,
+    });
+    await storage.saveMessageLink({
+      direction: 'u2a', sourceChatId: '1', sourceMessageId: '2',
+      targetChatId: '2', targetMessageId: '4', userId: '9',
+      createdAt: now - 31 * 86400_000,
+    });
+
+    const result = await storage.cleanupRetention({
+      updatesBefore: now - 7 * 86400_000,
+      linksBefore: now - 30 * 86400_000,
+      auditsBefore: now - 90 * 86400_000,
+    });
+
+    expect(result.updates).toBe(1);
+    expect(result.links).toBe(1);
+    expect(await storage.getProcessedUpdate('kept')).toBeTruthy();
+    expect(await storage.getProcessedUpdate('old')).toBeNull();
+  });
 });
 
 describe('D1 migrations', () => {

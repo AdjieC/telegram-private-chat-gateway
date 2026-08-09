@@ -736,6 +736,21 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     expect(busy.body.text).not.toContain('chat not found');
   });
 
+  it('/start 深链参数不进入待转发队列（验证通过后不转发指令文本）', async () => {
+    const telegram = createTelegramMock();
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    const userId = 781;
+
+    await send(messageUpdate(privateMessage(userId, 901, { text: '/start ref123' }), 9901), env, telegram);
+
+    // 本地题库挑战已下发，且 pending_ids 为空（深链指令不入队）
+    const chalKey = [...env.TOPIC_MAP._store.keys()].find(k => k.startsWith('chal:'));
+    expect(chalKey).toBeTruthy();
+    const state = JSON.parse(env.TOPIC_MAP._getRaw(chalKey));
+    expect(state.pending_ids).toEqual([]);
+  });
+
   it('scheduled 失败被捕获记录而非产生未处理拒绝', async () => {
     const env = createMockEnv({ TG_BOT_DB: 'not-a-binding' });
     const pending = [];

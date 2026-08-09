@@ -207,18 +207,20 @@ async function handleMenuCommand(env, threadId, senderId) {
   });
 }
 
+/** KV 前缀计数分页上限（每页 1000 键），防止超大命名空间拖垮存储页 */
+const KV_COUNT_MAX_PAGES = 20;
+
 async function countKvPrefix(env, prefix) {
   if (!env?.TOPIC_MAP?.list) return null;
   let total = 0;
   let cursor;
   let pages = 0;
-  const maxPages = 20; // 防止超大命名空间拖垮命令
   do {
     const result = await env.TOPIC_MAP.list({ prefix, cursor, limit: 1000 });
     total += (result.keys || []).length;
     cursor = result.list_complete ? undefined : result.cursor;
     pages += 1;
-  } while (cursor && pages < maxPages);
+  } while (cursor && pages < KV_COUNT_MAX_PAGES);
   return { total, truncated: Boolean(cursor) };
 }
 

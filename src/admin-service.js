@@ -95,8 +95,9 @@ export function createAdminService({
     }
 
     const allowed = adminId && await authorize(adminId, permission);
+    let before = null;
     if (allowed && resourceId) {
-      const before = await storage.getUser(resourceId);
+      before = await storage.getUser(resourceId);
       if (!before) {
         await telegram.call('answerCallbackQuery', {
           callback_query_id: query.id,
@@ -125,7 +126,9 @@ export function createAdminService({
         createdAt: now(),
       });
     }
-    const responseText = resourceId ? ADMIN_COPY.processed : ADMIN_COPY.backendConnected;
+    const responseText = resourceId
+      ? ADMIN_COPY.v1ActionResult(parts[2], before)
+      : ADMIN_COPY.backendConnected;
     await telegram.call('answerCallbackQuery', {
       callback_query_id: query.id,
       text: allowed ? responseText : ADMIN_COPY.permissionExpired,

@@ -29,6 +29,14 @@ export function createUpdateHandler({ conversation, supergroupId }) {
   };
 }
 
+/** Webhook 响应统一附带 no-store：错误与确认都不应被边缘缓存复用 */
+function webhookResponse(message, status = 200) {
+  return new Response(message, {
+    status,
+    headers: { 'Cache-Control': 'no-store' },
+  });
+}
+
 export async function routeUpdate(update, {
   storage,
   handleUpdate,
@@ -36,19 +44,19 @@ export async function routeUpdate(update, {
 }) {
   const updateId = update?.update_id;
   if (updateId === undefined || updateId === null) {
-    return new Response('Bad Request', { status: 400 });
+    return webhookResponse('Bad Request', 400);
   }
 
   let claim;
   try {
     claim = await storage.claimUpdate(updateId, getUpdateType(update), now());
   } catch (error) {
-    return new Response(
+    return webhookResponse(
       `Error: claimUpdate failed: ${error?.message || String(error)}`,
-      { status: 500 },
+      500,
     );
   }
-  if (claim === 'duplicate') return new Response('OK');
+  if (claim === 'duplicate') return webhookResponse('OK');
 
   try {
     const response = await handleUpdate(update);
@@ -64,21 +72,21 @@ export async function routeUpdate(update, {
     try {
       await storage.completeUpdate(updateId, now());
     } catch (error) {
-      return new Response(
+      return webhookResponse(
         `Error: completeUpdate failed: ${error?.message || String(error)}`,
-        { status: 500 },
+        500,
       );
     }
-    return response instanceof Response ? response : new Response('OK');
+    return response instanceof Response ? response : webhookResponse('OK');
   } catch (error) {
     try {
       await storage.markUpdateRetryable(updateId, error?.category || 'temporary');
     } catch {
       // ignore secondary storage errors
     }
-    return new Response(
+    return webhookResponse(
       `Error: handleUpdate failed: ${error?.message || String(error)}`,
-      { status: 500 },
+      500,
     );
   }
 }

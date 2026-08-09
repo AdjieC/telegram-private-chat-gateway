@@ -88,7 +88,7 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.2.6';
+const GATEWAY_VERSION = '1.2.7';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -1195,7 +1195,9 @@ async function handlePrivateMessage(msg, env, ctx) {
   }
 
   if (policyResult.action === 'require_verification') {
-    const isStart = msg.text && msg.text.trim() === "/start";
+    // /start 及其深链参数（/start payload）不进入待转发队列：
+    // 验证通过后不把指令文本转发给管理员
+    const isStart = msg.text && /^\/start(\s|$)/i.test(removeCommandBotSuffix(msg.text.trim()));
     const pendingMsgId = isStart ? null : msg.message_id;
     await verificationModule.sendVerificationChallenge(userId, env, pendingMsgId, msg.from);
     return;
