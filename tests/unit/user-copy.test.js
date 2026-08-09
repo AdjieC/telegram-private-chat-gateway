@@ -14,6 +14,8 @@ describe('user-copy', () => {
     // 明确告知本次消息未送达，避免用户误以为消息已发送
     expect(USER_COPY.rateLimited(1)).toContain('本次消息未送达');
     expect(USER_COPY.systemBusy).toMatch(/繁忙/);
+    expect(USER_COPY.retryExceeded).toMatch(/暂时无法接收/);
+    expect(USER_COPY.retryExceeded).toContain('管理员');
     expect(USER_COPY.bannedHourly).toMatch(/封禁/);
     expect(USER_COPY.mutedHourly).toMatch(/静音/);
     expect(USER_COPY.blockedWord).toMatch(/拦截/);
@@ -114,5 +116,35 @@ describe('user-copy', () => {
     expect(ADMIN_COPY.listWordsUnavailable).toContain('/listwords');
     expect(ADMIN_COPY.syncCommandsDenied).toContain('OWNER_IDS');
     expect(ADMIN_COPY.commandsSynced(23)).toContain('23');
+  });
+
+  it('cleanup 报告统计、转义与截断一致', () => {
+    const report = ADMIN_COPY.cleanupReport({
+      scannedCount: 5,
+      cleanedCount: 2,
+      errorCount: 1,
+      cleanedUsers: [
+        { userId: '1', title: '张三' },
+        { userId: '<2>', title: '李四' },
+      ],
+    });
+    expect(report).toContain('扫描用户: <b>5</b>');
+    expect(report).toContain('已清理: <b>2</b>');
+    expect(report).toContain('错误: 1');
+    // UID 与标题统一转义，防止注入
+    expect(report).toContain('&lt;2&gt;');
+    expect(report).toContain('重新验证');
+
+    // 超出展示上限时提示剩余数量
+    const overflow = ADMIN_COPY.cleanupReport({
+      cleanedCount: 3,
+      cleanedUsers: [{ userId: '1', title: 'a' }, { userId: '2', title: 'b' }, { userId: '3', title: 'c' }],
+      maxDisplay: 2,
+    });
+    expect(overflow).toContain('…还有 1 个');
+
+    // 无可清理时给出空态引导
+    const empty = ADMIN_COPY.cleanupReport({ cleanedCount: 0 });
+    expect(empty).toContain('没有发现需要清理的用户记录');
   });
 });

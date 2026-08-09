@@ -4,11 +4,17 @@
 
 ## [Unreleased]
 
+### 功能一致性
+
+- **动态规则对新消息生效**：新消息路径统一走 `evaluateLegacyPolicy`，D1 存储规则（`blocked_keyword` / `auto_reply` 等）此前仅对编辑消息生效，现与新消息路径共用同一策略评估；屏蔽词命中日志对 D1 规则改为记录规则 ID，避免越界取词。
+- **话题健康重试计数接通**：`retry:userId` 计数器此前只读不写（上限分支为死代码），现由 `checkThreadHealth` 在连续未知错误时累计（1 小时 TTL），达到 `MAX_RETRY_ATTEMPTS` 后暂停转发并提示用户；健康探测成功时自动清零。
+
 ### 验证页体验
 
 - **失败/加载态可返回**：验证页「返回 Telegram」按钮由仅成功显示改为始终可见，用户误入页面或验证失败时可随时返回，不再被卡在页面。
 - **排障信息与用户文案分离**：Turnstile 组件错误只向用户展示友好提示，错误码与修复建议（域名授权/Site Key/CSP 等部署细节）折叠进「技术详情」供管理员排障，不再直接暴露给终端用户。
 - **页脚收敛**：页脚不再直接展示用户 ID 与验证码（转为 data 属性承载，防调试信息泄露），新增随状态更新的状态行（正在验证/已完成可关闭/未完成可重试）；页面标题随验证状态切换，便于多标签页识别。
+- **验证页与回调禁用缓存**：`/verify` 页面与 `/verify-callback` JSON 响应统一 `Cache-Control: no-store`——验证 code 单次有效，防止浏览器/Telegram 内置浏览器复用旧页面导致过期误判。
 
 ### 文案与一致性
 
@@ -38,6 +44,13 @@
 - **日志卫生**：`admin_check_failed` 补充错误详情；`private_message_failed` 与 `admin_reply_failed` 补充 `updateId` 关联维度。
 - **管理面板微调**：用户跳转按钮超长用户名截断追加省略号；排行封禁/关闭徽标判断抽为 `statusBadge` 函数，消除嵌套三元。
 - **验证页可访问性**：新增 `prefers-reduced-motion` 减弱动态（关闭加载动画）、`format-detection` 关闭电话号码自动识别（防验证码误识别）、装饰图标对读屏器隐藏（`aria-hidden`）。
+- **占位标题检测统一**：`isPlaceholderTopicTitle` 收敛 worker.js 与 admin-actions.js 两处相近但不同的「User 占位标题」规则，单一来源防漂移。
+- **错误条目归一化共享**：`normalizeRecentErrorItem` 抽取到 `src/utils.js`，`recordSystemError` 与错误看板共用同一套截断规则。
+- **清理报告文案收拢**：`/cleanup` 完成报告（统计/列表/截断）统一由 `ADMIN_COPY.cleanupReport` 生成，转义内聚。
+- **随机 ID 去偏差**：`secureRandomId` 上移至 `src/utils.js`，改用与 `secureRandomInt` 一致的拒绝采样，消除取模偏差。
+- **策略校验与正则编译缓存**：`message-policy` 对同一「类型/模式/动作」规则只完整校验一次，正则按 pattern 复用编译结果——热路径上每条消息 × 每条规则不再重复执行 ReDoS 启发式扫描与编译。
+- **重试超限文案**：新增 `USER_COPY.retryExceeded`，区分于通用 `systemBusy`，提示用户稍后重试或联系管理员。
+- **媒体组单测覆盖**：`extractMedia` 各媒体类型、合并发送、过期清理独立单测，不再只依赖集成链路。
 
 ### 测试
 

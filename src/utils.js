@@ -165,6 +165,19 @@ export function isTestMessageInvalid(description) {
 }
 
 /**
+ * 判断话题标题是否为「资料缺失」占位标题（'User' / 'User @xxx' / 空），
+ * 命中后应尝试用最新资料修复标题。worker.js 与 admin-actions.js 共用，避免两处规则漂移。
+ * 语义 = 旧 worker 规则（=== 'User' 或 /^User @/i）与旧 admin-actions 规则（=== 'User' 或 /^User(\s@|$)/i）的并集。
+ * @param {*} title - 话题标题
+ * @returns {boolean}
+ */
+export function isPlaceholderTopicTitle(title) {
+  const value = String(title ?? '').trim();
+  if (!value) return true;
+  return value === 'User' || /^User\s@/i.test(value);
+}
+
+/**
  * 为请求 body 添加 message_thread_id 字段
  * @param {object} body - 请求体
  * @param {number|null|undefined} threadId - 话题 ID
@@ -199,6 +212,26 @@ export function generateVerifyCode() {
 }
 
 /**
+ * 生成加密安全的随机 ID（小写字母 + 数字）。
+ * 拒绝采样消除取模偏差（与 worker.js secureRandomInt 同一口径）：
+ * 字节值超出 [0, limit) 均匀区间时丢弃重采，保证每个字符等概率出现。
+ * @param {number} [length] - 输出长度（默认 12）
+ * @returns {string}
+ */
+export function secureRandomId(length = 12) {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const limit = Math.floor(256 / chars.length) * chars.length;
+  const result = [];
+  const byte = new Uint8Array(1);
+  const target = Math.max(1, Number(length) || 12);
+  while (result.length < target) {
+    crypto.getRandomValues(byte);
+    if (byte[0] < limit) result.push(chars[byte[0] % chars.length]);
+  }
+  return result.join('');
+}
+
+/**
  * 简易节流器：同一 key 在 windowMs 窗口内只放行一次。
  * 用于管理告警等高频路径，防止故障期间告警风暴刷屏。
  * @param {{windowMs?:number}} [opts]
@@ -214,4 +247,44 @@ export function createThrottle({ windowMs = 60000 } = {}) {
     lastSentAt.set(k, now);
     return true;
   };
+}
+
+// --- 系统错误条目归一化（内存环形缓冲与 KV 持久化、看板展示共用同一规则） ---
+
+/** 错误 action 文本上限 */
+export const RECENT_ERROR_ACTION_MAX = 120;
+/** 错误描述文本上限 */
+export const RECENT_ERROR_TEXT_MAX = 500;
+/** 关联 ID（userId/updateId/correlationId）上限 */
+export const RECENT_ERROR_ID_MAX = 120;
+
+/**
+ * 归一化系统错误条目：截断超长字段、过滤非对象输入。
+ * worker.js（recordSystemError）与 admin-commands.js（错误看板）共用，
+ * 避免两处各自实现同一套截断规则导致展示漂移。
+ * @param {object} item - 原始条目 {ts, action, error, userId?, updateId?, correlationId?}
+ * @returns {object|null} 归一化条目；非对象输入返回 null
+ */
+export function normalizeRecentErrorItem(item) {
+  if (!item || typeof item !== 'object') return null;
+  const text = (value, maxLength, fallback = '') => {
+    if (typeof value !== 'string' && typeof value !== 'number') return fallback;
+    return String(value).slice(0, maxLength);
+  };
+  const id = (value) => {
+    if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+    const valueText = String(value).slice(0, RECENT_ERROR_ID_MAX);
+    return valueText || undefined;
+  };
+  const ts = Number(item.ts);
+  const entry = {
+    ts: Number.isFinite(ts) ? ts : 0,
+    action: text(item.action, RECENT_ERROR_ACTION_MAX, 'unknown'),
+    error: text(item.error, RECENT_ERROR_TEXT_MAX),
+  };
+  for (const key of ['userId', 'updateId', 'correlationId']) {
+    const value = id(item[key]);
+    if (value !== undefined) entry[key] = value;
+  }
+  return entry;
 }

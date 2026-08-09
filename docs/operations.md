@@ -70,6 +70,20 @@ crons = ["0 3 * * *"]
 - Cloudflare Cron Trigger 是否启用
 - 日志中是否存在 `D1 'TG_BOT_DB' not bound` 或 SQL 错误
 
+## 代码内可调项
+
+多数行为阈值（验证有效期、限流窗口、媒体组合并延迟、清理批次、消息去重、告警节流等）以 `CONFIG` 常量定义在 `worker.js`，**不属于环境变量**——修改需改代码后重新构建并粘贴 `dist/worker.single.js`。完整清单由 `npm run sync-docs` 生成到 `CLAUDE.md` 的「CONFIG 配置项」索引。
+
+常用可调项示例：
+
+| 常量 | 默认值 | 影响 |
+|------|--------|------|
+| `MEDIA_GROUP_CLEANUP_PROBABILITY` | 0.05 | 每条消息触发过期媒体组扫描的概率；键自带 60s TTL，孤儿键极少，5% 抽样即可覆盖 |
+| `MEDIA_GROUP_DELAY_MS` | 3000 | 媒体组合并等待窗口（毫秒） |
+| `RATE_LIMIT_MESSAGE` / `RATE_LIMIT_VERIFY` | 45 / 3 | 消息发送与验证请求限流阈值（窗口内） |
+| `CLEANUP_BATCH_SIZE` | 10 | `/cleanup` 并发处理批次大小 |
+| `TURNSTILE_VERIFY_TTL` | 600 | Turnstile 验证 code 有效期（秒），验证页过期提示文案自动跟随 |
+
 ## 数据备份
 
 ### D1

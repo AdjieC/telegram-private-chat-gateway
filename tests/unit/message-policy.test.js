@@ -230,4 +230,22 @@ describe('规则安全验证', () => {
       ruleType: 'auto_reply', matchType: 'contains', pattern: 'hello', action: 'reply_only',
     })).toThrow('responseText is required');
   });
+
+  it('校验缓存：相同规则重复校验不再抛错，不同规则独立判定', () => {
+    const valid = { ruleType: 'blocked_keyword', matchType: 'regex', pattern: '^[a-z]+$', action: 'reject' };
+    expect(() => validateRuleInput(valid)).not.toThrow();
+    // 键相同（新对象同内容）→ 命中缓存
+    expect(() => validateRuleInput({ ...valid })).not.toThrow();
+    // 不同 pattern 独立判定：危险正则仍抛错
+    expect(() => validateRuleInput({ ruleType: 'blocked_keyword', matchType: 'regex', pattern: '(a+)+$', action: 'reject' })).toThrow('unsafe');
+    // 同 pattern 但规则类型不同也独立判定（键含 ruleType/action/responseText 长度）
+    expect(() => validateRuleInput({ ruleType: 'auto_reply', matchType: 'regex', pattern: '^[a-z]+$', action: 'reply_only' })).toThrow('responseText');
+  });
+
+  it('正则规则重复匹配结果稳定且复用编译缓存', () => {
+    const rule = { matchType: 'regex', pattern: 'hello\\d+', action: 'reject' };
+    expect(matchRule('hello123', rule)).toBe(true);
+    expect(matchRule('hello123', { ...rule })).toBe(true);
+    expect(matchRule('world', { ...rule })).toBe(false);
+  });
 });

@@ -508,4 +508,111 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     const hintsAfter = telegram.calls.filter(c => c.method === 'sendMessage' && c.body.chat_id === userId);
     expect(hintsAfter).toHaveLength(1);
   });
+
+  it('新消息同样应用 D1 动态规则（自动回复与拦截）', async () => {
+    const telegram = createTelegramMock();
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    const userId = 555;
+    await preVerify(env, userId);
+    await seedTopic(env, userId, 88);
+
+    // 直接写入 D1 规则（等价于管理员后台创建后落库）
+    const storage = createD1Storage(env.TG_BOT_DB);
+    await storage.upsertRule({
+      ruleId: 'auto1', ruleType: 'auto_reply', matchType: 'contains',
+      pattern: '客服电话', responseText: '请稍等，客服马上回复', action: 'reply_and_forward',
+      priority: 5, enabled: true,
+    });
+    await storage.upsertRule({
+      ruleId: 'block1', ruleType: 'blocked_keyword', matchType: 'contains',
+      pattern: '敏感词X', action: 'reject',
+      priority: 1, enabled: true,
+    });
+
+    // 命中 auto_reply 规则：自动回复 + 仍然转发
+    await send(messageUpdate(privateMessage(userId, 701, { text: '请问客服电话是多少' }), 9101), env, telegram);
+    const autoReply = telegram.calls.find(c => c.method === 'sendMessage' && c.body.chat_id === userId && c.body.text.includes('客服马上回复'));
+    expect(autoReply).toBeTruthy();
+    expect(telegram.calls.some(c => c.method === 'forwardMessage')).toBe(true);
+
+    // 命中 D1 blocked_keyword 规则：拦截且不再转发
+    await send(messageUpdate(privateMessage(userId, 702, { text: '这里有敏感词X' }), 9102), env, telegram);
+    const blockedNotice = telegram.calls.filter(c => c.method === 'sendMessage' && c.body.chat_id === userId).at(-1);
+    expect(blockedNotice.body.text).toContain('拦截');
+    expect(telegram.calls.filter(c => c.method === 'forwardMessage')).toHaveLength(1);
+  });
+
+  it('验证页与回调响应禁用缓存（单次链接防缓存误判）', async () => {
+    const telegram = createTelegramMock();
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv({
+      TURNSTILE_SITE_KEY: '0x4AAAAAAA-test',
+      TURNSTILE_SECRET_KEY: 'test-secret',
+      VERIFICATION_PAGE_URL: 'https://gw.example.workers.dev',
+    });
+
+    // GET /verify 页面
+    const pageRes = await worker.fetch(
+      new Request('https://worker.test/verify?code=abc&uid=1', { method: 'GET' }),
+      env,
+      { waitUntil() {} },
+    );
+    expect(pageRes.status).toBe(200);
+    expect(pageRes.headers.get('Cache-Control')).toBe('no-store');
+
+    // 缺参的 /verify 错误页
+    const errRes = await worker.fetch(
+      new Request('https://worker.test/verify', { method: 'GET' }),
+      env,
+      { waitUntil() {} },
+    );
+    expect(errRes.headers.get('Cache-Control')).toBe('no-store');
+
+    // POST /verify-callback 的 JSON 响应（非法 JSON → 400）
+    const cbRes = await worker.fetch(
+      new Request('https://worker.test/verify-callback', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{bad json',
+      }),
+      env,
+      { waitUntil() {} },
+    );
+    expect(cbRes.status).toBe(400);
+    expect(cbRes.headers.get('Cache-Control')).toBe('no-store');
+    expect(cbRes.headers.get('content-type')).toContain('application/json');
+  });
+
+  it('话题健康连续未知错误达到上限后暂停转发并提示用户', async () => {
+    const telegram = createTelegramMock({
+      // 探测消息发往超级群时返回未知错误；对用户的普通消息保持成功
+      sendMessage: async (body) => {
+        if (body.chat_id === SUPERGROUP_ID) {
+          return { ok: false, description: 'unexpected error 500' };
+        }
+        return { ok: true, result: { message_id: 1 } };
+      },
+    });
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    const userId = 444;
+    await preVerify(env, userId);
+    // 使用本文件其他用例未用过的 threadId，避免线程健康内存缓存（60s TTL）跳过探测
+    await seedTopic(env, userId, 777);
+
+    // 前 4 条：探测未知错误但消息仍转发，重试计数累计到 4
+    for (let i = 0; i < 4; i += 1) {
+      await send(messageUpdate(privateMessage(userId, 800 + i, { text: `消息-${i}` }), 9200 + i), env, telegram);
+    }
+    expect(telegram.calls.filter(c => c.method === 'forwardMessage')).toHaveLength(4);
+
+    // 第 5 条：重试计数超过上限（4 > 3），暂停转发并提示
+    await send(messageUpdate(privateMessage(userId, 804, { text: '消息-4' }), 9204), env, telegram);
+    expect(telegram.calls.filter(c => c.method === 'forwardMessage')).toHaveLength(4);
+    const notice = telegram.calls.find(c => c.method === 'sendMessage' && c.body.chat_id === userId);
+    expect(notice.body.text).toContain('暂时无法接收');
+    // 计数器被清除，后续可重试
+    expect(await env.TOPIC_MAP.get(`retry:${userId}`)).toBe(null);
+  });
 });

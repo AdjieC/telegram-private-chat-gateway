@@ -10,7 +10,7 @@ import {
   invalidateBlockedWordsCache,
 } from './blocked-words.js';
 import { ADMIN_COPY, USER_COPY } from './user-copy.js';
-import { parseSpamKeywords, withMessageThreadId } from './utils.js';
+import { parseSpamKeywords, withMessageThreadId, isPlaceholderTopicTitle } from './utils.js';
 
 /**
  * @param {object} deps
@@ -456,7 +456,7 @@ export function createAdminActions(deps) {
       userRec?.thread_id
       && resolvedTitle
       && resolvedTitle !== 'User'
-      && (!userRec.title || userRec.title === 'User' || /^User(\s@|$)/i.test(userRec.title))
+      && isPlaceholderTopicTitle(userRec.title)
     ) {
       try {
         const edit = await tgCall(env, 'editForumTopic', {
@@ -663,25 +663,14 @@ export function createAdminActions(deps) {
         }
       } while (cursor);
 
-      // 生成并发送清理报告
-      let reportText = `✅ <b>清理完成</b>\n\n`;
-      reportText += `📊 <b>统计</b>\n`;
-      reportText += `• 扫描用户: <b>${scannedCount}</b>\n`;
-      reportText += `• 已清理: <b>${cleanedCount}</b>\n`;
-      reportText += `• 错误: ${errorCount}\n\n`;
-
-      if (cleanedCount > 0) {
-        reportText += `🗑 <b>已清理用户</b>（话题已删除）:\n`;
-        for (const user of cleanedUsers.slice(0, config.MAX_CLEANUP_DISPLAY)) {
-          reportText += `• UID <code>${escapeHtml(String(user.userId))}</code> · ${escapeHtml(user.title || '')}\n`;
-        }
-        if (cleanedUsers.length > config.MAX_CLEANUP_DISPLAY) {
-          reportText += `\n…还有 ${cleanedUsers.length - config.MAX_CLEANUP_DISPLAY} 个\n`;
-        }
-        reportText += `\n💡 这些用户下次发消息将重新验证并创建新话题。`;
-      } else {
-        reportText += `✨ 没有发现需要清理的用户记录。`;
-      }
+      // 生成并发送清理报告（文案与转义统一收敛到 ADMIN_COPY.cleanupReport）
+      const reportText = ADMIN_COPY.cleanupReport({
+        scannedCount,
+        cleanedCount,
+        errorCount,
+        cleanedUsers,
+        maxDisplay: config.MAX_CLEANUP_DISPLAY,
+      });
 
       logger.info('cleanup_completed', {
         cleanedCount,

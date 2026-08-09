@@ -1153,6 +1153,11 @@ function isTestMessageInvalid(description) {
   const desc = normalizeTgDescription(description);
   return desc.includes("message text is empty") || desc.includes("bad request: message text is empty");
 }
+function isPlaceholderTopicTitle(title) {
+  const value = String(title ?? "").trim();
+  if (!value) return true;
+  return value === "User" || /^User\s@/i.test(value);
+}
 function withMessageThreadId(body, threadId) {
   if (threadId === void 0 || threadId === null) return body;
   return { ...body, message_thread_id: threadId };
@@ -1166,6 +1171,18 @@ function generateVerifyCode() {
   crypto.getRandomValues(bytes);
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+function secureRandomId(length = 12) {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const limit = Math.floor(256 / chars.length) * chars.length;
+  const result = [];
+  const byte = new Uint8Array(1);
+  const target = Math.max(1, Number(length) || 12);
+  while (result.length < target) {
+    crypto.getRandomValues(byte);
+    if (byte[0] < limit) result.push(chars[byte[0] % chars.length]);
+  }
+  return result.join("");
+}
 function createThrottle({ windowMs = 6e4 } = {}) {
   const lastSentAt = /* @__PURE__ */ new Map();
   return (key, now = Date.now()) => {
@@ -1175,6 +1192,32 @@ function createThrottle({ windowMs = 6e4 } = {}) {
     lastSentAt.set(k, now);
     return true;
   };
+}
+var RECENT_ERROR_ACTION_MAX = 120;
+var RECENT_ERROR_TEXT_MAX = 500;
+var RECENT_ERROR_ID_MAX = 120;
+function normalizeRecentErrorItem(item) {
+  if (!item || typeof item !== "object") return null;
+  const text = (value, maxLength, fallback = "") => {
+    if (typeof value !== "string" && typeof value !== "number") return fallback;
+    return String(value).slice(0, maxLength);
+  };
+  const id = (value) => {
+    if (typeof value !== "string" && typeof value !== "number") return void 0;
+    const valueText = String(value).slice(0, RECENT_ERROR_ID_MAX);
+    return valueText || void 0;
+  };
+  const ts = Number(item.ts);
+  const entry = {
+    ts: Number.isFinite(ts) ? ts : 0,
+    action: text(item.action, RECENT_ERROR_ACTION_MAX, "unknown"),
+    error: text(item.error, RECENT_ERROR_TEXT_MAX)
+  };
+  for (const key of ["userId", "updateId", "correlationId"]) {
+    const value = id(item[key]);
+    if (value !== void 0) entry[key] = value;
+  }
+  return entry;
 }
 
 // src/message-policy.js
@@ -1187,6 +1230,23 @@ var RULE_ACTIONS = {
   auto_reply: /* @__PURE__ */ new Set(["reply_and_forward", "reply_only", "forward_only"]),
   content_type: /* @__PURE__ */ new Set(["reject", "silent_reject", "allow"])
 };
+var VALIDATION_CACHE_MAX = 500;
+var ruleValidationCache = /* @__PURE__ */ new Map();
+var regexCache = /* @__PURE__ */ new Map();
+function cacheBoundedSet(cache, key, value) {
+  if (cache.size >= VALIDATION_CACHE_MAX) {
+    cache.delete(cache.keys().next().value);
+  }
+  cache.set(key, value);
+}
+function getCachedRegex(pattern) {
+  let re = regexCache.get(pattern);
+  if (!re) {
+    re = new RegExp(pattern, "i");
+    cacheBoundedSet(regexCache, pattern, re);
+  }
+  return re;
+}
 function normalizeText(value) {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -1215,6 +1275,9 @@ function validateRuleInput(rule) {
   const pattern = String(rule?.pattern ?? "");
   const responseText = String(ruleValue(rule, "responseText", "response_text") ?? "");
   const ruleType = ruleValue(rule, "ruleType", "rule_type");
+  const action = rule?.action;
+  const cacheKey = [matchType, pattern, ruleType || "", action || "", String(responseText.length)].join("\0");
+  if (ruleValidationCache.has(cacheKey)) return;
   if (!MATCH_TYPES.has(matchType)) throw new Error(`unsupported matchType: ${matchType}`);
   if (!pattern) throw new Error("pattern is required");
   if (pattern.length > MAX_PATTERN_LENGTH) {
@@ -1224,13 +1287,16 @@ function validateRuleInput(rule) {
     throw new Error("responseText must not exceed 4000 characters");
   }
   if (ruleType && !RULE_ACTIONS[ruleType]) throw new Error(`unsupported ruleType: ${ruleType}`);
-  if (ruleType && rule.action && !RULE_ACTIONS[ruleType].has(rule.action)) {
-    throw new Error(`unsupported action: ${rule.action}`);
+  if (ruleType && action && !RULE_ACTIONS[ruleType].has(action)) {
+    throw new Error(`unsupported action: ${action}`);
   }
-  if (ruleType === "auto_reply" && rule.action !== "forward_only" && responseText.length === 0) {
+  if (ruleType === "auto_reply" && action !== "forward_only" && responseText.length === 0) {
     throw new Error("responseText is required for auto reply");
   }
-  if (matchType !== "regex") return;
+  if (matchType !== "regex") {
+    cacheBoundedSet(ruleValidationCache, cacheKey, true);
+    return;
+  }
   if (hasUnsafeNestedQuantifier(pattern)) {
     throw new Error("regex contains unsafe nested quantifiers");
   }
@@ -1239,18 +1305,19 @@ function validateRuleInput(rule) {
   }
   let expression;
   try {
-    expression = new RegExp(pattern, "i");
+    expression = getCachedRegex(pattern);
   } catch {
     throw new Error("regex is invalid");
   }
   if (expression.test("")) throw new Error("regex must not match empty text");
+  cacheBoundedSet(ruleValidationCache, cacheKey, true);
 }
 function matchRule(text, rule) {
   validateRuleInput(rule);
   const input = String(text ?? "").slice(0, MAX_INPUT_LENGTH);
   const pattern = String(rule.pattern);
   const matchType = ruleValue(rule, "matchType", "match_type") || "contains";
-  if (matchType === "regex") return new RegExp(pattern, "i").test(input);
+  if (matchType === "regex") return getCachedRegex(pattern).test(input);
   const normalizedInput = normalizeText(input);
   const normalizedPattern = normalizeText(pattern);
   if (matchType === "equals") return normalizedInput === normalizedPattern;
@@ -1402,6 +1469,8 @@ var USER_COPY = {
     return `\u26A0\uFE0F \u53D1\u9001\u8FC7\u4E8E\u9891\u7E41\uFF0C\u672C\u6B21\u6D88\u606F\u672A\u9001\u8FBE\uFF0C\u8BF7\u7EA6 ${minutes} \u5206\u949F\u540E\u518D\u8BD5\u3002`;
   },
   systemBusy: "\u26A0\uFE0F \u7CFB\u7EDF\u7E41\u5FD9\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+  /** 话题健康连续失败达到上限：暂停转发并给出可行动提示（区别于一次性 systemBusy） */
+  retryExceeded: "\u26A0\uFE0F \u7CFB\u7EDF\u6682\u65F6\u65E0\u6CD5\u63A5\u6536\u60A8\u7684\u6D88\u606F\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002\u82E5\u6301\u7EED\u5982\u6B64\u8BF7\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
   bannedHourly: "\u{1F6AB} \u60A8\u5DF2\u88AB\u7BA1\u7406\u5458\u5C01\u7981\uFF0C\u6682\u65F6\u65E0\u6CD5\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u3002\u5982\u6709\u7591\u95EE\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u5904\u7406\u3002",
   mutedHourly: "\u{1F507} \u60A8\u5F53\u524D\u5904\u4E8E\u9759\u97F3\u72B6\u6001\uFF0C\u6D88\u606F\u4E0D\u4F1A\u9001\u8FBE\u7BA1\u7406\u5458\u3002\u8BF7\u7B49\u5F85\u7BA1\u7406\u5458\u53D6\u6D88\u9759\u97F3\u3002",
   blockedWord: "\u{1F6AB} \u60A8\u7684\u6D88\u606F\u5305\u542B\u8FDD\u89C4\u5185\u5BB9\uFF0C\u5DF2\u88AB\u62E6\u622A\u3002\u8BF7\u4FEE\u6539\u540E\u91CD\u65B0\u53D1\u9001\u3002",
@@ -1526,6 +1595,32 @@ ${existing}
     return `\u274C <b>\u6E05\u7406\u8FC7\u7A0B\u51FA\u9519</b>
 
 \u9519\u8BEF\u4FE1\u606F: <code>${msg}</code>`;
+  },
+  /** 批量清理完成报告（HTML；cleanedUsers 为 {userId, title} 原始记录，内部统一转义） */
+  cleanupReport({ scannedCount = 0, cleanedCount = 0, errorCount = 0, cleanedUsers = [], maxDisplay = 20 } = {}) {
+    const limit = Math.max(1, Number(maxDisplay) || 20);
+    const lines = [
+      "\u2705 <b>\u6E05\u7406\u5B8C\u6210</b>",
+      "",
+      "\u{1F4CA} <b>\u7EDF\u8BA1</b>",
+      `\u2022 \u626B\u63CF\u7528\u6237: <b>${scannedCount}</b>`,
+      `\u2022 \u5DF2\u6E05\u7406: <b>${cleanedCount}</b>`,
+      `\u2022 \u9519\u8BEF: ${errorCount}`,
+      ""
+    ];
+    if (cleanedCount > 0) {
+      lines.push("\u{1F5D1} <b>\u5DF2\u6E05\u7406\u7528\u6237</b>\uFF08\u8BDD\u9898\u5DF2\u5220\u9664\uFF09:");
+      for (const user of cleanedUsers.slice(0, limit)) {
+        lines.push(`\u2022 UID <code>${escapeHtml(String(user.userId ?? ""))}</code> \xB7 ${escapeHtml(user.title || "")}`);
+      }
+      if (cleanedUsers.length > limit) {
+        lines.push("", `\u2026\u8FD8\u6709 ${cleanedUsers.length - limit} \u4E2A`);
+      }
+      lines.push("", "\u{1F4A1} \u8FD9\u4E9B\u7528\u6237\u4E0B\u6B21\u53D1\u6D88\u606F\u5C06\u91CD\u65B0\u9A8C\u8BC1\u5E76\u521B\u5EFA\u65B0\u8BDD\u9898\u3002");
+    } else {
+      lines.push("\u2728 \u6CA1\u6709\u53D1\u73B0\u9700\u8981\u6E05\u7406\u7684\u7528\u6237\u8BB0\u5F55\u3002");
+    }
+    return lines.join("\n");
   },
   /** 管理 UI 回调 toast 与通用错误提示 */
   cbNoPermission: "\u65E0\u6743\u9650",
@@ -2597,7 +2692,7 @@ function createAdminActions(deps) {
     const banStatus = await env.TOPIC_MAP.get(`banned:${userId}`);
     const from = await resolveUserFromForTopic2(env, userId, null);
     const resolvedTitle = buildTopicTitle2(from);
-    if (userRec?.thread_id && resolvedTitle && resolvedTitle !== "User" && (!userRec.title || userRec.title === "User" || /^User(\s@|$)/i.test(userRec.title))) {
+    if (userRec?.thread_id && resolvedTitle && resolvedTitle !== "User" && isPlaceholderTopicTitle(userRec.title)) {
       try {
         const edit = await tgCall2(env, "editForumTopic", {
           chat_id: env.SUPERGROUP_ID,
@@ -2751,35 +2846,13 @@ function createAdminActions(deps) {
           await new Promise((r) => setTimeout(r, 200));
         }
       } while (cursor);
-      let reportText = `\u2705 <b>\u6E05\u7406\u5B8C\u6210</b>
-
-`;
-      reportText += `\u{1F4CA} <b>\u7EDF\u8BA1</b>
-`;
-      reportText += `\u2022 \u626B\u63CF\u7528\u6237: <b>${scannedCount}</b>
-`;
-      reportText += `\u2022 \u5DF2\u6E05\u7406: <b>${cleanedCount}</b>
-`;
-      reportText += `\u2022 \u9519\u8BEF: ${errorCount}
-
-`;
-      if (cleanedCount > 0) {
-        reportText += `\u{1F5D1} <b>\u5DF2\u6E05\u7406\u7528\u6237</b>\uFF08\u8BDD\u9898\u5DF2\u5220\u9664\uFF09:
-`;
-        for (const user of cleanedUsers.slice(0, config.MAX_CLEANUP_DISPLAY)) {
-          reportText += `\u2022 UID <code>${escapeHtml2(String(user.userId))}</code> \xB7 ${escapeHtml2(user.title || "")}
-`;
-        }
-        if (cleanedUsers.length > config.MAX_CLEANUP_DISPLAY) {
-          reportText += `
-\u2026\u8FD8\u6709 ${cleanedUsers.length - config.MAX_CLEANUP_DISPLAY} \u4E2A
-`;
-        }
-        reportText += `
-\u{1F4A1} \u8FD9\u4E9B\u7528\u6237\u4E0B\u6B21\u53D1\u6D88\u606F\u5C06\u91CD\u65B0\u9A8C\u8BC1\u5E76\u521B\u5EFA\u65B0\u8BDD\u9898\u3002`;
-      } else {
-        reportText += `\u2728 \u6CA1\u6709\u53D1\u73B0\u9700\u8981\u6E05\u7406\u7684\u7528\u6237\u8BB0\u5F55\u3002`;
-      }
+      const reportText = ADMIN_COPY.cleanupReport({
+        scannedCount,
+        cleanedCount,
+        errorCount,
+        cleanedUsers,
+        maxDisplay: config.MAX_CLEANUP_DISPLAY
+      });
       logger.info("cleanup_completed", {
         cleanedCount,
         errorCount,
@@ -4167,29 +4240,6 @@ function createAdminCommandHandlers(deps) {
     return { total, truncated: Boolean(cursor) };
   }
   async function collectRecentErrors(env) {
-    const normalizeRecentError = (item) => {
-      if (!item || typeof item !== "object") return null;
-      const text = (value, maxLength, fallback = "") => {
-        if (typeof value !== "string" && typeof value !== "number") return fallback;
-        return String(value).slice(0, maxLength);
-      };
-      const id = (value) => {
-        if (typeof value !== "string" && typeof value !== "number") return void 0;
-        const valueText = String(value).slice(0, 120);
-        return valueText || void 0;
-      };
-      const timestamp = Number(item.ts);
-      const normalized = {
-        ts: Number.isFinite(timestamp) ? timestamp : 0,
-        action: text(item.action, 120, "unknown"),
-        error: text(item.error, 500)
-      };
-      for (const key of ["userId", "updateId", "correlationId"]) {
-        const value = id(item[key]);
-        if (value !== void 0) normalized[key] = value;
-      }
-      return normalized;
-    };
     let kvErrors = [];
     try {
       if (env?.TOPIC_MAP) {
@@ -4203,7 +4253,7 @@ function createAdminCommandHandlers(deps) {
     const merged = [];
     const seen = /* @__PURE__ */ new Set();
     for (const rawItem of [...getRecentSystemErrors(), ...kvErrors]) {
-      const item = normalizeRecentError(rawItem);
+      const item = normalizeRecentErrorItem(rawItem);
       if (!item) continue;
       const key = `${item.ts}|${item.action}|${item.error}`;
       if (seen.has(key)) continue;
@@ -5307,9 +5357,8 @@ var CONFIG = {
   MEDIA_GROUP_CLEANUP_PROBABILITY: 0.05
   // 过期媒体组扫描概率：键自带 60s TTL，孤儿键极少，无需每条消息全量扫 KV
 };
-var GATEWAY_VERSION = "1.2.0";
+var GATEWAY_VERSION = "1.2.1";
 var TOPIC_TITLE_PLACEHOLDER = "User";
-var TOPIC_TITLE_USER_PATTERN = /^User @/i;
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
 var topicCreateInFlight = /* @__PURE__ */ new Map();
@@ -5334,36 +5383,10 @@ var Logger = createLogger({}, console, {
   }
 });
 var RECENT_SYSTEM_ERRORS_MAX = 12;
-var RECENT_ERROR_ACTION_MAX = 120;
-var RECENT_ERROR_TEXT_MAX = 500;
-var RECENT_ERROR_ID_MAX = 120;
 var recentSystemErrors = [];
 var systemErrorKvThrottle = createThrottle({ windowMs: 3e4 });
-function recentErrorText(value, maxLength, fallback = "") {
-  if (typeof value !== "string" && typeof value !== "number") return fallback;
-  return String(value).slice(0, maxLength);
-}
-function recentErrorId(value) {
-  if (typeof value !== "string" && typeof value !== "number") return void 0;
-  const text = String(value).slice(0, RECENT_ERROR_ID_MAX);
-  return text || void 0;
-}
-function normalizeRecentSystemError(item) {
-  if (!item || typeof item !== "object") return null;
-  const ts = Number(item.ts);
-  const entry = {
-    ts: Number.isFinite(ts) ? ts : 0,
-    action: recentErrorText(item.action, RECENT_ERROR_ACTION_MAX, "unknown"),
-    error: recentErrorText(item.error, RECENT_ERROR_TEXT_MAX)
-  };
-  for (const key of ["userId", "updateId", "correlationId"]) {
-    const value = recentErrorId(item[key]);
-    if (value !== void 0) entry[key] = value;
-  }
-  return entry;
-}
 function recordSystemError(action, error, data = {}, env = null) {
-  const entry = normalizeRecentSystemError({
+  const entry = normalizeRecentErrorItem({
     ts: Date.now(),
     action,
     error: error instanceof Error ? error.message : String(error ?? ""),
@@ -5385,7 +5408,7 @@ function recordSystemError(action, error, data = {}, env = null) {
         list = [];
       }
       if (!Array.isArray(list)) list = [];
-      list = list.map(normalizeRecentSystemError).filter(Boolean);
+      list = list.map(normalizeRecentErrorItem).filter(Boolean);
       list.unshift(entry);
       await env.TOPIC_MAP.put(
         "sys:recent_errors",
@@ -5591,12 +5614,6 @@ function secureRandomInt(min, max) {
   } while (value >= limit);
   return min + value % range;
 }
-function secureRandomId(length = 12) {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes).map((b) => chars[b % chars.length]).join("");
-}
 async function safeGetJSON(env, key, defaultValue = null) {
   try {
     const data = await env.TOPIC_MAP.get(key, { type: "json" });
@@ -5612,6 +5629,15 @@ async function safeGetJSON(env, key, defaultValue = null) {
     Logger.error("kv_parse_failed", e, { key });
     return defaultValue;
   }
+}
+function verifyJsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store"
+    }
+  });
 }
 function isSparseTelegramFrom(from) {
   if (!from || typeof from !== "object") return true;
@@ -5937,6 +5963,7 @@ var legacyApp = {
           }), {
             headers: {
               "Content-Type": "text/html; charset=utf-8",
+              "Cache-Control": "no-store",
               "X-Content-Type-Options": "nosniff",
               "Referrer-Policy": "no-referrer"
             }
@@ -5968,6 +5995,8 @@ var legacyApp = {
           {
             headers: {
               "Content-Type": "text/html; charset=utf-8",
+              // 验证链接单次有效：禁用一切缓存，防止浏览器/Telegram 内置浏览器复用旧页面
+              "Cache-Control": "no-store",
               "Content-Security-Policy": csp,
               "X-Content-Type-Options": "nosniff",
               "Referrer-Policy": "no-referrer"
@@ -5982,40 +6011,25 @@ var legacyApp = {
       try {
         body = await request.json();
       } catch {
-        return new Response(JSON.stringify({ success: false, error: "invalid_json" }), {
-          status: 400,
-          headers: { "Content-Type": "application/json" }
-        });
+        return verifyJsonResponse({ success: false, error: "invalid_json" }, 400);
       }
       try {
         const { token, code, userId } = body || {};
         if (!token || !code || !userId) {
-          return new Response(JSON.stringify({ success: false, error: "missing_params" }), {
-            status: 400,
-            headers: { "Content-Type": "application/json" }
-          });
+          return verifyJsonResponse({ success: false, error: "missing_params" }, 400);
         }
         const turnstileSecret = (env.TURNSTILE_SECRET_KEY || "").toString().trim();
         if (!turnstileSecret) {
-          return new Response(JSON.stringify({ success: false, error: "server_not_configured" }), {
-            status: 500,
-            headers: { "Content-Type": "application/json" }
-          });
+          return verifyJsonResponse({ success: false, error: "server_not_configured" }, 500);
         }
         const verifyResult = await verificationModule.verifyTurnstileToken(token, turnstileSecret);
         if (!verifyResult.success) {
           Logger.warn("turnstile_token_invalid", { userId, error: verifyResult.error });
-          return new Response(JSON.stringify({ success: false, error: "turnstile_failed", detail: verifyResult.error }), {
-            status: 403,
-            headers: { "Content-Type": "application/json" }
-          });
+          return verifyJsonResponse({ success: false, error: "turnstile_failed", detail: verifyResult.error }, 403);
         }
         const storedUserId = await env.TOPIC_MAP.get(`turnstile_code:${code}`);
         if (!storedUserId || storedUserId !== String(userId)) {
-          return new Response(JSON.stringify({ success: false, error: "code_invalid_or_expired" }), {
-            status: 403,
-            headers: { "Content-Type": "application/json" }
-          });
+          return verifyJsonResponse({ success: false, error: "code_invalid_or_expired" }, 403);
         }
         await ephemeralStore(env).setVerification(userId, {
           ttl: CONFIG.VERIFIED_EXPIRE_SECONDS,
@@ -6066,15 +6080,10 @@ var legacyApp = {
             Logger.error("pending_turnstile_parse_failed", e, { userId });
           }
         }
-        return new Response(JSON.stringify({ success: true, pendingCount }), {
-          headers: { "Content-Type": "application/json" }
-        });
+        return verifyJsonResponse({ success: true, pendingCount });
       } catch (e) {
         Logger.error("verify_callback_error", e);
-        return new Response(JSON.stringify({ success: false, error: "server_error" }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" }
-        });
+        return verifyJsonResponse({ success: false, error: "server_error" }, 500);
       }
     }
     let update = parsedUpdate;
@@ -6191,21 +6200,13 @@ async function handlePrivateMessage(msg, env, ctx) {
     }
     return;
   }
-  const [isBanned, isMuted, blockedWords, verification] = await Promise.all([
+  const [isBanned, isMuted] = await Promise.all([
     env.TOPIC_MAP.get(`banned:${userId}`),
-    env.TOPIC_MAP.get(`muted:${userId}`),
-    getBlockedWords(env, false, Logger),
-    getVerificationState(env, userId)
+    env.TOPIC_MAP.get(`muted:${userId}`)
   ]);
-  const blockedRules = buildLegacyBlockedRules(blockedWords);
-  const policyResult = evaluateMessagePolicy({
-    message: msg,
-    user: {
-      status: isBanned ? "banned" : "active",
-      trustLevel: verification?.type === "trusted" ? "trusted" : "normal"
-    },
-    verification,
-    rules: blockedRules
+  const policyResult = await evaluateLegacyPolicy(env, msg, {
+    userId,
+    status: isBanned ? "banned" : "active"
   });
   if (policyResult.reason === "banned") {
     await sendHourlyNotice(env, userId, `ban_notice:${userId}`, USER_COPY.bannedHourly);
@@ -6216,8 +6217,14 @@ async function handlePrivateMessage(msg, env, ctx) {
     return;
   }
   if (policyResult.reason === "blocked_keyword") {
-    const matchedIndex = Number(policyResult.matchedRuleId?.split(":")[1]);
-    Logger.info("message_blocked_by_word", { userId, word: blockedWords[matchedIndex] });
+    const ruleId2 = policyResult.matchedRuleId || "";
+    let word = ruleId2;
+    if (ruleId2.startsWith("legacy_blocked:")) {
+      const matchedIndex = Number(ruleId2.split(":")[1]);
+      const blockedWords = await getBlockedWords(env, false, Logger);
+      word = blockedWords[matchedIndex] ?? ruleId2;
+    }
+    Logger.info("message_blocked_by_word", { userId, word });
     await tgCall(env, "sendMessage", {
       chat_id: userId,
       text: USER_COPY.blockedWord
@@ -6266,7 +6273,7 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
   const retryKey = `retry:${userId}`;
   let retryCount = parseInt(await env.TOPIC_MAP.get(retryKey) ?? "0", 10);
   if (retryCount > CONFIG.MAX_RETRY_ATTEMPTS) {
-    await tgCall(env, "sendMessage", { chat_id: userId, text: USER_COPY.systemBusy });
+    await tgCall(env, "sendMessage", { chat_id: userId, text: USER_COPY.retryExceeded });
     await env.TOPIC_MAP.delete(retryKey);
     return;
   }
@@ -6275,7 +6282,7 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
     if (!rec || !rec.thread_id) {
       throw new Error("\u521B\u5EFA\u8BDD\u9898\u5931\u8D25");
     }
-  } else if (!rec.title || rec.title === TOPIC_TITLE_PLACEHOLDER || TOPIC_TITLE_USER_PATTERN.test(rec.title)) {
+  } else if (isPlaceholderTopicTitle(rec.title)) {
     try {
       const resolvedFrom = await resolveUserFromForTopic(env, userId, msg.from);
       const title = buildTopicTitle(resolvedFrom);
@@ -6360,6 +6367,8 @@ async function checkThreadHealth(threadId, env, { userId, retryKey }) {
       threadId,
       errorDescription: probe.description
     });
+    const currentRetry = parseInt(await env.TOPIC_MAP.get(retryKey) ?? "0", 10);
+    await env.TOPIC_MAP.put(retryKey, String(currentRetry + 1), { expirationTtl: 3600 });
     return { action: "ok", status: "unknown" };
   }
   await env.TOPIC_MAP.delete(retryKey);

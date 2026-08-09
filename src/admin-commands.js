@@ -39,6 +39,7 @@ import {
 } from './admin-ui-format.js';
 import { bumpDailyStat, getDailyStats, getRecentDailySeries } from './daily-stats.js';
 import { ADMIN_COPY } from './user-copy.js';
+import { normalizeRecentErrorItem } from './utils.js';
 
 /**
  * @param {object} deps
@@ -221,29 +222,6 @@ async function countKvPrefix(env, prefix) {
 }
 
 async function collectRecentErrors(env) {
-  const normalizeRecentError = (item) => {
-    if (!item || typeof item !== 'object') return null;
-    const text = (value, maxLength, fallback = '') => {
-      if (typeof value !== 'string' && typeof value !== 'number') return fallback;
-      return String(value).slice(0, maxLength);
-    };
-    const id = (value) => {
-      if (typeof value !== 'string' && typeof value !== 'number') return undefined;
-      const valueText = String(value).slice(0, 120);
-      return valueText || undefined;
-    };
-    const timestamp = Number(item.ts);
-    const normalized = {
-      ts: Number.isFinite(timestamp) ? timestamp : 0,
-      action: text(item.action, 120, 'unknown'),
-      error: text(item.error, 500),
-    };
-    for (const key of ['userId', 'updateId', 'correlationId']) {
-      const value = id(item[key]);
-      if (value !== undefined) normalized[key] = value;
-    }
-    return normalized;
-  };
   let kvErrors = [];
   try {
     if (env?.TOPIC_MAP) {
@@ -254,8 +232,9 @@ async function collectRecentErrors(env) {
   if (!Array.isArray(kvErrors)) kvErrors = [];
   const merged = [];
   const seen = new Set();
+  // 归一化规则与 recordSystemError 共用（src/utils.js normalizeRecentErrorItem），避免两处截断漂移
   for (const rawItem of [...getRecentSystemErrors(), ...kvErrors]) {
-    const item = normalizeRecentError(rawItem);
+    const item = normalizeRecentErrorItem(rawItem);
     if (!item) continue;
     const key = `${item.ts}|${item.action}|${item.error}`;
     if (seen.has(key)) continue;

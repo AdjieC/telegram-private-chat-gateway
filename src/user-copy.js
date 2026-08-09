@@ -1,6 +1,7 @@
 /**
  * 用户侧与管理侧常用文案（非验证类；验证见 verify-copy.js）
  */
+import { escapeHtml } from './utils.js';
 
 /** 编辑通知正文单侧截断上限：两侧合计须低于 Telegram 4096 字符消息上限 */
 export const EDIT_SNIPPET_LIMIT = 1500;
@@ -40,6 +41,9 @@ export const USER_COPY = {
     return `⚠️ 发送过于频繁，本次消息未送达，请约 ${minutes} 分钟后再试。`;
   },
   systemBusy: '⚠️ 系统繁忙，请稍后再试。',
+  /** 话题健康连续失败达到上限：暂停转发并给出可行动提示（区别于一次性 systemBusy） */
+  retryExceeded:
+    '⚠️ 系统暂时无法接收您的消息，请稍后再试。若持续如此请联系管理员。',
   bannedHourly:
     '🚫 您已被管理员封禁，暂时无法继续发送消息。如有疑问请等待管理员处理。',
   mutedHourly:
@@ -161,6 +165,32 @@ export const ADMIN_COPY = {
   cleanupScanning: '🔄 <b>正在扫描需要清理的用户...</b>',
   cleanupFailed(msg) {
     return `❌ <b>清理过程出错</b>\n\n错误信息: <code>${msg}</code>`;
+  },
+  /** 批量清理完成报告（HTML；cleanedUsers 为 {userId, title} 原始记录，内部统一转义） */
+  cleanupReport({ scannedCount = 0, cleanedCount = 0, errorCount = 0, cleanedUsers = [], maxDisplay = 20 } = {}) {
+    const limit = Math.max(1, Number(maxDisplay) || 20);
+    const lines = [
+      '✅ <b>清理完成</b>',
+      '',
+      '📊 <b>统计</b>',
+      `• 扫描用户: <b>${scannedCount}</b>`,
+      `• 已清理: <b>${cleanedCount}</b>`,
+      `• 错误: ${errorCount}`,
+      '',
+    ];
+    if (cleanedCount > 0) {
+      lines.push('🗑 <b>已清理用户</b>（话题已删除）:');
+      for (const user of cleanedUsers.slice(0, limit)) {
+        lines.push(`• UID <code>${escapeHtml(String(user.userId ?? ''))}</code> · ${escapeHtml(user.title || '')}`);
+      }
+      if (cleanedUsers.length > limit) {
+        lines.push('', `…还有 ${cleanedUsers.length - limit} 个`);
+      }
+      lines.push('', '💡 这些用户下次发消息将重新验证并创建新话题。');
+    } else {
+      lines.push('✨ 没有发现需要清理的用户记录。');
+    }
+    return lines.join('\n');
   },
   /** 管理 UI 回调 toast 与通用错误提示 */
   cbNoPermission: '无权限',

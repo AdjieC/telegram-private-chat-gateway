@@ -10,6 +10,32 @@ const RULE_ACTIONS = {
   content_type: new Set(['reject', 'silent_reject', 'allow']),
 };
 
+// 校验结果缓存：同一「类型|模式|动作」规则只完整校验一次。
+// 规则校验含正则编译与不安全嵌套量词启发式扫描（ReDoS 防护），
+// 热路径上每条消息 × 每条规则重复执行成本可观；规则来自 D1 且创建时已校验，结果稳定可缓存。
+const VALIDATION_CACHE_MAX = 500;
+const ruleValidationCache = new Map(); // key -> true（仅缓存通过校验的规则）
+
+// 已编译正则缓存（按 pattern 复用，避免每条消息重新 new RegExp）
+const regexCache = new Map(); // pattern -> RegExp
+
+function cacheBoundedSet(cache, key, value) {
+  if (cache.size >= VALIDATION_CACHE_MAX) {
+    // Map 迭代顺序为插入序，删除最早插入的条目
+    cache.delete(cache.keys().next().value);
+  }
+  cache.set(key, value);
+}
+
+function getCachedRegex(pattern) {
+  let re = regexCache.get(pattern);
+  if (!re) {
+    re = new RegExp(pattern, 'i');
+    cacheBoundedSet(regexCache, pattern, re);
+  }
+  return re;
+}
+
 export function classifyContentType(message = {}) {
   if (message.forward_origin || message.forward_from || message.forward_from_chat) return 'forwarded_message';
   if (message.caption && (message.photo || message.video || message.document || message.audio || message.animation)) return 'media_caption';
@@ -52,6 +78,11 @@ export function validateRuleInput(rule) {
   const pattern = String(rule?.pattern ?? '');
   const responseText = String(ruleValue(rule, 'responseText', 'response_text') ?? '');
   const ruleType = ruleValue(rule, 'ruleType', 'rule_type');
+  const action = rule?.action;
+
+  // 校验结果缓存：键覆盖全部校验输入，命中即视为已通过
+  const cacheKey = [matchType, pattern, ruleType || '', action || '', String(responseText.length)].join('\u0000');
+  if (ruleValidationCache.has(cacheKey)) return;
 
   if (!MATCH_TYPES.has(matchType)) throw new Error(`unsupported matchType: ${matchType}`);
   if (!pattern) throw new Error('pattern is required');
@@ -62,18 +93,21 @@ export function validateRuleInput(rule) {
     throw new Error('responseText must not exceed 4000 characters');
   }
   if (ruleType && !RULE_ACTIONS[ruleType]) throw new Error(`unsupported ruleType: ${ruleType}`);
-  if (ruleType && rule.action && !RULE_ACTIONS[ruleType].has(rule.action)) {
-    throw new Error(`unsupported action: ${rule.action}`);
+  if (ruleType && action && !RULE_ACTIONS[ruleType].has(action)) {
+    throw new Error(`unsupported action: ${action}`);
   }
   if (
     ruleType === 'auto_reply'
-    && rule.action !== 'forward_only'
+    && action !== 'forward_only'
     && responseText.length === 0
   ) {
     throw new Error('responseText is required for auto reply');
   }
 
-  if (matchType !== 'regex') return;
+  if (matchType !== 'regex') {
+    cacheBoundedSet(ruleValidationCache, cacheKey, true);
+    return;
+  }
   if (hasUnsafeNestedQuantifier(pattern)) {
     throw new Error('regex contains unsafe nested quantifiers');
   }
@@ -83,11 +117,13 @@ export function validateRuleInput(rule) {
 
   let expression;
   try {
-    expression = new RegExp(pattern, 'i');
+    expression = getCachedRegex(pattern);
   } catch {
     throw new Error('regex is invalid');
   }
   if (expression.test('')) throw new Error('regex must not match empty text');
+
+  cacheBoundedSet(ruleValidationCache, cacheKey, true);
 }
 
 export function matchRule(text, rule) {
@@ -96,7 +132,7 @@ export function matchRule(text, rule) {
   const pattern = String(rule.pattern);
   const matchType = ruleValue(rule, 'matchType', 'match_type') || 'contains';
 
-  if (matchType === 'regex') return new RegExp(pattern, 'i').test(input);
+  if (matchType === 'regex') return getCachedRegex(pattern).test(input);
 
   const normalizedInput = normalizeText(input);
   const normalizedPattern = normalizeText(pattern);

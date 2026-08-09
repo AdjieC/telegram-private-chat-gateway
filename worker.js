@@ -42,6 +42,9 @@ import {
   isTestMessageInvalid,
   cleanProfileText,
   createThrottle,
+  isPlaceholderTopicTitle,
+  normalizeRecentErrorItem,
+  secureRandomId,
 } from './src/utils.js';
 
 // Telegram Private Chat Gateway — Cloudflare Workers 私聊安全接入与双向会话网关
@@ -82,11 +85,10 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.2.0';
+const GATEWAY_VERSION = '1.2.1';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
-const TOPIC_TITLE_USER_PATTERN = /^User @/i;
 /** 低频状态（封禁/静音）每小时最多提醒一次的 KV TTL */
 const HOURLY_NOTICE_TTL_SECONDS = 3600;
 
@@ -123,41 +125,12 @@ const Logger = createLogger({}, console, {
 
 // 进程内最近错误环形缓冲（isolate 生命周期内有效；并尽力写入 KV）
 const RECENT_SYSTEM_ERRORS_MAX = 12;
-const RECENT_ERROR_ACTION_MAX = 120;
-const RECENT_ERROR_TEXT_MAX = 500;
-const RECENT_ERROR_ID_MAX = 120;
 const recentSystemErrors = [];
 // 系统错误写入 KV 节流：错误风暴期间内存环形缓冲全量保留，KV 尽力写入降频，避免放大 KV 写入成本
 const systemErrorKvThrottle = createThrottle({ windowMs: 30000 });
 
-function recentErrorText(value, maxLength, fallback = '') {
-  if (typeof value !== 'string' && typeof value !== 'number') return fallback;
-  return String(value).slice(0, maxLength);
-}
-
-function recentErrorId(value) {
-  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
-  const text = String(value).slice(0, RECENT_ERROR_ID_MAX);
-  return text || undefined;
-}
-
-function normalizeRecentSystemError(item) {
-  if (!item || typeof item !== 'object') return null;
-  const ts = Number(item.ts);
-  const entry = {
-    ts: Number.isFinite(ts) ? ts : 0,
-    action: recentErrorText(item.action, RECENT_ERROR_ACTION_MAX, 'unknown'),
-    error: recentErrorText(item.error, RECENT_ERROR_TEXT_MAX),
-  };
-  for (const key of ['userId', 'updateId', 'correlationId']) {
-    const value = recentErrorId(item[key]);
-    if (value !== undefined) entry[key] = value;
-  }
-  return entry;
-}
-
 function recordSystemError(action, error, data = {}, env = null) {
-  const entry = normalizeRecentSystemError({
+  const entry = normalizeRecentErrorItem({
     ts: Date.now(),
     action,
     error: error instanceof Error ? error.message : String(error ?? ''),
@@ -178,7 +151,7 @@ function recordSystemError(action, error, data = {}, env = null) {
           if (raw) list = JSON.parse(raw);
         } catch { list = []; }
         if (!Array.isArray(list)) list = [];
-        list = list.map(normalizeRecentSystemError).filter(Boolean);
+        list = list.map(normalizeRecentErrorItem).filter(Boolean);
         list.unshift(entry);
         await env.TOPIC_MAP.put(
           'sys:recent_errors',
@@ -423,13 +396,6 @@ function secureRandomInt(min, max) {
   return min + (value % range);
 }
 
-function secureRandomId(length = 12) {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes).map(b => chars[b % chars.length]).join('');
-}
-
 // 安全的 JSON 获取
 async function safeGetJSON(env, key, defaultValue = null) {
   try {
@@ -446,6 +412,17 @@ async function safeGetJSON(env, key, defaultValue = null) {
     Logger.error('kv_parse_failed', e, { key });
     return defaultValue;
   }
+}
+
+// 验证相关 JSON 响应统一禁用缓存：验证 code 单次有效，任何缓存都会导致过期误判
+function verifyJsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+    },
+  });
 }
 
 /**
@@ -856,6 +833,7 @@ const legacyApp = {
           }), {
             headers: {
               'Content-Type': 'text/html; charset=utf-8',
+              'Cache-Control': 'no-store',
               'X-Content-Type-Options': 'nosniff',
               'Referrer-Policy': 'no-referrer',
             },
@@ -894,6 +872,8 @@ const legacyApp = {
           {
             headers: {
               'Content-Type': 'text/html; charset=utf-8',
+              // 验证链接单次有效：禁用一切缓存，防止浏览器/Telegram 内置浏览器复用旧页面
+              'Cache-Control': 'no-store',
               'Content-Security-Policy': csp,
               'X-Content-Type-Options': 'nosniff',
               'Referrer-Policy': 'no-referrer',
@@ -914,46 +894,31 @@ const legacyApp = {
         body = await request.json();
       } catch {
         // 非法 JSON 属客户端错误，返回 400 而非 500，避免错误日志噪声
-        return new Response(JSON.stringify({ success: false, error: 'invalid_json' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return verifyJsonResponse({ success: false, error: 'invalid_json' }, 400);
       }
       try {
         const { token, code, userId } = body || {};
 
         if (!token || !code || !userId) {
-          return new Response(JSON.stringify({ success: false, error: 'missing_params' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' }
-          });
+          return verifyJsonResponse({ success: false, error: 'missing_params' }, 400);
         }
 
         // 验证 Turnstile token
         const turnstileSecret = (env.TURNSTILE_SECRET_KEY || '').toString().trim();
         if (!turnstileSecret) {
-          return new Response(JSON.stringify({ success: false, error: 'server_not_configured' }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' }
-          });
+          return verifyJsonResponse({ success: false, error: 'server_not_configured' }, 500);
         }
 
         const verifyResult = await verificationModule.verifyTurnstileToken(token, turnstileSecret);
         if (!verifyResult.success) {
           Logger.warn('turnstile_token_invalid', { userId, error: verifyResult.error });
-          return new Response(JSON.stringify({ success: false, error: 'turnstile_failed', detail: verifyResult.error }), {
-            status: 403,
-            headers: { 'Content-Type': 'application/json' }
-          });
+          return verifyJsonResponse({ success: false, error: 'turnstile_failed', detail: verifyResult.error }, 403);
         }
 
         // 从 KV 验证 code 是否匹配
         const storedUserId = await env.TOPIC_MAP.get(`turnstile_code:${code}`);
         if (!storedUserId || storedUserId !== String(userId)) {
-          return new Response(JSON.stringify({ success: false, error: 'code_invalid_or_expired' }), {
-            status: 403,
-            headers: { 'Content-Type': 'application/json' }
-          });
+          return verifyJsonResponse({ success: false, error: 'code_invalid_or_expired' }, 403);
         }
 
         // Turnstile token 有效 + code 匹配 → 标记验证通过
@@ -1013,15 +978,10 @@ const legacyApp = {
           }
         }
 
-        return new Response(JSON.stringify({ success: true, pendingCount }), {
-          headers: { 'Content-Type': 'application/json' }
-        });
+        return verifyJsonResponse({ success: true, pendingCount });
       } catch (e) {
         Logger.error('verify_callback_error', e);
-        return new Response(JSON.stringify({ success: false, error: 'server_error' }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        });
+        return verifyJsonResponse({ success: false, error: 'server_error' }, 500);
       }
     }
 
@@ -1177,21 +1137,15 @@ async function handlePrivateMessage(msg, env, ctx) {
     return;
   }
 
-  const [isBanned, isMuted, blockedWords, verification] = await Promise.all([
+  const [isBanned, isMuted] = await Promise.all([
     env.TOPIC_MAP.get(`banned:${userId}`),
     env.TOPIC_MAP.get(`muted:${userId}`),
-    getBlockedWords(env, false, Logger),
-    getVerificationState(env, userId),
   ]);
-  const blockedRules = buildLegacyBlockedRules(blockedWords);
-  const policyResult = evaluateMessagePolicy({
-    message: msg,
-    user: {
-      status: isBanned ? 'banned' : 'active',
-      trustLevel: verification?.type === 'trusted' ? 'trusted' : 'normal',
-    },
-    verification,
-    rules: blockedRules,
+  // 统一走 evaluateLegacyPolicy：与编辑消息路径共用同一策略评估，
+  // 使 D1 动态规则（blocked_keyword / auto_reply 等）对新消息同样生效
+  const policyResult = await evaluateLegacyPolicy(env, msg, {
+    userId,
+    status: isBanned ? 'banned' : 'active',
   });
 
   if (policyResult.reason === 'banned') {
@@ -1205,8 +1159,15 @@ async function handlePrivateMessage(msg, env, ctx) {
     return;
   }
   if (policyResult.reason === 'blocked_keyword') {
-    const matchedIndex = Number(policyResult.matchedRuleId?.split(':')[1]);
-    Logger.info('message_blocked_by_word', { userId, word: blockedWords[matchedIndex] });
+    const ruleId = policyResult.matchedRuleId || '';
+    // legacy_blocked:N 映射到屏蔽词表；D1 规则命中时记录规则 ID，避免越界取词
+    let word = ruleId;
+    if (ruleId.startsWith('legacy_blocked:')) {
+      const matchedIndex = Number(ruleId.split(':')[1]);
+      const blockedWords = await getBlockedWords(env, false, Logger);
+      word = blockedWords[matchedIndex] ?? ruleId;
+    }
+    Logger.info('message_blocked_by_word', { userId, word });
     await tgCall(env, "sendMessage", {
       chat_id: userId,
       text: USER_COPY.blockedWord,
@@ -1268,11 +1229,11 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
     return;
   }
 
-  // 重试计数器检查
+  // 重试计数器检查：连续未知错误达到上限后暂停转发并提示（见 checkThreadHealth 递增）
   const retryKey = `retry:${userId}`;
   let retryCount = parseInt((await env.TOPIC_MAP.get(retryKey)) ?? "0", 10);
   if (retryCount > CONFIG.MAX_RETRY_ATTEMPTS) {
-    await tgCall(env, "sendMessage", { chat_id: userId, text: USER_COPY.systemBusy });
+    await tgCall(env, "sendMessage", { chat_id: userId, text: USER_COPY.retryExceeded });
     await env.TOPIC_MAP.delete(retryKey);
     return;
   }
@@ -1283,7 +1244,7 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
     if (!rec || !rec.thread_id) {
       throw new Error("创建话题失败");
     }
-  } else if (!rec.title || rec.title === TOPIC_TITLE_PLACEHOLDER || TOPIC_TITLE_USER_PATTERN.test(rec.title)) {
+  } else if (isPlaceholderTopicTitle(rec.title)) {
     // 修复 Turnstile 回放建话题时资料缺失导致的占位标题
     try {
       const resolvedFrom = await resolveUserFromForTopic(env, userId, msg.from);
@@ -1390,6 +1351,10 @@ async function checkThreadHealth(threadId, env, { userId, retryKey }) {
     Logger.warn('topic_test_failed_unknown', {
       userId, threadId, errorDescription: probe.description
     });
+    // 累计瞬态失败：连续未知错误达到上限后由 forwardToTopic 暂停转发并提示用户。
+    // 计数器带 1 小时 TTL，健康探测成功时会被清除，避免历史失败永久生效。
+    const currentRetry = parseInt((await env.TOPIC_MAP.get(retryKey)) ?? '0', 10);
+    await env.TOPIC_MAP.put(retryKey, String(currentRetry + 1), { expirationTtl: 3600 });
     return { action: "ok", status: "unknown" };
   }
 
