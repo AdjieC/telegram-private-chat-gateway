@@ -89,7 +89,7 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.3.1';
+const GATEWAY_VERSION = '1.3.2';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -104,6 +104,10 @@ const topicCreateInFlight = new Map();
 const adminStatusCache = new Map();
 // thread 映射缺失时的负缓存（避免重复全量扫描已知不存在的话题）
 const threadNotFoundCache = new Map();
+// thread->user 映射进程内缓存：映射建立后不再变化，命中即跳过每条消息一次的补建 KV 读
+const threadMappingCache = new Map();
+const THREAD_MAPPING_CACHE_TTL_MS = 10 * 60 * 1000;
+const THREAD_MAPPING_CACHE_MAX_ENTRIES = 2000;
 const ruleCache = new WeakMap();
 const THREAD_NOT_FOUND_TTL_MS = 5 * 60 * 1000;
 const THREAD_NOT_FOUND_MAX_ENTRIES = 1000;
@@ -1240,15 +1244,22 @@ async function handlePrivateMessage(msg, env, ctx) {
  * 职责：前置检查 → 获取/创建话题 → 健康检查 → 执行转发
  */
 async function forwardToTopic(msg, userId, key, env, ctx) {
+  // 前置三项 KV 读相互独立，并行拉取：每条消息少两次串行 KV 往返
+  const retryKey = `retry:${userId}`;
+  const [needsVerify, initialRec, retryRaw] = await Promise.all([
+    env.TOPIC_MAP.get(`needs_verify:${userId}`),
+    safeGetJSON(env, key, null),
+    env.TOPIC_MAP.get(retryKey),
+  ]);
+
   // 并发兜底：如果已被标记为需要重新验证，直接发起验证并暂停转发/建话题
-  const needsVerify = await env.TOPIC_MAP.get(`needs_verify:${userId}`);
   if (needsVerify) {
     await verificationModule.sendVerificationChallenge(userId, env, msg.message_id || null, msg.from);
     return;
   }
 
   // 获取用户话题记录
-  let rec = await safeGetJSON(env, key, null);
+  let rec = initialRec;
 
   if (rec && rec.closed) {
     await tgCall(env, "sendMessage", { chat_id: userId, text: USER_COPY.conversationClosed });
@@ -1256,8 +1267,7 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
   }
 
   // 重试计数器检查：连续未知错误达到上限后暂停转发并提示（见 checkThreadHealth 递增）
-  const retryKey = `retry:${userId}`;
-  let retryCount = parseInt((await env.TOPIC_MAP.get(retryKey)) ?? "0", 10);
+  const retryCount = parseInt(retryRaw ?? "0", 10);
   if (retryCount > CONFIG.MAX_RETRY_ATTEMPTS) {
     await tgCall(env, "sendMessage", { chat_id: userId, text: USER_COPY.retryExceeded });
     await env.TOPIC_MAP.delete(retryKey);
@@ -1291,11 +1301,16 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
     }
   }
 
-  // 补建 thread->user 映射（兼容旧数据）
+  // 补建 thread->user 映射（兼容旧数据）；进程内命中即跳过，避免每条消息一次 KV 读
   if (rec.thread_id) {
-    const mappedUser = await env.TOPIC_MAP.get(`thread:${rec.thread_id}`);
-    if (!mappedUser) {
-      await env.TOPIC_MAP.put(`thread:${rec.thread_id}`, String(userId));
+    const mappingKey = String(rec.thread_id);
+    const cachedMapping = threadMappingCache.get(mappingKey);
+    if (!cachedMapping || Date.now() - cachedMapping.ts >= THREAD_MAPPING_CACHE_TTL_MS) {
+      const mappedUser = await env.TOPIC_MAP.get(`thread:${rec.thread_id}`);
+      if (!mappedUser) {
+        await env.TOPIC_MAP.put(`thread:${rec.thread_id}`, String(userId));
+      }
+      setBoundedCache(threadMappingCache, mappingKey, { ts: Date.now() }, THREAD_MAPPING_CACHE_MAX_ENTRIES);
     }
   }
 

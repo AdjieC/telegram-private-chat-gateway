@@ -5472,13 +5472,16 @@ var CONFIG = {
   RETRY_COUNT_TTL_SECONDS: 3600
   // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.3.1";
+var GATEWAY_VERSION = "1.3.2";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
 var topicCreateInFlight = /* @__PURE__ */ new Map();
 var adminStatusCache = /* @__PURE__ */ new Map();
 var threadNotFoundCache = /* @__PURE__ */ new Map();
+var threadMappingCache = /* @__PURE__ */ new Map();
+var THREAD_MAPPING_CACHE_TTL_MS = 10 * 60 * 1e3;
+var THREAD_MAPPING_CACHE_MAX_ENTRIES = 2e3;
 var ruleCache = /* @__PURE__ */ new WeakMap();
 var THREAD_NOT_FOUND_TTL_MS = 5 * 60 * 1e3;
 var THREAD_NOT_FOUND_MAX_ENTRIES = 1e3;
@@ -6388,18 +6391,22 @@ async function handlePrivateMessage(msg, env, ctx) {
   await forwardToTopic(msg, userId, key, env, ctx);
 }
 async function forwardToTopic(msg, userId, key, env, ctx) {
-  const needsVerify = await env.TOPIC_MAP.get(`needs_verify:${userId}`);
+  const retryKey = `retry:${userId}`;
+  const [needsVerify, initialRec, retryRaw] = await Promise.all([
+    env.TOPIC_MAP.get(`needs_verify:${userId}`),
+    safeGetJSON(env, key, null),
+    env.TOPIC_MAP.get(retryKey)
+  ]);
   if (needsVerify) {
     await verificationModule.sendVerificationChallenge(userId, env, msg.message_id || null, msg.from);
     return;
   }
-  let rec = await safeGetJSON(env, key, null);
+  let rec = initialRec;
   if (rec && rec.closed) {
     await tgCall(env, "sendMessage", { chat_id: userId, text: USER_COPY.conversationClosed });
     return;
   }
-  const retryKey = `retry:${userId}`;
-  let retryCount = parseInt(await env.TOPIC_MAP.get(retryKey) ?? "0", 10);
+  const retryCount = parseInt(retryRaw ?? "0", 10);
   if (retryCount > CONFIG.MAX_RETRY_ATTEMPTS) {
     await tgCall(env, "sendMessage", { chat_id: userId, text: USER_COPY.retryExceeded });
     await env.TOPIC_MAP.delete(retryKey);
@@ -6430,9 +6437,14 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
     }
   }
   if (rec.thread_id) {
-    const mappedUser = await env.TOPIC_MAP.get(`thread:${rec.thread_id}`);
-    if (!mappedUser) {
-      await env.TOPIC_MAP.put(`thread:${rec.thread_id}`, String(userId));
+    const mappingKey = String(rec.thread_id);
+    const cachedMapping = threadMappingCache.get(mappingKey);
+    if (!cachedMapping || Date.now() - cachedMapping.ts >= THREAD_MAPPING_CACHE_TTL_MS) {
+      const mappedUser = await env.TOPIC_MAP.get(`thread:${rec.thread_id}`);
+      if (!mappedUser) {
+        await env.TOPIC_MAP.put(`thread:${rec.thread_id}`, String(userId));
+      }
+      setBoundedCache(threadMappingCache, mappingKey, { ts: Date.now() }, THREAD_MAPPING_CACHE_MAX_ENTRIES);
     }
   }
   if (rec.thread_id) {
