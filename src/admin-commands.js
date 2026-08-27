@@ -641,7 +641,7 @@ async function handleNotesCommand(env, threadId, queryText = '') {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: ADMIN_COPY.notesSearchFailed(escapeHtml(e?.message || String(e))),
+      text: ADMIN_COPY.notesSearchFailed(e?.message || String(e)),
       parse_mode: 'HTML',
     });
     return;
@@ -796,7 +796,7 @@ async function handleFindCommand(env, threadId, queryText) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: ADMIN_COPY.searchFailed(escapeHtml(e?.message || String(e))),
+      text: ADMIN_COPY.searchFailed(e?.message || String(e)),
       parse_mode: 'HTML',
     });
   }

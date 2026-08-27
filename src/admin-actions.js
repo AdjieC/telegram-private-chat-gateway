@@ -150,7 +150,7 @@ export function createAdminActions(deps) {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
         text: existing
-          ? ADMIN_COPY.noteView(escapeHtml(existing))
+          ? ADMIN_COPY.noteView(existing)
           : ADMIN_COPY.noteEmpty,
         parse_mode: 'HTML',
       });
@@ -169,7 +169,7 @@ export function createAdminActions(deps) {
     await tgCall(env, 'sendMessage', {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: ADMIN_COPY.noteSaved(escapeHtml(content.slice(0, 500))),
+      text: ADMIN_COPY.noteSaved(content.slice(0, 500)),
       parse_mode: 'HTML',
     });
   }
@@ -202,7 +202,7 @@ export function createAdminActions(deps) {
       await tgCall(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: ADMIN_COPY.wordExists(escapeHtml(word)),
+        text: ADMIN_COPY.wordExists(word),
         parse_mode: "HTML",
       });
       return;
@@ -215,7 +215,7 @@ export function createAdminActions(deps) {
     await tgCall(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: ADMIN_COPY.wordAdded(escapeHtml(word), kvWords.length),
+      text: ADMIN_COPY.wordAdded(word, kvWords.length),
       parse_mode: "HTML",
     });
   }
@@ -237,7 +237,7 @@ export function createAdminActions(deps) {
       await tgCall(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: ADMIN_COPY.wordHardcoded(escapeHtml(word)),
+        text: ADMIN_COPY.wordHardcoded(word),
         parse_mode: "HTML",
       });
       return;
@@ -252,7 +252,7 @@ export function createAdminActions(deps) {
       await tgCall(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: ADMIN_COPY.wordMissing(escapeHtml(word)),
+        text: ADMIN_COPY.wordMissing(word),
         parse_mode: "HTML",
       });
       return;
@@ -264,7 +264,7 @@ export function createAdminActions(deps) {
     await tgCall(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: ADMIN_COPY.wordDeleted(escapeHtml(word), kvWords.length),
+      text: ADMIN_COPY.wordDeleted(word, kvWords.length),
       parse_mode: "HTML",
     });
   }
@@ -414,7 +414,7 @@ export function createAdminActions(deps) {
       await tgCall(env, 'sendMessage', {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: ADMIN_COPY.banNotifyFailed(escapeHtml(notify?.description || 'unknown')),
+        text: ADMIN_COPY.banNotifyFailed(notify?.description || 'unknown'),
         parse_mode: 'HTML',
       });
     } else {
@@ -693,7 +693,7 @@ export function createAdminActions(deps) {
       logger.error('cleanup_failed', e, { threadId });
       await tgCall(env, "sendMessage", withMessageThreadId({
         chat_id: env.SUPERGROUP_ID,
-        text: ADMIN_COPY.cleanupFailed(escapeHtml(e?.message || String(e))),
+        text: ADMIN_COPY.cleanupFailed(e?.message || String(e)),
         parse_mode: "HTML"
       }, threadId));
     } finally {

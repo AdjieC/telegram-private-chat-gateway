@@ -1561,33 +1561,35 @@ var ADMIN_COPY = {
       `\u{1F4DD} \u6D88\u606F\u5DF2\u62E6\u622A\u3002${locateHint}`
     ].join("\n");
   },
+  /** 转发完全失败报告（HTML；四段值均为原始文本，内部统一转义） */
   forwardTotalFail(userId, threadId, fwdDesc, copyDesc) {
     return [
       "\u26A0\uFE0F <b>\u6D88\u606F\u8F6C\u53D1\u5B8C\u5168\u5931\u8D25</b>",
       "",
-      `\u{1F464} \u7528\u6237: <code>${userId}</code>`,
-      `\u{1F4DD} \u8BDD\u9898: <code>${threadId}</code>`,
-      `\u274C forwardMessage: <code>${fwdDesc || "unknown"}</code>`,
-      `\u274C copyMessage: <code>${copyDesc || "unknown"}</code>`
+      `\u{1F464} \u7528\u6237: <code>${escapeHtml(String(userId))}</code>`,
+      `\u{1F4DD} \u8BDD\u9898: <code>${escapeHtml(String(threadId))}</code>`,
+      `\u274C forwardMessage: <code>${escapeHtml(String(fwdDesc || "unknown"))}</code>`,
+      `\u274C copyMessage: <code>${escapeHtml(String(copyDesc || "unknown"))}</code>`
     ].join("\n");
   },
   wordUsageAdd: "\u26A0\uFE0F \u7528\u6CD5: <code>/addword \u5C4F\u853D\u8BCD</code>",
   wordUsageDel: "\u26A0\uFE0F \u7528\u6CD5: <code>/delword \u5C4F\u853D\u8BCD</code>",
+  /** 词库回执（HTML；word 为管理员输入的原始文本，内部统一转义） */
   wordExists(word) {
-    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u5DF2\u5B58\u5728\u3002`;
+    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${escapeHtml(word)}\u300D\u5DF2\u5B58\u5728\u3002`;
   },
   wordAdded(word, count) {
-    return `\u2705 \u5DF2\u6DFB\u52A0\u5C4F\u853D\u8BCD\u300C${word}\u300D
+    return `\u2705 \u5DF2\u6DFB\u52A0\u5C4F\u853D\u8BCD\u300C${escapeHtml(word)}\u300D
 \u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 <b>${count}</b> \u4E2A\u8BCD`;
   },
   wordHardcoded(word) {
-    return `\u26A0\uFE0F\u300C${word}\u300D\u662F\u786C\u7F16\u7801\u5C4F\u853D\u8BCD\uFF0C\u65E0\u6CD5\u901A\u8FC7\u547D\u4EE4\u5220\u9664\uFF0C\u8BF7\u76F4\u63A5\u4FEE\u6539\u4EE3\u7801\u4E2D\u7684 BLOCKED_WORDS\u3002`;
+    return `\u26A0\uFE0F\u300C${escapeHtml(word)}\u300D\u662F\u786C\u7F16\u7801\u5C4F\u853D\u8BCD\uFF0C\u65E0\u6CD5\u901A\u8FC7\u547D\u4EE4\u5220\u9664\uFF0C\u8BF7\u76F4\u63A5\u4FEE\u6539\u4EE3\u7801\u4E2D\u7684 BLOCKED_WORDS\u3002`;
   },
   wordMissing(word) {
-    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${word}\u300D\u4E0D\u5B58\u5728\u4E8E\u52A8\u6001\u8BCD\u5E93\u4E2D\u3002`;
+    return `\u26A0\uFE0F \u5C4F\u853D\u8BCD\u300C${escapeHtml(word)}\u300D\u4E0D\u5B58\u5728\u4E8E\u52A8\u6001\u8BCD\u5E93\u4E2D\u3002`;
   },
   wordDeleted(word, count) {
-    return `\u2705 \u5DF2\u5220\u9664\u5C4F\u853D\u8BCD\u300C${word}\u300D
+    return `\u2705 \u5DF2\u5220\u9664\u5C4F\u853D\u8BCD\u300C${escapeHtml(word)}\u300D
 \u5F53\u524D\u52A8\u6001\u8BCD\u5E93\u5171 <b>${count}</b> \u4E2A\u8BCD`;
   },
   /** 用户编辑消息被策略拦截后发给管理员的提示（纯文本，reason 为策略原因标识） */
@@ -1605,13 +1607,14 @@ var ADMIN_COPY = {
   unmutedInGroup: "\u{1F50A} <b>\u5DF2\u53D6\u6D88\u9759\u97F3</b>",
   noteEmpty: "\u{1F4DD} \u6682\u65E0\u5907\u6CE8\u3002\u7528\u6CD5: <code>/note \u5185\u5BB9</code>",
   noteCleared: "\u2705 \u5907\u6CE8\u5DF2\u6E05\u9664",
+  /** 备注回执（HTML；备注内容为管理员输入的原始文本，内部统一转义） */
   noteSaved(content) {
     return `\u2705 \u5907\u6CE8\u5DF2\u4FDD\u5B58\uFF1A
-${content}`;
+${escapeHtml(content)}`;
   },
   noteView(existing) {
     return `\u{1F4DD} <b>\u5F53\u524D\u5907\u6CE8</b>
-${existing}
+${escapeHtml(existing)}
 
 \u7528\u6CD5: <code>/note \u65B0\u5907\u6CE8</code>\uFF08\u53D1 <code>/note clear</code> \u6E05\u7A7A\uFF09`;
   },
@@ -1621,16 +1624,18 @@ ${existing}
   trusted: "\u{1F31F} <b>\u5DF2\u8BBE\u7F6E\u6C38\u4E45\u4FE1\u4EFB</b>",
   bannedInGroup: "\u{1F6AB} <b>\u7528\u6237\u5DF2\u5C01\u7981</b>\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
   unbannedInGroup: "\u2705 <b>\u7528\u6237\u5DF2\u89E3\u5C01</b>\uFF08\u5DF2\u5C1D\u8BD5\u901A\u77E5\u5BF9\u65B9\uFF09",
+  /** 封禁通知失败提示（HTML；desc 为 Telegram 错误描述的原始文本，内部统一转义） */
   banNotifyFailed(desc) {
-    return `\u26A0\uFE0F \u5DF2\u5C01\u7981\uFF0C\u4F46\u901A\u77E5\u7528\u6237\u5931\u8D25\uFF08\u53EF\u80FD\u5BF9\u65B9\u672A\u79C1\u804A\u8FC7\u673A\u5668\u4EBA\u6216\u5DF2\u62C9\u9ED1\uFF09\uFF1A${desc}`;
+    return `\u26A0\uFE0F \u5DF2\u5C01\u7981\uFF0C\u4F46\u901A\u77E5\u7528\u6237\u5931\u8D25\uFF08\u53EF\u80FD\u5BF9\u65B9\u672A\u79C1\u804A\u8FC7\u673A\u5668\u4EBA\u6216\u5DF2\u62C9\u9ED1\uFF09\uFF1A${escapeHtml(desc)}`;
   },
   /** 批量清理流程提示（HTML） */
   cleanupBusy: "\u23F3 <b>\u5DF2\u6709\u6E05\u7406\u4EFB\u52A1\u6B63\u5728\u8FD0\u884C\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002</b>",
   cleanupScanning: "\u{1F504} <b>\u6B63\u5728\u626B\u63CF\u9700\u8981\u6E05\u7406\u7684\u7528\u6237...</b>",
+  /** 清理失败提示（HTML；msg 为错误描述的原始文本，内部统一转义） */
   cleanupFailed(msg) {
     return `\u274C <b>\u6E05\u7406\u8FC7\u7A0B\u51FA\u9519</b>
 
-\u9519\u8BEF\u4FE1\u606F: <code>${msg}</code>`;
+\u9519\u8BEF\u4FE1\u606F: <code>${escapeHtml(msg)}</code>`;
   },
   /** 批量清理完成报告（HTML；cleanedUsers 为 {userId, title} 原始记录，内部统一转义） */
   cleanupReport({ scannedCount = 0, cleanedCount = 0, errorCount = 0, cleanedUsers = [], maxDisplay = 20 } = {}) {
@@ -1675,11 +1680,12 @@ ${existing}
   cbOperationFailed: "\u64CD\u4F5C\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5",
   kvNotBoundNotes: "\u274C KV \u672A\u7ED1\u5B9A\uFF0C\u65E0\u6CD5\u641C\u7D22\u5907\u6CE8",
   d1NotBoundFind: "\u274C D1 \u672A\u7ED1\u5B9A\uFF0C\u65E0\u6CD5\u641C\u7D22",
+  /** 搜索失败提示（HTML；msg 为错误描述的原始文本，内部统一转义） */
   notesSearchFailed(msg) {
-    return `\u274C \u5907\u6CE8\u641C\u7D22\u5931\u8D25: ${msg}`;
+    return `\u274C \u5907\u6CE8\u641C\u7D22\u5931\u8D25: ${escapeHtml(msg)}`;
   },
   searchFailed(msg) {
-    return `\u274C \u641C\u7D22\u5931\u8D25: ${msg}`;
+    return `\u274C \u641C\u7D22\u5931\u8D25: ${escapeHtml(msg)}`;
   },
   /** v1:* 资料卡回调与后台菜单文案 */
   adminMenuTitle: "\u7BA1\u7406\u540E\u53F0",
@@ -2510,7 +2516,7 @@ function createAdminActions(deps) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: existing ? ADMIN_COPY.noteView(escapeHtml2(existing)) : ADMIN_COPY.noteEmpty,
+        text: existing ? ADMIN_COPY.noteView(existing) : ADMIN_COPY.noteEmpty,
         parse_mode: "HTML"
       });
       return;
@@ -2528,7 +2534,7 @@ function createAdminActions(deps) {
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: ADMIN_COPY.noteSaved(escapeHtml2(content.slice(0, 500))),
+      text: ADMIN_COPY.noteSaved(content.slice(0, 500)),
       parse_mode: "HTML"
     });
   }
@@ -2558,7 +2564,7 @@ function createAdminActions(deps) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: ADMIN_COPY.wordExists(escapeHtml2(word)),
+        text: ADMIN_COPY.wordExists(word),
         parse_mode: "HTML"
       });
       return;
@@ -2570,7 +2576,7 @@ function createAdminActions(deps) {
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: ADMIN_COPY.wordAdded(escapeHtml2(word), kvWords.length),
+      text: ADMIN_COPY.wordAdded(word, kvWords.length),
       parse_mode: "HTML"
     });
   }
@@ -2589,7 +2595,7 @@ function createAdminActions(deps) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: ADMIN_COPY.wordHardcoded(escapeHtml2(word)),
+        text: ADMIN_COPY.wordHardcoded(word),
         parse_mode: "HTML"
       });
       return;
@@ -2601,7 +2607,7 @@ function createAdminActions(deps) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: ADMIN_COPY.wordMissing(escapeHtml2(word)),
+        text: ADMIN_COPY.wordMissing(word),
         parse_mode: "HTML"
       });
       return;
@@ -2612,7 +2618,7 @@ function createAdminActions(deps) {
     await tgCall2(env, "sendMessage", {
       chat_id: env.SUPERGROUP_ID,
       message_thread_id: threadId,
-      text: ADMIN_COPY.wordDeleted(escapeHtml2(word), kvWords.length),
+      text: ADMIN_COPY.wordDeleted(word, kvWords.length),
       parse_mode: "HTML"
     });
   }
@@ -2749,7 +2755,7 @@ function createAdminActions(deps) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: ADMIN_COPY.banNotifyFailed(escapeHtml2(notify?.description || "unknown")),
+        text: ADMIN_COPY.banNotifyFailed(notify?.description || "unknown"),
         parse_mode: "HTML"
       });
     } else {
@@ -2963,7 +2969,7 @@ function createAdminActions(deps) {
       logger.error("cleanup_failed", e, { threadId });
       await tgCall2(env, "sendMessage", withMessageThreadId({
         chat_id: env.SUPERGROUP_ID,
-        text: ADMIN_COPY.cleanupFailed(escapeHtml2(e?.message || String(e))),
+        text: ADMIN_COPY.cleanupFailed(e?.message || String(e)),
         parse_mode: "HTML"
       }, threadId));
     } finally {
@@ -4707,7 +4713,7 @@ function createAdminCommandHandlers(deps) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: ADMIN_COPY.notesSearchFailed(escapeHtml(e?.message || String(e))),
+        text: ADMIN_COPY.notesSearchFailed(e?.message || String(e)),
         parse_mode: "HTML"
       });
       return;
@@ -4857,7 +4863,7 @@ function createAdminCommandHandlers(deps) {
       await tgCall2(env, "sendMessage", {
         chat_id: env.SUPERGROUP_ID,
         message_thread_id: threadId,
-        text: ADMIN_COPY.searchFailed(escapeHtml(e?.message || String(e))),
+        text: ADMIN_COPY.searchFailed(e?.message || String(e)),
         parse_mode: "HTML"
       });
     }
@@ -5489,7 +5495,7 @@ var CONFIG = {
   RETRY_COUNT_TTL_SECONDS: 3600
   // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.3.5";
+var GATEWAY_VERSION = "1.3.6";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
@@ -6644,10 +6650,10 @@ async function handleForwardFailure(res, msg, userId, threadId, env) {
       env,
       "forward_failed",
       ADMIN_COPY.forwardTotalFail(
-        escapeHtml(String(userId)),
-        escapeHtml(String(threadId)),
-        escapeHtml(res.description || ""),
-        escapeHtml(copyRes.description || "")
+        String(userId),
+        String(threadId),
+        res.description || "",
+        copyRes.description || ""
       )
     );
   }

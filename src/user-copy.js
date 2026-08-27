@@ -109,32 +109,34 @@ export const ADMIN_COPY = {
       `📝 消息已拦截。${locateHint}`,
     ].join('\n');
   },
+  /** 转发完全失败报告（HTML；四段值均为原始文本，内部统一转义） */
   forwardTotalFail(userId, threadId, fwdDesc, copyDesc) {
     return [
       '⚠️ <b>消息转发完全失败</b>',
       '',
-      `👤 用户: <code>${userId}</code>`,
-      `📝 话题: <code>${threadId}</code>`,
-      `❌ forwardMessage: <code>${fwdDesc || 'unknown'}</code>`,
-      `❌ copyMessage: <code>${copyDesc || 'unknown'}</code>`,
+      `👤 用户: <code>${escapeHtml(String(userId))}</code>`,
+      `📝 话题: <code>${escapeHtml(String(threadId))}</code>`,
+      `❌ forwardMessage: <code>${escapeHtml(String(fwdDesc || 'unknown'))}</code>`,
+      `❌ copyMessage: <code>${escapeHtml(String(copyDesc || 'unknown'))}</code>`,
     ].join('\n');
   },
   wordUsageAdd: '⚠️ 用法: <code>/addword 屏蔽词</code>',
   wordUsageDel: '⚠️ 用法: <code>/delword 屏蔽词</code>',
+  /** 词库回执（HTML；word 为管理员输入的原始文本，内部统一转义） */
   wordExists(word) {
-    return `⚠️ 屏蔽词「${word}」已存在。`;
+    return `⚠️ 屏蔽词「${escapeHtml(word)}」已存在。`;
   },
   wordAdded(word, count) {
-    return `✅ 已添加屏蔽词「${word}」\n当前动态词库共 <b>${count}</b> 个词`;
+    return `✅ 已添加屏蔽词「${escapeHtml(word)}」\n当前动态词库共 <b>${count}</b> 个词`;
   },
   wordHardcoded(word) {
-    return `⚠️「${word}」是硬编码屏蔽词，无法通过命令删除，请直接修改代码中的 BLOCKED_WORDS。`;
+    return `⚠️「${escapeHtml(word)}」是硬编码屏蔽词，无法通过命令删除，请直接修改代码中的 BLOCKED_WORDS。`;
   },
   wordMissing(word) {
-    return `⚠️ 屏蔽词「${word}」不存在于动态词库中。`;
+    return `⚠️ 屏蔽词「${escapeHtml(word)}」不存在于动态词库中。`;
   },
   wordDeleted(word, count) {
-    return `✅ 已删除屏蔽词「${word}」\n当前动态词库共 <b>${count}</b> 个词`;
+    return `✅ 已删除屏蔽词「${escapeHtml(word)}」\n当前动态词库共 <b>${count}</b> 个词`;
   },
   /** 用户编辑消息被策略拦截后发给管理员的提示（纯文本，reason 为策略原因标识） */
   userEditBlocked(reason) {
@@ -149,11 +151,12 @@ export const ADMIN_COPY = {
   unmutedInGroup: '🔊 <b>已取消静音</b>',
   noteEmpty: '📝 暂无备注。用法: <code>/note 内容</code>',
   noteCleared: '✅ 备注已清除',
+  /** 备注回执（HTML；备注内容为管理员输入的原始文本，内部统一转义） */
   noteSaved(content) {
-    return `✅ 备注已保存：\n${content}`;
+    return `✅ 备注已保存：\n${escapeHtml(content)}`;
   },
   noteView(existing) {
-    return `📝 <b>当前备注</b>\n${existing}\n\n用法: <code>/note 新备注</code>（发 <code>/note clear</code> 清空）`;
+    return `📝 <b>当前备注</b>\n${escapeHtml(existing)}\n\n用法: <code>/note 新备注</code>（发 <code>/note clear</code> 清空）`;
   },
   conversationClosedInGroup: '🚫 <b>对话已强制关闭</b>',
   conversationOpenedInGroup: '✅ <b>对话已恢复</b>',
@@ -161,14 +164,16 @@ export const ADMIN_COPY = {
   trusted: '🌟 <b>已设置永久信任</b>',
   bannedInGroup: '🚫 <b>用户已封禁</b>（已尝试通知对方）',
   unbannedInGroup: '✅ <b>用户已解封</b>（已尝试通知对方）',
+  /** 封禁通知失败提示（HTML；desc 为 Telegram 错误描述的原始文本，内部统一转义） */
   banNotifyFailed(desc) {
-    return `⚠️ 已封禁，但通知用户失败（可能对方未私聊过机器人或已拉黑）：${desc}`;
+    return `⚠️ 已封禁，但通知用户失败（可能对方未私聊过机器人或已拉黑）：${escapeHtml(desc)}`;
   },
   /** 批量清理流程提示（HTML） */
   cleanupBusy: '⏳ <b>已有清理任务正在运行，请稍后再试。</b>',
   cleanupScanning: '🔄 <b>正在扫描需要清理的用户...</b>',
+  /** 清理失败提示（HTML；msg 为错误描述的原始文本，内部统一转义） */
   cleanupFailed(msg) {
-    return `❌ <b>清理过程出错</b>\n\n错误信息: <code>${msg}</code>`;
+    return `❌ <b>清理过程出错</b>\n\n错误信息: <code>${escapeHtml(msg)}</code>`;
   },
   /** 批量清理完成报告（HTML；cleanedUsers 为 {userId, title} 原始记录，内部统一转义） */
   cleanupReport({ scannedCount = 0, cleanedCount = 0, errorCount = 0, cleanedUsers = [], maxDisplay = 20 } = {}) {
@@ -213,11 +218,12 @@ export const ADMIN_COPY = {
   cbOperationFailed: '操作失败，请重试',
   kvNotBoundNotes: '❌ KV 未绑定，无法搜索备注',
   d1NotBoundFind: '❌ D1 未绑定，无法搜索',
+  /** 搜索失败提示（HTML；msg 为错误描述的原始文本，内部统一转义） */
   notesSearchFailed(msg) {
-    return `❌ 备注搜索失败: ${msg}`;
+    return `❌ 备注搜索失败: ${escapeHtml(msg)}`;
   },
   searchFailed(msg) {
-    return `❌ 搜索失败: ${msg}`;
+    return `❌ 搜索失败: ${escapeHtml(msg)}`;
   },
   /** v1:* 资料卡回调与后台菜单文案 */
   adminMenuTitle: '管理后台',

@@ -129,6 +129,28 @@ describe('user-copy', () => {
     expect(ADMIN_COPY.commandsSynced(23)).toContain('23');
   });
 
+  it('词库/备注/错误描述文案内部统一转义（与 cleanupReport 同一契约，调用方传原始值）', () => {
+    expect(ADMIN_COPY.wordExists('<词>')).toContain('「&lt;词&gt;」');
+    expect(ADMIN_COPY.wordAdded('<词>', 2)).toContain('「&lt;词&gt;」');
+    expect(ADMIN_COPY.wordAdded('<词>', 2)).toContain('<b>2</b>');
+    expect(ADMIN_COPY.wordHardcoded('<词>')).toContain('「&lt;词&gt;」');
+    expect(ADMIN_COPY.wordMissing('<词>')).toContain('「&lt;词&gt;」');
+    expect(ADMIN_COPY.wordDeleted('<词>', 1)).toContain('「&lt;词&gt;」');
+    expect(ADMIN_COPY.noteSaved('<备注>')).toContain('&lt;备注&gt;');
+    expect(ADMIN_COPY.noteView('<备注>')).toContain('&lt;备注&gt;');
+    expect(ADMIN_COPY.banNotifyFailed('<错误>')).toContain('&lt;错误&gt;');
+    expect(ADMIN_COPY.cleanupFailed('<错误>')).toContain('&lt;错误&gt;');
+    expect(ADMIN_COPY.notesSearchFailed('<错误>')).toContain('&lt;错误&gt;');
+    expect(ADMIN_COPY.searchFailed('<错误>')).toContain('&lt;错误&gt;');
+    // 转发失败报告的四段描述同样内部转义，但保留自身 HTML 结构
+    const fwd = ADMIN_COPY.forwardTotalFail('<u>', '<t>', '<f>', '<c>');
+    expect(fwd).toContain('<code>&lt;u&gt;</code>');
+    expect(fwd).toContain('<code>&lt;t&gt;</code>');
+    expect(fwd).toContain('<code>&lt;f&gt;</code>');
+    expect(fwd).toContain('<code>&lt;c&gt;</code>');
+    expect(fwd).toContain('<b>消息转发完全失败</b>');
+  });
+
   it('cleanup 报告统计、转义与截断一致', () => {
     const report = ADMIN_COPY.cleanupReport({
       scannedCount: 5,

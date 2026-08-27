@@ -89,7 +89,7 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.3.5';
+const GATEWAY_VERSION = '1.3.6';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -1551,10 +1551,10 @@ async function handleForwardFailure(res, msg, userId, threadId, env) {
       env,
       'forward_failed',
       ADMIN_COPY.forwardTotalFail(
-        escapeHtml(String(userId)),
-        escapeHtml(String(threadId)),
-        escapeHtml(res.description || ''),
-        escapeHtml(copyRes.description || ''),
+        String(userId),
+        String(threadId),
+        res.description || '',
+        copyRes.description || '',
       ),
     );
   }
