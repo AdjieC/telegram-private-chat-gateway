@@ -2417,6 +2417,7 @@ function createAdminActions(deps) {
     logger
   } = deps;
   const readSafely = (work, fallback) => Promise.resolve().then(work).catch(() => fallback);
+  const HOURLY_NOTICE_TTL_SECONDS2 = 3600;
   async function panel(env, threadId, userId) {
     const [resolvedFrom, ban2, muted, rec, note2, d1User, verification] = await Promise.all([
       readSafely(
@@ -2759,7 +2760,7 @@ function createAdminActions(deps) {
         parse_mode: "HTML"
       });
     } else {
-      await env.TOPIC_MAP.put(noticeKey.ban(userId), "1", { expirationTtl: 3600 });
+      await env.TOPIC_MAP.put(noticeKey.ban(userId), "1", { expirationTtl: HOURLY_NOTICE_TTL_SECONDS2 });
     }
   }
   async function unban(env, threadId, userId) {
@@ -3261,7 +3262,7 @@ function createVerificationModule(deps) {
       const parts = data.split(":");
       if (parts.length !== 3) return;
       const verifyId = parts[1];
-      const selectedIndex = parseInt(parts[2]);
+      const selectedIndex = parseInt(parts[2], 10);
       const userId = query.from.id;
       const stateStr = await env.TOPIC_MAP.get(`chal:${verifyId}`);
       if (!stateStr) {
@@ -3643,7 +3644,7 @@ function createSpamModule(deps) {
         reasons.push("new_user_link");
         details.linkBlockRemainingHours = Math.ceil(config.NEW_USER_LINK_BLOCK_SECONDS / 3600);
       } else {
-        const elapsed = (Date.now() - parseInt(verifyTs)) / 1e3;
+        const elapsed = (Date.now() - parseInt(verifyTs, 10)) / 1e3;
         if (elapsed < config.NEW_USER_LINK_BLOCK_SECONDS) {
           const remainingHours = Math.ceil((config.NEW_USER_LINK_BLOCK_SECONDS - elapsed) / 3600);
           reasons.push("new_user_link");
@@ -3664,14 +3665,14 @@ function createSpamModule(deps) {
   }
   async function updateSpamStats(env, reasons) {
     try {
-      await Promise.all((reasons || []).map(async (reason) => {
-        const countKey = `stats:spam:${reason}`;
-        const current = parseInt(await env.TOPIC_MAP.get(countKey) || "0");
+      const countKeys = [
+        ...(reasons || []).map((reason) => `stats:spam:${reason}`),
+        "stats:spam:total"
+      ];
+      await Promise.all(countKeys.map(async (countKey) => {
+        const current = parseInt(await env.TOPIC_MAP.get(countKey) || "0", 10);
         await env.TOPIC_MAP.put(countKey, String(current + 1), { expirationTtl: SPAM_STATS_TTL_SECONDS });
       }));
-      const totalKey = "stats:spam:total";
-      const total = parseInt(await env.TOPIC_MAP.get(totalKey) || "0");
-      await env.TOPIC_MAP.put(totalKey, String(total + 1), { expirationTtl: SPAM_STATS_TTL_SECONDS });
     } catch (e) {
       logger.warn("spam_stats_update_failed", { error: e.message });
     }
@@ -5495,7 +5496,7 @@ var CONFIG = {
   RETRY_COUNT_TTL_SECONDS: 3600
   // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.3.6";
+var GATEWAY_VERSION = "1.3.7";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
@@ -6192,7 +6193,7 @@ var legacyApp = {
             try {
               await tgCall(normalizedEnv, "deleteMessage", {
                 chat_id: Number(userId),
-                message_id: parseInt(verifyMsgId)
+                message_id: parseInt(verifyMsgId, 10)
               });
             } catch (e) {
             }

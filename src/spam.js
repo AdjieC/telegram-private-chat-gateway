@@ -136,7 +136,7 @@ export function createSpamModule(deps) {
         reasons.push('new_user_link');
         details.linkBlockRemainingHours = Math.ceil(config.NEW_USER_LINK_BLOCK_SECONDS / 3600);
       } else {
-        const elapsed = (Date.now() - parseInt(verifyTs)) / 1000;
+        const elapsed = (Date.now() - parseInt(verifyTs, 10)) / 1000;
         if (elapsed < config.NEW_USER_LINK_BLOCK_SECONDS) {
           const remainingHours = Math.ceil((config.NEW_USER_LINK_BLOCK_SECONDS - elapsed) / 3600);
           reasons.push('new_user_link');
@@ -166,15 +166,16 @@ export function createSpamModule(deps) {
    */
   async function updateSpamStats(env, reasons) {
     try {
-      // 各原因计数并行写入，缩短 waitUntil 内滞留时间
-      await Promise.all((reasons || []).map(async (reason) => {
-        const countKey = `stats:spam:${reason}`;
-        const current = parseInt(await env.TOPIC_MAP.get(countKey) || "0");
+      // 各原因计数与总计并入同一并行批写入，缩短 waitUntil 内滞留时间。
+      // KV 无原子递增，重复原因/并发调用可能丢失一次更新，计数仅供参考
+      const countKeys = [
+        ...(reasons || []).map((reason) => `stats:spam:${reason}`),
+        'stats:spam:total',
+      ];
+      await Promise.all(countKeys.map(async (countKey) => {
+        const current = parseInt(await env.TOPIC_MAP.get(countKey) || "0", 10);
         await env.TOPIC_MAP.put(countKey, String(current + 1), { expirationTtl: SPAM_STATS_TTL_SECONDS });
       }));
-      const totalKey = 'stats:spam:total';
-      const total = parseInt(await env.TOPIC_MAP.get(totalKey) || "0");
-      await env.TOPIC_MAP.put(totalKey, String(total + 1), { expirationTtl: SPAM_STATS_TTL_SECONDS });
     } catch (e) {
       logger.warn('spam_stats_update_failed', { error: e.message });
     }

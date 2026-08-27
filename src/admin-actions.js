@@ -47,6 +47,9 @@ export function createAdminActions(deps) {
     Promise.resolve().then(work).catch(() => fallback)
   );
 
+  // 封禁/静音提醒节流 TTL：与 worker.js HOURLY_NOTICE_TTL_SECONDS 同口径（每小时最多提醒一次）
+  const HOURLY_NOTICE_TTL_SECONDS = 3600;
+
   async function panel(env, threadId, userId) {
     const [resolvedFrom, ban, muted, rec, note, d1User, verification] = await Promise.all([
       readSafely(
@@ -418,7 +421,7 @@ export function createAdminActions(deps) {
         parse_mode: 'HTML',
       });
     } else {
-      await env.TOPIC_MAP.put(noticeKey.ban(userId), '1', { expirationTtl: 3600 });
+      await env.TOPIC_MAP.put(noticeKey.ban(userId), '1', { expirationTtl: HOURLY_NOTICE_TTL_SECONDS });
     }
   }
 

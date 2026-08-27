@@ -299,7 +299,7 @@ export function createVerificationModule(deps) {
       if (parts.length !== 3) return;
 
       const verifyId = parts[1];
-      const selectedIndex = parseInt(parts[2]);
+      const selectedIndex = parseInt(parts[2], 10);
       const userId = query.from.id;
 
       const stateStr = await env.TOPIC_MAP.get(`chal:${verifyId}`);

@@ -89,7 +89,7 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.3.6';
+const GATEWAY_VERSION = '1.3.7';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -955,7 +955,7 @@ const legacyApp = {
             try {
               await tgCall(normalizedEnv, "deleteMessage", {
                 chat_id: Number(userId),
-                message_id: parseInt(verifyMsgId)
+                message_id: parseInt(verifyMsgId, 10)
               });
             } catch (e) {
               // 消息可能已被删除，忽略
