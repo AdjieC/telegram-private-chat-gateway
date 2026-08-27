@@ -189,4 +189,32 @@ describe('logger', () => {
     expect(small).toContain('"a":1');
     expect(small).not.toContain('truncated');
   });
+
+  it('截断按 UTF-8 字节计：中文内容不超 32KB（Cloudflare 配额按字节计）', () => {
+    const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const logger = createLogger({}, sink);
+
+    logger.info('big_cjk', { payload: '汉'.repeat(30000) });
+    const out = sink.info.mock.calls[0][0];
+    expect(out.endsWith('…[truncated]')).toBe(true);
+    const byteLength = new TextEncoder().encode(out).byteLength;
+    expect(byteLength).toBeLessThanOrEqual(32 * 1024);
+    expect(out).not.toContain('�');
+  });
+
+  it('截断不截断 UTF-16 代理对：emoji 内容无孤立代理项乱码', () => {
+    const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const logger = createLogger({}, sink);
+
+    logger.info('big_emoji', { payload: '🙂'.repeat(20000) });
+    const out = sink.info.mock.calls[0][0];
+    const byteLength = new TextEncoder().encode(out).byteLength;
+    expect(byteLength).toBeLessThanOrEqual(32 * 1024);
+    // 孤立代理项在编码为 UTF-8 时会变成 U+FFFD 替换字符
+    expect(out).not.toContain('�');
+    // suffix 前最后一个码元不得是 high surrogate
+    const beforeSuffix = out.slice(0, out.length - '…[truncated]'.length);
+    const lastCode = beforeSuffix.charCodeAt(beforeSuffix.length - 1);
+    expect(lastCode >= 0xd800 && lastCode <= 0xdbff).toBe(false);
+  });
 });

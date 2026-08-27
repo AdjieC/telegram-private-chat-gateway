@@ -2051,9 +2051,19 @@ function errorMessage(value) {
 var LOG_MAX_BYTES = 32 * 1024;
 var LOG_TRUNCATED_SUFFIX = "\u2026[truncated]";
 function capLogLine(output) {
-  if (output.length <= LOG_MAX_BYTES) return output;
-  const keep = LOG_MAX_BYTES - LOG_TRUNCATED_SUFFIX.length;
-  return `${output.slice(0, keep)}${LOG_TRUNCATED_SUFFIX}`;
+  if (output.length * 3 <= LOG_MAX_BYTES) return output;
+  const encoder = new TextEncoder();
+  if (encoder.encode(output).byteLength <= LOG_MAX_BYTES) return output;
+  const budget = LOG_MAX_BYTES - encoder.encode(LOG_TRUNCATED_SUFFIX).byteLength;
+  let bytes = 0;
+  let end = 0;
+  for (const char of output) {
+    const charBytes = encoder.encode(char).byteLength;
+    if (bytes + charBytes > budget) break;
+    bytes += charBytes;
+    end += char.length;
+  }
+  return `${output.slice(0, end)}${LOG_TRUNCATED_SUFFIX}`;
 }
 function createLogger(baseContext = {}, sink = console, options = {}) {
   const { onError } = options;
@@ -5472,7 +5482,7 @@ var CONFIG = {
   RETRY_COUNT_TTL_SECONDS: 3600
   // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.3.2";
+var GATEWAY_VERSION = "1.3.3";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();

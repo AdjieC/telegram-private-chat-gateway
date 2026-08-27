@@ -81,14 +81,30 @@ function errorMessage(value) {
   return String(value);
 }
 
-/** 单条日志输出长度上限：超出部分截断并追加标记，避免超长负载撑爆 Cloudflare 日志配额 */
+/** 单条日志输出长度上限（UTF-8 字节）：超出部分截断并追加标记，避免超长负载撑爆 Cloudflare 日志配额 */
 const LOG_MAX_BYTES = 32 * 1024;
 const LOG_TRUNCATED_SUFFIX = '…[truncated]';
 
+/**
+ * 按 UTF-8 字节上限截断日志行。
+ * output.length 是 UTF-16 码元数而非字节数：中文 1 字符占 3 字节，按码元截断会放大约 3 倍；
+ * 截断按码点边界推进（for...of 逐码点），避免截断代理对产生 U+FFFD 乱码。
+ */
 function capLogLine(output) {
-  if (output.length <= LOG_MAX_BYTES) return output;
-  const keep = LOG_MAX_BYTES - LOG_TRUNCATED_SUFFIX.length;
-  return `${output.slice(0, keep)}${LOG_TRUNCATED_SUFFIX}`;
+  // 快速路径：每码元最多 3 UTF-8 字节（BMP），码元数不超上限 1/3 时字节数必不超
+  if (output.length * 3 <= LOG_MAX_BYTES) return output;
+  const encoder = new TextEncoder();
+  if (encoder.encode(output).byteLength <= LOG_MAX_BYTES) return output;
+  const budget = LOG_MAX_BYTES - encoder.encode(LOG_TRUNCATED_SUFFIX).byteLength;
+  let bytes = 0;
+  let end = 0;
+  for (const char of output) {
+    const charBytes = encoder.encode(char).byteLength;
+    if (bytes + charBytes > budget) break;
+    bytes += charBytes;
+    end += char.length; // 代理对 char.length 为 2，按码元推进保证不截在半截代理对上
+  }
+  return `${output.slice(0, end)}${LOG_TRUNCATED_SUFFIX}`;
 }
 
 export function createLogger(baseContext = {}, sink = console, options = {}) {
