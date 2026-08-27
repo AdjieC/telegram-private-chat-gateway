@@ -10,9 +10,17 @@ describe('verify-copy', () => {
   it('挑战与成功文案使用统一 HTML 口径', () => {
     expect(VERIFY_COPY.turnstileChallenge).toMatch(/人机验证/);
     expect(VERIFY_COPY.turnstileChallenge).toMatch(/<b>/);
-    expect(VERIFY_COPY.quizChallenge('1+1=?')).toContain('1+1=?');
+    expect(VERIFY_COPY.quizChallenge('1+1=?', 5)).toContain('1+1=?');
     expect(VERIFY_COPY.successBody).toMatch(/验证成功/);
     expect(VERIFY_COPY.successBodyWithPending).toMatch(/送达/);
+  });
+
+  it('题库挑战文案注入有效期分钟数，避免与 VERIFY_EXPIRE_SECONDS 漂移', () => {
+    expect(VERIFY_COPY.quizChallenge('1+1=?', 5)).toContain('约 5 分钟内有效');
+    expect(VERIFY_COPY.quizChallenge('1+1=?', 10)).toContain('约 10 分钟内有效');
+    // 非法输入兜底为 1 分钟，不出现 NaN/undefined
+    expect(VERIFY_COPY.quizChallenge('1+1=?')).toContain('约 1 分钟内有效');
+    expect(VERIFY_COPY.quizChallenge('1+1=?')).not.toContain('undefined');
   });
 
   it('失败/过期提示可区分', () => {

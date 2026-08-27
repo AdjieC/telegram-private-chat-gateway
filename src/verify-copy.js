@@ -7,9 +7,10 @@ export const VERIFY_COPY = {
   turnstileChallenge:
     '🛡 <b>人机验证</b>\n\n请点击下方按钮完成验证。\n通过后您刚才的消息会自动送达管理员。',
 
-  /** 本地题库提示 */
-  quizChallenge(question) {
-    return `🛡 <b>人机验证</b>\n\n${question}\n\n请点击下方按钮作答；答对后消息会自动送达。`;
+  /** 本地题库提示（expireMinutes 由调用方按 VERIFY_EXPIRE_SECONDS 换算注入，防文案与配置漂移） */
+  quizChallenge(question, expireMinutes) {
+    const minutes = Math.max(1, Math.round(Number(expireMinutes) || 0));
+    return `🛡 <b>人机验证</b>\n\n${question}\n\n请点击下方按钮作答（约 ${minutes} 分钟内有效）；答对后消息会自动送达。`;
   },
 
   buttonTurnstile: '🔐 点击验证',

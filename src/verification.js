@@ -278,7 +278,8 @@ export function createVerificationModule(deps) {
     // 发送验证题目
     const quizMsg = await tgCall(env, "sendMessage", {
       chat_id: userId,
-      text: VERIFY_COPY.quizChallenge(escapeHtml(challenge.question)),
+      // 有效期分钟数按 VERIFY_EXPIRE_SECONDS 换算注入，避免文案与配置漂移
+      text: VERIFY_COPY.quizChallenge(escapeHtml(challenge.question), config.VERIFY_EXPIRE_SECONDS / 60),
       parse_mode: "HTML",
       reply_markup: keyboard
     });

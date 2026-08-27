@@ -1530,7 +1530,7 @@ var USER_COPY = {
     return [
       "\u{1F44B} <b>\u79C1\u804A\u7F51\u5173</b>",
       "",
-      "\u76F4\u63A5\u53D1\u9001\u6587\u5B57 / \u56FE\u7247 / \u6587\u4EF6\u5373\u53EF\u8054\u7CFB\u7BA1\u7406\u5458\u3002",
+      "\u76F4\u63A5\u53D1\u9001\u6587\u5B57 / \u56FE\u7247 / \u6587\u4EF6\u5373\u53EF\u8054\u7CFB\u7BA1\u7406\u5458\uFF1B\u4E00\u6B21\u53D1\u9001\u591A\u5F20\u56FE\u7247\u4F1A\u6309\u76F8\u518C\u5408\u5E76\u9001\u8FBE\u3002",
       "",
       "<b>\u5E38\u89C1\u95EE\u9898</b>",
       "\u2022 \u63D0\u793A\u300C\u4EBA\u673A\u9A8C\u8BC1\u300D\u2014 \u70B9\u6309\u94AE\u7B54\u9898\u6216\u6253\u5F00\u7F51\u9875\u5B8C\u6210\uFF0C\u7B54\u5BF9\u540E\u6D88\u606F\u81EA\u52A8\u9001\u8FBE",
@@ -1542,6 +1542,7 @@ var USER_COPY = {
       "<b>\u547D\u4EE4</b>",
       "\u2022 /start \u2014 \u5F00\u59CB\u6216\u91CD\u65B0\u9A8C\u8BC1",
       "\u2022 /help \u2014 \u672C\u8BF4\u660E",
+      "\u2022 /cancel \u2014 \u53D6\u6D88\u8FDB\u884C\u4E2D\u7684\u64CD\u4F5C\uFF08\u5185\u5BB9\u4E0D\u4F1A\u8F6C\u53D1\u7ED9\u7BA1\u7406\u5458\uFF09",
       "",
       "<i>\u8BF7\u52FF\u5728\u6B64\u4F7F\u7528\u7BA1\u7406\u6307\u4EE4\uFF1B\u7BA1\u7406\u64CD\u4F5C\u4EC5\u5728\u8D85\u7EA7\u7FA4\u8BDD\u9898\u5185\u6709\u6548\u3002</i>"
     ].join("\n");
@@ -2992,13 +2993,14 @@ function createAdminActions(deps) {
 var VERIFY_COPY = {
   /** Turnstile 私聊提示 */
   turnstileChallenge: "\u{1F6E1} <b>\u4EBA\u673A\u9A8C\u8BC1</b>\n\n\u8BF7\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u5B8C\u6210\u9A8C\u8BC1\u3002\n\u901A\u8FC7\u540E\u60A8\u521A\u624D\u7684\u6D88\u606F\u4F1A\u81EA\u52A8\u9001\u8FBE\u7BA1\u7406\u5458\u3002",
-  /** 本地题库提示 */
-  quizChallenge(question) {
+  /** 本地题库提示（expireMinutes 由调用方按 VERIFY_EXPIRE_SECONDS 换算注入，防文案与配置漂移） */
+  quizChallenge(question, expireMinutes) {
+    const minutes = Math.max(1, Math.round(Number(expireMinutes) || 0));
     return `\u{1F6E1} <b>\u4EBA\u673A\u9A8C\u8BC1</b>
 
 ${question}
 
-\u8BF7\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u4F5C\u7B54\uFF1B\u7B54\u5BF9\u540E\u6D88\u606F\u4F1A\u81EA\u52A8\u9001\u8FBE\u3002`;
+\u8BF7\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u4F5C\u7B54\uFF08\u7EA6 ${minutes} \u5206\u949F\u5185\u6709\u6548\uFF09\uFF1B\u7B54\u5BF9\u540E\u6D88\u606F\u4F1A\u81EA\u52A8\u9001\u8FBE\u3002`;
   },
   buttonTurnstile: "\u{1F510} \u70B9\u51FB\u9A8C\u8BC1",
   /** 验证请求触发速率限制（minutes 由调用方按窗口秒数换算，保持口径一致） */
@@ -3237,7 +3239,8 @@ function createVerificationModule(deps) {
     const keyboard = buildQuizKeyboard(challenge.options, verifyId, config.BUTTON_COLUMNS);
     const quizMsg = await tgCall2(env, "sendMessage", {
       chat_id: userId,
-      text: VERIFY_COPY.quizChallenge(escapeHtml(challenge.question)),
+      // 有效期分钟数按 VERIFY_EXPIRE_SECONDS 换算注入，避免文案与配置漂移
+      text: VERIFY_COPY.quizChallenge(escapeHtml(challenge.question), config.VERIFY_EXPIRE_SECONDS / 60),
       parse_mode: "HTML",
       reply_markup: keyboard
     });
@@ -5482,7 +5485,7 @@ var CONFIG = {
   RETRY_COUNT_TTL_SECONDS: 3600
   // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.3.3";
+var GATEWAY_VERSION = "1.3.4";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();

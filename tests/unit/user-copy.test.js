@@ -109,6 +109,14 @@ describe('user-copy', () => {
     expect(help).not.toContain('undefined');
   });
 
+  it('帮助正文命令清单与实际支持一致（/cancel、相册合并）', () => {
+    const help = USER_COPY.helpText(1);
+    // worker.js 私聊路径支持 /cancel（无操作不转发），帮助不得漏列
+    expect(help).toContain('/cancel');
+    // 媒体组会合并为相册转发，帮助应如实说明
+    expect(help).toContain('相册');
+  });
+
   it('管理提示文案收拢齐全', () => {
     expect(ADMIN_COPY.noPermissionHint).toContain('无管理权限');
     expect(ADMIN_COPY.threadNotLinked).toContain('未关联用户');
