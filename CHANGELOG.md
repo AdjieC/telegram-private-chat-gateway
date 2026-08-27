@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### 性能
+
+- **转发前置 KV 读并行化**：`forwardToTopic` 的 `needs_verify` / 用户话题记录 / 重试计数三项独立 KV 读由串行改为 `Promise.all` 并行，每条用户消息减少两次串行 KV 往返。
+- **thread→user 映射补建缓存**：映射建立后不再变化，新增进程内有界缓存（10 分钟 TTL），命中即跳过此前每条转发消息一次的补建 KV 读。
+
+### 日志
+
+- **日志截断按 UTF-8 字节计**：`capLogLine` 原按 UTF-16 码元数截断，中文内容实际字节数可达上限 3 倍；改为按字节截断并按码点边界推进，不再截断代理对产生 U+FFFD 乱码。
+
+### 体验
+
+- **`/help` 命令清单补全**：补充 `/cancel`（取消操作不转发）与相册合并发送说明，帮助文案与实际支持行为一致。
+- **题库验证文案告知有效期**：`quizChallenge` 注入有效期分钟数（按 `VERIFY_EXPIRE_SECONDS` 换算），用户答题前可知时限。
+- **验证页 noscript 降级引导**：禁用 JavaScript 的浏览器显示启用指引，不再面对无提示的静态卡片。
+- **验证错误页标题与页脚修正**：标题由「人机验证」改为「验证不可用」与页内状态一致；页脚改为品牌行，下一步引导统一由注入的 hint 承担，不再重复显示。
+
+### 一致性
+
+- **管理文案转义收敛**：`wordExists/wordAdded/wordHardcoded/wordMissing/wordDeleted/noteSaved/noteView/banNotifyFailed/cleanupFailed/notesSearchFailed/searchFailed/forwardTotalFail` 改为函数内部统一转义（与 `cleanupReport` 同一契约），调用方不再各自 `escapeHtml`，消除隐式契约导致的双重转义/漏转义风险。
+- **`parseInt` 统一 radix**：`verification.js`、`spam.js`、`worker.js` 中 5 处省略 radix 的 `parseInt` 统一补 `10`。
+- **spam 统计总计并行化**：`updateSpamStats` 的 `stats:spam:total` 并入原因计数同一并行批写入，缩短 waitUntil 滞留时间。
+
+### 健壮性
+
+- **修复验证页内联脚本整体 `SyntaxError`（生产 P0）**：`onTurnstileError` 技术详情行的 `'\n'` 处于 JS 模板字面量内，渲染时被求值为真实换行，导致验证页 `<script>` 块整体解析失败——`onTurnstileSuccess/onTurnstileError` 回调不存在（Turnstile 报 400020，用户无法完成网页验证）、状态提示与主题切换全部失效。改为 `'\\n'` 输出字面转义；字符串断言型单测无法发现此类问题，新增「渲染输出脚本经 `node:vm` 编译」防回归测试，并以真实浏览器（CDP）完成亮色/暗色/JS 禁用/组件报错四条渲染回归。
+- **修复 `notifyAdmin` 缺失导致的告警丢失**：a0822bd 误删 `notifyAdmin` 定义但残留调用——forwardMessage 与 copyMessage 双失败时抛 `ReferenceError`，管理员收不到「转发完全失败」告警（反而给用户报「系统繁忙」）。已恢复实现（同类型按 `ALERT_THROTTLE_MS` 节流、发送失败不影响主流程），并补集成测试锁定该路径。
+- **私聊兜底通知防二次抛出**：`systemBusy` 兜底发送自身失败时仅告警不再抛出，「私聊路径永不 5xx」的设计意图不再依赖 `tgCall` 不抛错的隐含前提。
+- **命名遮蔽与魔术数字清理**：`sendHourlyNotice` 参数 `noticeKey` 重命名为 `kvKey`（遮蔽 utils 导入的 `noticeKey`）；`admin-actions` 封禁提醒 TTL 提取为 `HOURLY_NOTICE_TTL_SECONDS` 常量，与 worker 同口径。
+
+### 测试
+
+- 新增：日志中文/emoji 截断字节上限与代理对边界、`/help` 命令清单一致性、题库挑战有效期注入、验证页 noscript、错误页标题与页脚去重、管理文案内部转义契约、forward/copy 双失败管理员告警。
+
 ### 健壮性
 
 - **Turnstile siteverify 错误码可读化**：验证页为 `timeout-or-duplicate` / `invalid-input-secret` / `bad-request` / `missing-input-response` / `invalid-input-response` 等常见服务端错误码补充用户可读文案，未映射错误码仍走兜底展示。
