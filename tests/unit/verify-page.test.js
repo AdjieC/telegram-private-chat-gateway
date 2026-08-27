@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import vm from 'node:vm';
 import { renderVerifyPage, renderVerifyErrorPage } from '../../src/verify-page.js';
 
 describe('verify-page', () => {
@@ -165,6 +166,16 @@ describe('verify-page', () => {
     expect(page).toContain("document.querySelector('.turnstile-container')");
     // 键盘用户：成功后聚焦返回按钮
     expect(page).toContain("backBtn.focus()");
+  });
+
+  it('渲染输出的内联脚本语法有效（模板字符串内 JS 转义序列防回归）', () => {
+    // 模板字面量会把 '\n' 求值为真实换行，导致输出脚本 SyntaxError（生产曾因此全块脚本失效）；
+    // 字符串断言无法发现此类问题，必须用真实解析器编译验证。
+    const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const source of scripts) {
+      expect(() => new vm.Script(source)).not.toThrow();
+    }
   });
 });
 

@@ -5369,8 +5369,8 @@ function onTurnstileError(errorCode) {
   var wrap = document.getElementById('tech-wrap');
   var detailEl = document.getElementById('tech-detail');
   if (wrap && detailEl) {
-    detailEl.textContent = (code ? '\u9519\u8BEF\u7801: ' + code + '
-' : '') + (hint || '\u672A\u77E5\u9519\u8BEF');
+    // \u6CE8\u610F\uFF1A\u672C\u6A21\u677F\u662F JS \u6A21\u677F\u5B57\u9762\u91CF\uFF0C\u811A\u672C\u5185\u9700\u8981\u5B57\u9762\u6362\u884C\u8F6C\u4E49\u65F6\u5FC5\u987B\u53CC\u5199\u53CD\u659C\u6760\uFF0C\u5426\u5219\u6E32\u67D3\u8F93\u51FA\u4E3A\u771F\u5B9E\u6362\u884C\u5BFC\u81F4 SyntaxError
+    detailEl.textContent = (code ? '\u9519\u8BEF\u7801: ' + code + '\\n' : '') + (hint || '\u672A\u77E5\u9519\u8BEF');
     wrap.hidden = false;
   }
 }
@@ -5472,7 +5472,7 @@ var CONFIG = {
   RETRY_COUNT_TTL_SECONDS: 3600
   // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.2.9";
+var GATEWAY_VERSION = "1.3.0";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();

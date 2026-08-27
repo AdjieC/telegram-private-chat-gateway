@@ -216,7 +216,8 @@ function onTurnstileError(errorCode) {
   var wrap = document.getElementById('tech-wrap');
   var detailEl = document.getElementById('tech-detail');
   if (wrap && detailEl) {
-    detailEl.textContent = (code ? '错误码: ' + code + '\n' : '') + (hint || '未知错误');
+    // 注意：本模板是 JS 模板字面量，脚本内需要字面换行转义时必须双写反斜杠，否则渲染输出为真实换行导致 SyntaxError
+    detailEl.textContent = (code ? '错误码: ' + code + '\\n' : '') + (hint || '未知错误');
     wrap.hidden = false;
   }
 }
