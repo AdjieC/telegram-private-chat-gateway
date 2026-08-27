@@ -67,6 +67,7 @@ const VERIFY_PAGE_HTML = `<!DOCTYPE html>
 #tech-wrap summary{cursor:pointer;user-select:none;color:var(--sub)}
 #tech-detail{white-space:pre-wrap;word-break:break-all;margin-top:6px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .footer span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
+.noscript-tip{display:block;margin-top:14px;font-size:13px;line-height:1.6;color:var(--error-text);background:var(--error-bg);padding:10px 16px;border-radius:12px}
 </style>
 </head>
 <body>
@@ -78,6 +79,9 @@ const VERIFY_PAGE_HTML = `<!DOCTYPE html>
     <div class="cf-turnstile" data-sitekey="{{SITE_KEY}}" data-callback="onTurnstileSuccess" data-error-callback="onTurnstileError"></div>
   </div>
   <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
+  <noscript>
+    <p class="noscript-tip">当前浏览器已禁用 JavaScript，无法完成人机验证。请启用 JavaScript 后刷新本页，或改用系统浏览器打开链接。</p>
+  </noscript>
   <a id="back-btn" href="tg://resolve">📱 返回 Telegram</a>
   <details id="tech-wrap" hidden>
     <summary>技术详情（排障用）</summary>
@@ -261,7 +265,7 @@ const VERIFY_ERROR_PAGE_HTML = `<!DOCTYPE html>
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
 <meta name="format-detection" content="telephone=no">
-<title>人机验证</title>
+<title>验证不可用</title>
 <style>${VERIFY_SHARED_STYLE}
 .error{display:inline-flex;align-items:center;gap:7px;font-size:13px;line-height:1.5;color:var(--error-text);margin-top:14px;padding:9px 16px;border-radius:999px;background:var(--error-bg);border:1px solid transparent}
 </style>
@@ -273,7 +277,7 @@ const VERIFY_ERROR_PAGE_HTML = `<!DOCTYPE html>
   <p class="desc">{{DESC}}</p>
   <div class="error">❌ 无法继续验证</div>
   <a id="back-btn" href="tg://resolve">📱 返回 Telegram</a>
-  <div class="footer">请返回 Telegram 后向机器人重新发送消息获取新链接<br>
+  <div class="footer">私聊网关 · 人机验证<br>
     <a href="${GATEWAY_REPO}" target="_blank" rel="noopener noreferrer">项目地址 GitHub ↗</a>
   </div>
 </div>

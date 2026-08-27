@@ -177,6 +177,12 @@ describe('verify-page', () => {
       expect(() => new vm.Script(source)).not.toThrow();
     }
   });
+
+  it('禁用 JavaScript 时提供 noscript 降级引导（验证依赖 JS 提交）', () => {
+    expect(page).toContain('<noscript>');
+    expect(page).toContain('</noscript>');
+    expect(page).toMatch(/<noscript>[\s\S]*?JavaScript[\s\S]*?<\/noscript>/);
+  });
 });
 
 describe('verify-page error page', () => {
@@ -200,5 +206,20 @@ describe('verify-page error page', () => {
   it('message 与 hint 同时存在时以换行分隔', () => {
     const page = renderVerifyErrorPage({ message: '原因', hint: '引导' });
     expect(page).toContain('原因<br>引导');
+  });
+
+  it('错误页标题与「验证不可用」状态一致，便于多标签页识别', () => {
+    const page = renderVerifyErrorPage({ message: '原因' });
+    expect(page).toContain('<title>验证不可用</title>');
+  });
+
+  it('错误页页脚不重复注入的引导语（下一步引导归 hint，页脚只留品牌行）', () => {
+    const page = renderVerifyErrorPage({
+      message: '验证链接缺少必要参数或系统未配置 Turnstile。',
+      hint: '请返回 Telegram 后向机器人重新发送消息获取新链接。',
+    });
+    const occurrences = page.match(/重新发送消息获取新链接/g) || [];
+    expect(occurrences.length).toBe(1);
+    expect(page).toContain('私聊网关 · 人机验证');
   });
 });

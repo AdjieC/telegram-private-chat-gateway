@@ -5233,6 +5233,7 @@ var VERIFY_PAGE_HTML = `<!DOCTYPE html>
 #tech-wrap summary{cursor:pointer;user-select:none;color:var(--sub)}
 #tech-detail{white-space:pre-wrap;word-break:break-all;margin-top:6px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .footer span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
+.noscript-tip{display:block;margin-top:14px;font-size:13px;line-height:1.6;color:var(--error-text);background:var(--error-bg);padding:10px 16px;border-radius:12px}
 </style>
 </head>
 <body>
@@ -5244,6 +5245,9 @@ var VERIFY_PAGE_HTML = `<!DOCTYPE html>
     <div class="cf-turnstile" data-sitekey="{{SITE_KEY}}" data-callback="onTurnstileSuccess" data-error-callback="onTurnstileError"></div>
   </div>
   <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
+  <noscript>
+    <p class="noscript-tip">\u5F53\u524D\u6D4F\u89C8\u5668\u5DF2\u7981\u7528 JavaScript\uFF0C\u65E0\u6CD5\u5B8C\u6210\u4EBA\u673A\u9A8C\u8BC1\u3002\u8BF7\u542F\u7528 JavaScript \u540E\u5237\u65B0\u672C\u9875\uFF0C\u6216\u6539\u7528\u7CFB\u7EDF\u6D4F\u89C8\u5668\u6253\u5F00\u94FE\u63A5\u3002</p>
+  </noscript>
   <a id="back-btn" href="tg://resolve">\u{1F4F1} \u8FD4\u56DE Telegram</a>
   <details id="tech-wrap" hidden>
     <summary>\u6280\u672F\u8BE6\u60C5\uFF08\u6392\u969C\u7528\uFF09</summary>
@@ -5411,7 +5415,7 @@ var VERIFY_ERROR_PAGE_HTML = `<!DOCTYPE html>
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
 <meta name="format-detection" content="telephone=no">
-<title>\u4EBA\u673A\u9A8C\u8BC1</title>
+<title>\u9A8C\u8BC1\u4E0D\u53EF\u7528</title>
 <style>${VERIFY_SHARED_STYLE}
 .error{display:inline-flex;align-items:center;gap:7px;font-size:13px;line-height:1.5;color:var(--error-text);margin-top:14px;padding:9px 16px;border-radius:999px;background:var(--error-bg);border:1px solid transparent}
 </style>
@@ -5423,7 +5427,7 @@ var VERIFY_ERROR_PAGE_HTML = `<!DOCTYPE html>
   <p class="desc">{{DESC}}</p>
   <div class="error">\u274C \u65E0\u6CD5\u7EE7\u7EED\u9A8C\u8BC1</div>
   <a id="back-btn" href="tg://resolve">\u{1F4F1} \u8FD4\u56DE Telegram</a>
-  <div class="footer">\u8BF7\u8FD4\u56DE Telegram \u540E\u5411\u673A\u5668\u4EBA\u91CD\u65B0\u53D1\u9001\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5<br>
+  <div class="footer">\u79C1\u804A\u7F51\u5173 \xB7 \u4EBA\u673A\u9A8C\u8BC1<br>
     <a href="${GATEWAY_REPO}" target="_blank" rel="noopener noreferrer">\u9879\u76EE\u5730\u5740 GitHub \u2197</a>
   </div>
 </div>
@@ -5485,7 +5489,7 @@ var CONFIG = {
   RETRY_COUNT_TTL_SECONDS: 3600
   // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.3.4";
+var GATEWAY_VERSION = "1.3.5";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
