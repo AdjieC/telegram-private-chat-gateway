@@ -751,6 +751,28 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     expect(state.pending_ids).toEqual([]);
   });
 
+  it('forwardMessage 与 copyMessage 双失败时告警通知管理员（notifyAdmin 必须存在）', async () => {
+    const telegram = createTelegramMock({
+      forwardMessage: async () => ({ ok: false, error_code: 400, description: 'Bad Request: message to forward not found' }),
+      copyMessage: async () => ({ ok: false, error_code: 400, description: 'Bad Request: message to copy not found' }),
+    });
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv();
+    const userId = 889;
+    await preVerify(env, userId);
+    // 使用本文件未用过的 threadId，避免健康缓存跳过探测
+    await seedTopic(env, userId, 781);
+
+    const { response, flush } = await send(messageUpdate(privateMessage(userId, 802, { text: 'hi' }), 9802), env, telegram);
+    await flush();
+    expect(response.status).toBe(200);
+    // 双失败路径必须向超级群发出「转发完全失败」告警（a0822bd 曾误删 notifyAdmin 导致 ReferenceError）
+    const alert = telegram.calls.find(c => c.method === 'sendMessage'
+      && String(c.body.chat_id) === String(env.SUPERGROUP_ID)
+      && String(c.body.text || '').includes('转发完全失败'));
+    expect(alert).toBeTruthy();
+  });
+
   it('scheduled 失败被捕获记录而非产生未处理拒绝', async () => {
     const env = createMockEnv({ TG_BOT_DB: 'not-a-binding' });
     const pending = [];

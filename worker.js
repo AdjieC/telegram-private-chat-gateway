@@ -89,7 +89,7 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.3.0';
+const GATEWAY_VERSION = '1.3.1';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -1067,10 +1067,15 @@ const legacyApp = {
         // 同一条用户消息被重复转发（转发无幂等）。可重试标记机制仅用于
         // 回调等可安全重放的路径（edited_message / v1 回调）。
         // 不向用户泄露技术细节
-        await tgCall(normalizedEnv, "sendMessage", {
-          chat_id: msg.chat.id,
-          text: USER_COPY.systemBusy,
-        });
+        try {
+          await tgCall(normalizedEnv, "sendMessage", {
+            chat_id: msg.chat.id,
+            text: USER_COPY.systemBusy,
+          });
+        } catch (notifyError) {
+          // 兜底通知自身失败不得再抛出：上面的设计意图是私聊路径永不 5xx
+          Logger.warn('system_busy_notify_failed', { userId: msg.chat.id, error: notifyError?.message });
+        }
         Logger.error('private_message_failed', e, {
           userId: msg.chat.id,
           updateId: update?.update_id,
@@ -1107,16 +1112,17 @@ const legacyApp = {
 
 /**
  * 低频状态（封禁/静音）每小时最多提醒一次：避免用户反复发送时被重复打扰。
+ * @param {string} kvKey - 节流标记 KV 键（由 utils.noticeKey 生成；勿命名为 noticeKey 以免遮蔽导入）
  * @returns {Promise<boolean>} 本次是否实际发送了提醒
  */
-async function sendHourlyNotice(env, userId, noticeKey, text) {
+async function sendHourlyNotice(env, userId, kvKey, text) {
   try {
-    if (await env.TOPIC_MAP.get(noticeKey)) return false;
+    if (await env.TOPIC_MAP.get(kvKey)) return false;
     await tgCall(env, 'sendMessage', { chat_id: userId, text });
-    await env.TOPIC_MAP.put(noticeKey, '1', { expirationTtl: HOURLY_NOTICE_TTL_SECONDS });
+    await env.TOPIC_MAP.put(kvKey, '1', { expirationTtl: HOURLY_NOTICE_TTL_SECONDS });
     return true;
   } catch (e) {
-    Logger.warn('hourly_notice_failed', { userId, noticeKey, error: e?.message });
+    Logger.warn('hourly_notice_failed', { userId, noticeKey: kvKey, error: e?.message });
     return false;
   }
 }
@@ -1459,6 +1465,29 @@ async function handleForwardRedirect(res, msg, userId, threadId, env, reason) {
     pendingMsgId: msg?.message_id || res.result?.message_id,
     reason,
   });
+}
+
+/** 管理告警节流器：同类型告警 ALERT_THROTTLE_MS 内最多一条，防故障期告警刷屏 */
+const adminAlertThrottle = createThrottle({ windowMs: CONFIG.ALERT_THROTTLE_MS });
+
+/**
+ * 发送管理员告警到超级群（HTML 解析模式）。
+ * 同类型告警按 ALERT_THROTTLE_MS 节流；发送失败仅记录日志，不得影响主流程。
+ */
+async function notifyAdmin(env, type, text) {
+  if (!adminAlertThrottle(`admin_alert:${type}`)) {
+    Logger.warn('admin_alert_throttled', { type });
+    return;
+  }
+  try {
+    await tgCall(env, 'sendMessage', {
+      chat_id: env.SUPERGROUP_ID,
+      text,
+      parse_mode: 'HTML',
+    });
+  } catch (e) {
+    Logger.warn('admin_alert_failed', { type, error: e?.message });
+  }
 }
 
 /**

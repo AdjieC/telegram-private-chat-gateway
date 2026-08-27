@@ -5472,7 +5472,7 @@ var CONFIG = {
   RETRY_COUNT_TTL_SECONDS: 3600
   // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.3.0";
+var GATEWAY_VERSION = "1.3.1";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
@@ -6260,10 +6260,14 @@ var legacyApp = {
         }
         await handlePrivateMessage(msg, normalizedEnv, ctx);
       } catch (e) {
-        await tgCall(normalizedEnv, "sendMessage", {
-          chat_id: msg.chat.id,
-          text: USER_COPY.systemBusy
-        });
+        try {
+          await tgCall(normalizedEnv, "sendMessage", {
+            chat_id: msg.chat.id,
+            text: USER_COPY.systemBusy
+          });
+        } catch (notifyError) {
+          Logger.warn("system_busy_notify_failed", { userId: msg.chat.id, error: notifyError?.message });
+        }
         Logger.error("private_message_failed", e, {
           userId: msg.chat.id,
           updateId: update?.update_id
@@ -6290,14 +6294,14 @@ var legacyApp = {
     return new Response("OK");
   }
 };
-async function sendHourlyNotice(env, userId, noticeKey2, text) {
+async function sendHourlyNotice(env, userId, kvKey, text) {
   try {
-    if (await env.TOPIC_MAP.get(noticeKey2)) return false;
+    if (await env.TOPIC_MAP.get(kvKey)) return false;
     await tgCall(env, "sendMessage", { chat_id: userId, text });
-    await env.TOPIC_MAP.put(noticeKey2, "1", { expirationTtl: HOURLY_NOTICE_TTL_SECONDS });
+    await env.TOPIC_MAP.put(kvKey, "1", { expirationTtl: HOURLY_NOTICE_TTL_SECONDS });
     return true;
   } catch (e) {
-    Logger.warn("hourly_notice_failed", { userId, noticeKey: noticeKey2, error: e?.message });
+    Logger.warn("hourly_notice_failed", { userId, noticeKey: kvKey, error: e?.message });
     return false;
   }
 }
@@ -6554,6 +6558,22 @@ async function handleForwardRedirect(res, msg, userId, threadId, env, reason) {
     pendingMsgId: msg?.message_id || res.result?.message_id,
     reason
   });
+}
+var adminAlertThrottle = createThrottle({ windowMs: CONFIG.ALERT_THROTTLE_MS });
+async function notifyAdmin(env, type, text) {
+  if (!adminAlertThrottle(`admin_alert:${type}`)) {
+    Logger.warn("admin_alert_throttled", { type });
+    return;
+  }
+  try {
+    await tgCall(env, "sendMessage", {
+      chat_id: env.SUPERGROUP_ID,
+      text,
+      parse_mode: "HTML"
+    });
+  } catch (e) {
+    Logger.warn("admin_alert_failed", { type, error: e?.message });
+  }
 }
 async function handleForwardFailure(res, msg, userId, threadId, env) {
   const desc = normalizeTgDescription(res.description);
