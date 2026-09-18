@@ -66,6 +66,7 @@ const CONFIG = {
   RATE_LIMIT_MESSAGE: 45,
   RATE_LIMIT_VERIFY: 3,
   RATE_LIMIT_WINDOW: 60,
+  RATE_LIMIT_VERIFY_CALLBACK: 15,       // verify-callback IP 限流：15 次/分钟
   BUTTON_COLUMNS: 2,
   MAX_TITLE_LENGTH: 128,
   MAX_NAME_LENGTH: 30,
@@ -89,7 +90,7 @@ const CONFIG = {
 };
 
 /** 网关版本（展示于 /sysinfo） */
-const GATEWAY_VERSION = '1.3.8';
+const GATEWAY_VERSION = '1.3.9';
 
 /** 话题占位标题：资料缺失时建话题的兜底名称，出现即视为需要修复 */
 const TOPIC_TITLE_PLACEHOLDER = 'User';
@@ -838,7 +839,7 @@ const legacyApp = {
         const userId = url.searchParams.get('uid');
         const siteKey = (env.TURNSTILE_SITE_KEY || '').toString().trim();
 
-        if (!code || !userId || !siteKey) {
+        if (!code || !userId || !siteKey || !/^\d{1,20}$/.test(userId) || !/^[a-zA-Z0-9_-]{1,64}$/.test(code)) {
           const hint = siteKey
             ? VERIFY_COPY.pageErrorMissingParams.hintResend
             : VERIFY_COPY.pageErrorMissingParams.hintNoSiteKey;
@@ -904,6 +905,13 @@ const legacyApp = {
 
     // PR #12: Turnstile token 验证端点（由前端页面 JS fetch 调用）
     if ((url.pathname === "/verify-callback" || url.pathname.endsWith("/verify-callback")) && request.method === "POST") {
+      const clientIp = request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || 'unknown';
+      const ipRateLimit = await checkRateLimit(clientIp, env, 'verify_cb_ip', CONFIG.RATE_LIMIT_VERIFY_CALLBACK, 60);
+      if (!ipRateLimit.allowed) {
+        Logger.warn('turnstile_callback_rate_limited', { clientIp });
+        return verifyJsonResponse({ success: false, error: 'rate_limited' }, 429);
+      }
+
       let body;
       try {
         body = await request.json();
@@ -912,9 +920,21 @@ const legacyApp = {
         return verifyJsonResponse({ success: false, error: 'invalid_json' }, 400);
       }
       try {
-        const { token, code, userId } = body || {};
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          return verifyJsonResponse({ success: false, error: 'missing_params' }, 400);
+        }
 
-        if (!token || !code || !userId) {
+        const { token, code, userId } = body;
+
+        if (
+          typeof token !== 'string' ||
+          token.trim() === '' ||
+          token.length > 2048 ||
+          typeof code !== 'string' ||
+          !/^[a-zA-Z0-9_-]{1,64}$/.test(code) ||
+          (typeof userId !== 'string' && typeof userId !== 'number') ||
+          !/^\d{1,20}$/.test(String(userId))
+        ) {
           return verifyJsonResponse({ success: false, error: 'missing_params' }, 400);
         }
 
@@ -933,6 +953,11 @@ const legacyApp = {
         // 从 KV 验证 code 是否匹配
         const storedUserId = await env.TOPIC_MAP.get(`turnstile_code:${code}`);
         if (!storedUserId || storedUserId !== String(userId)) {
+          if (storedUserId) {
+            // 安全防御：code 存在但 userId 不匹配，视为探测或攻击尝试，立即清除该 code 防止继续爆破
+            await env.TOPIC_MAP.delete(`turnstile_code:${code}`);
+            Logger.warn('turnstile_code_mismatch_cleared', { userId, storedUserId, clientIp });
+          }
           return verifyJsonResponse({ success: false, error: 'code_invalid_or_expired' }, 403);
         }
 

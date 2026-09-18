@@ -5260,7 +5260,7 @@ var VERIFY_PAGE_HTML = `<!DOCTYPE html>
     <summary>\u6280\u672F\u8BE6\u60C5\uFF08\u6392\u969C\u7528\uFF09</summary>
     <div id="tech-detail"></div>
   </details>
-  <div class="footer" data-user-id="{{USER_ID}}" data-code="{{CODE}}">
+  <div class="footer" data-user-id="{{USER_ID}}" data-code="{{CODE}}" data-worker-url="{{WORKER_URL}}">
     <span id="footer-status">\u79C1\u804A\u7F51\u5173 \xB7 \u4EBA\u673A\u9A8C\u8BC1</span><br>
     <a href="${GATEWAY_REPO}" target="_blank" rel="noopener noreferrer">\u9879\u76EE\u5730\u5740 GitHub \u2197</a>
   </div>
@@ -5323,10 +5323,15 @@ function onTurnstileSuccess(token) {
   if (submitted) return;
   submitted = true;
   showStatus('\u2705 \u9A8C\u8BC1\u901A\u8FC7\uFF0C\u6B63\u5728\u901A\u77E5\u673A\u5668\u4EBA\u2026', 'loading');
-  fetch('{{WORKER_URL}}/verify-callback', {
+  var footer = document.querySelector('.footer');
+  var code = footer ? (footer.getAttribute('data-code') || '') : '';
+  var userId = footer ? (footer.getAttribute('data-user-id') || '') : '';
+  var workerUrl = footer ? (footer.getAttribute('data-worker-url') || '') : '';
+  var targetUrl = (workerUrl ? workerUrl : '') + '/verify-callback';
+  fetch(targetUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: token, code: '{{CODE}}', userId: '{{USER_ID}}' })
+    body: JSON.stringify({ token: token, code: code, userId: userId })
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
@@ -5345,6 +5350,7 @@ function onTurnstileSuccess(token) {
       if (backBtn) backBtn.focus();
     } else {
       var errMap = {
+        'rate_limited': '\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7A0D\u5019\u518D\u8BD5',
         'turnstile_failed': '\u4EBA\u673A\u9A8C\u8BC1\u672A\u901A\u8FC7\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u91CD\u8BD5',
         'code_invalid_or_expired': '\u9A8C\u8BC1\u94FE\u63A5\u5DF2\u8FC7\u671F\uFF08\u7EA6 {{VERIFY_EXPIRE_MINUTES}} \u5206\u949F\uFF09\uFF0C\u8BF7\u8FD4\u56DE Telegram \u91CD\u65B0\u53D1\u6D88\u606F\u83B7\u53D6\u65B0\u94FE\u63A5',
         'server_not_configured': '\u670D\u52A1\u5668\u672A\u5B8C\u6210\u914D\u7F6E\uFF0C\u8BF7\u8054\u7CFB\u7BA1\u7406\u5458',
@@ -5398,7 +5404,7 @@ function onTurnstileError(errorCode) {
     wrap.hidden = false;
   }
 }
-// \u521D\u59CB\u52A0\u8F7D\u6001\uFF1A\u811A\u672C\u672A\u5C31\u7EEA\u65F6\u663E\u793A\u52A0\u8F7D\u52A8\u753B\uFF08\u533A\u5206\u811A\u672C\u88AB\u5899\u4E0E widget \u914D\u7F6E\u9519\u8BEF\uFF09
+// \u521D\u59CB\u52A0\u8F7D\u72B6\u6001\uFF1A\u811A\u672C\u672A\u5C31\u7EEA\u65F6\u663E\u793A\u52A0\u8F7D\u52A8\u753B\uFF08\u533A\u5206\u811A\u672C\u88AB\u5899\u4E0E widget \u914D\u7F6E\u9519\u8BEF\uFF09
 showStatus('\u6B63\u5728\u52A0\u8F7D\u9A8C\u8BC1\u7EC4\u4EF6\u2026', 'loading');
 // \u811A\u672C\u957F\u65F6\u95F4\u672A\u5C31\u7EEA\u65F6\u7ED9\u51FA\u63D0\u793A\uFF08\u533A\u5206\u811A\u672C\u88AB\u5899\u4E0E widget \u914D\u7F6E\u9519\u8BEF\uFF09
 setTimeout(function() {
@@ -5464,6 +5470,8 @@ var CONFIG = {
   RATE_LIMIT_MESSAGE: 45,
   RATE_LIMIT_VERIFY: 3,
   RATE_LIMIT_WINDOW: 60,
+  RATE_LIMIT_VERIFY_CALLBACK: 15,
+  // verify-callback IP 限流：15 次/分钟
   BUTTON_COLUMNS: 2,
   MAX_TITLE_LENGTH: 128,
   MAX_NAME_LENGTH: 30,
@@ -5496,7 +5504,7 @@ var CONFIG = {
   RETRY_COUNT_TTL_SECONDS: 3600
   // 话题健康重试计数有效期：超过即视为从未失败，避免历史失败永久生效
 };
-var GATEWAY_VERSION = "1.3.8";
+var GATEWAY_VERSION = "1.3.9";
 var TOPIC_TITLE_PLACEHOLDER = "User";
 var HOURLY_NOTICE_TTL_SECONDS = 3600;
 var threadHealthCache = /* @__PURE__ */ new Map();
@@ -6102,7 +6110,7 @@ var legacyApp = {
         const code = url.searchParams.get("code");
         const userId = url.searchParams.get("uid");
         const siteKey = (env.TURNSTILE_SITE_KEY || "").toString().trim();
-        if (!code || !userId || !siteKey) {
+        if (!code || !userId || !siteKey || !/^\d{1,20}$/.test(userId) || !/^[a-zA-Z0-9_-]{1,64}$/.test(code)) {
           const hint = siteKey ? VERIFY_COPY.pageErrorMissingParams.hintResend : VERIFY_COPY.pageErrorMissingParams.hintNoSiteKey;
           return new Response(renderVerifyErrorPage({
             message: VERIFY_COPY.pageErrorMissingParams.message,
@@ -6154,6 +6162,12 @@ var legacyApp = {
       return new Response("Not Found", { status: 404 });
     }
     if ((url.pathname === "/verify-callback" || url.pathname.endsWith("/verify-callback")) && request.method === "POST") {
+      const clientIp = request.headers.get("cf-connecting-ip") || request.headers.get("x-real-ip") || "unknown";
+      const ipRateLimit = await checkRateLimit(clientIp, env, "verify_cb_ip", CONFIG.RATE_LIMIT_VERIFY_CALLBACK, 60);
+      if (!ipRateLimit.allowed) {
+        Logger.warn("turnstile_callback_rate_limited", { clientIp });
+        return verifyJsonResponse({ success: false, error: "rate_limited" }, 429);
+      }
       let body;
       try {
         body = await request.json();
@@ -6161,8 +6175,11 @@ var legacyApp = {
         return verifyJsonResponse({ success: false, error: "invalid_json" }, 400);
       }
       try {
-        const { token, code, userId } = body || {};
-        if (!token || !code || !userId) {
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          return verifyJsonResponse({ success: false, error: "missing_params" }, 400);
+        }
+        const { token, code, userId } = body;
+        if (typeof token !== "string" || token.trim() === "" || token.length > 2048 || typeof code !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(code) || typeof userId !== "string" && typeof userId !== "number" || !/^\d{1,20}$/.test(String(userId))) {
           return verifyJsonResponse({ success: false, error: "missing_params" }, 400);
         }
         const turnstileSecret = (env.TURNSTILE_SECRET_KEY || "").toString().trim();
@@ -6176,6 +6193,10 @@ var legacyApp = {
         }
         const storedUserId = await env.TOPIC_MAP.get(`turnstile_code:${code}`);
         if (!storedUserId || storedUserId !== String(userId)) {
+          if (storedUserId) {
+            await env.TOPIC_MAP.delete(`turnstile_code:${code}`);
+            Logger.warn("turnstile_code_mismatch_cleared", { userId, storedUserId, clientIp });
+          }
           return verifyJsonResponse({ success: false, error: "code_invalid_or_expired" }, 403);
         }
         await ephemeralStore(env).setVerification(userId, {

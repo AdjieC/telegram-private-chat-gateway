@@ -35,6 +35,9 @@ function jsonResponse(data, status = 200) {
 function createTelegramMock(handlers = {}) {
   const calls = [];
   async function fetchImpl(url, init) {
+    if (String(url).includes('challenges.cloudflare.com/turnstile/v0/siteverify')) {
+      return jsonResponse({ success: true });
+    }
     const method = String(url).split('/').pop();
     const body = init?.body ? JSON.parse(init.body) : {};
     calls.push({ method, body });
@@ -607,6 +610,94 @@ describe('主消息链路（worker.fetch 全链路）', () => {
     expect(cbRes.status).toBe(400);
     expect(cbRes.headers.get('Cache-Control')).toBe('no-store');
     expect(cbRes.headers.get('content-type')).toContain('application/json');
+  });
+
+  it('/verify 针对恶意/非法参数直接返回错误降级页面', async () => {
+    const env = createMockEnv({
+      TURNSTILE_SITE_KEY: '0x4AAAAAAA-test',
+      TURNSTILE_SECRET_KEY: 'test-secret',
+    });
+    const resBadUid = await worker.fetch(
+      new Request('https://worker.test/verify?code=validcode&uid=123%27%22<script>', { method: 'GET' }),
+      env,
+      { waitUntil() {} },
+    );
+    const htmlBadUid = await resBadUid.text();
+    expect(htmlBadUid).toContain('无法继续验证');
+
+    const resBadCode = await worker.fetch(
+      new Request('https://worker.test/verify?code=bad%20code!@#&uid=12345', { method: 'GET' }),
+      env,
+      { waitUntil() {} },
+    );
+    const htmlBadCode = await resBadCode.text();
+    expect(htmlBadCode).toContain('无法继续验证');
+  });
+
+  it('/verify-callback 探测不匹配时主动清理 code，且单 IP 超频触发限流', async () => {
+    const telegram = createTelegramMock();
+    vi.stubGlobal('fetch', telegram.fetchImpl);
+    const env = createMockEnv({
+      TURNSTILE_SITE_KEY: '0x4AAAAAAA-test',
+      TURNSTILE_SECRET_KEY: 'test-secret',
+    });
+    await env.TOPIC_MAP.put('turnstile_code:test-probe-code', '1000');
+
+    const resMismatch = await worker.fetch(
+      new Request('https://worker.test/verify-callback', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'cf-connecting-ip': '1.2.3.4' },
+        body: JSON.stringify({ token: 'mock-valid-token', code: 'test-probe-code', userId: '2000' }),
+      }),
+      env,
+      { waitUntil() {} },
+    );
+    expect(resMismatch.status).toBe(403);
+    const mismatchData = await resMismatch.json();
+    expect(mismatchData.error).toBe('code_invalid_or_expired');
+    const afterProbe = await env.TOPIC_MAP.get('turnstile_code:test-probe-code');
+    expect(afterProbe).toBeNull();
+
+    // 畸形入参：token 为对象、数组、空字符串或超长等，本地直接 400
+    const badTokens = [{}, [], '', '   ', 'x'.repeat(2049)];
+    for (const badToken of badTokens) {
+      const resBad = await worker.fetch(
+        new Request('https://worker.test/verify-callback', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ token: badToken, code: 'valid_code', userId: '12345' }),
+        }),
+        env,
+        { waitUntil() {} },
+      );
+      expect(resBad.status).toBe(400);
+      const badData = await resBad.json();
+      expect(badData.error).toBe('missing_params');
+    }
+
+    for (let i = 0; i < 15; i += 1) {
+      await worker.fetch(
+        new Request('https://worker.test/verify-callback', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'cf-connecting-ip': '9.9.9.9' },
+          body: JSON.stringify({ token: 't', code: 'c', userId: '1' }),
+        }),
+        env,
+        { waitUntil() {} },
+      );
+    }
+    const resRateLimited = await worker.fetch(
+      new Request('https://worker.test/verify-callback', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'cf-connecting-ip': '9.9.9.9' },
+        body: JSON.stringify({ token: 't', code: 'c', userId: '1' }),
+      }),
+      env,
+      { waitUntil() {} },
+    );
+    expect(resRateLimited.status).toBe(429);
+    const rlData = await resRateLimited.json();
+    expect(rlData.error).toBe('rate_limited');
   });
 
   it('话题健康连续未知错误达到上限后暂停转发并提示用户', async () => {

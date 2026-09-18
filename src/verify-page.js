@@ -87,7 +87,7 @@ const VERIFY_PAGE_HTML = `<!DOCTYPE html>
     <summary>技术详情（排障用）</summary>
     <div id="tech-detail"></div>
   </details>
-  <div class="footer" data-user-id="{{USER_ID}}" data-code="{{CODE}}">
+  <div class="footer" data-user-id="{{USER_ID}}" data-code="{{CODE}}" data-worker-url="{{WORKER_URL}}">
     <span id="footer-status">私聊网关 · 人机验证</span><br>
     <a href="${GATEWAY_REPO}" target="_blank" rel="noopener noreferrer">项目地址 GitHub ↗</a>
   </div>
@@ -150,10 +150,15 @@ function onTurnstileSuccess(token) {
   if (submitted) return;
   submitted = true;
   showStatus('✅ 验证通过，正在通知机器人…', 'loading');
-  fetch('{{WORKER_URL}}/verify-callback', {
+  var footer = document.querySelector('.footer');
+  var code = footer ? (footer.getAttribute('data-code') || '') : '';
+  var userId = footer ? (footer.getAttribute('data-user-id') || '') : '';
+  var workerUrl = footer ? (footer.getAttribute('data-worker-url') || '') : '';
+  var targetUrl = (workerUrl ? workerUrl : '') + '/verify-callback';
+  fetch(targetUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: token, code: '{{CODE}}', userId: '{{USER_ID}}' })
+    body: JSON.stringify({ token: token, code: code, userId: userId })
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
@@ -172,6 +177,7 @@ function onTurnstileSuccess(token) {
       if (backBtn) backBtn.focus();
     } else {
       var errMap = {
+        'rate_limited': '请求过于频繁，请稍候再试',
         'turnstile_failed': '人机验证未通过，请刷新页面重试',
         'code_invalid_or_expired': '验证链接已过期（约 {{VERIFY_EXPIRE_MINUTES}} 分钟），请返回 Telegram 重新发消息获取新链接',
         'server_not_configured': '服务器未完成配置，请联系管理员',
@@ -225,7 +231,7 @@ function onTurnstileError(errorCode) {
     wrap.hidden = false;
   }
 }
-// 初始加载态：脚本未就绪时显示加载动画（区分脚本被墙与 widget 配置错误）
+// 初始加载状态：脚本未就绪时显示加载动画（区分脚本被墙与 widget 配置错误）
 showStatus('正在加载验证组件…', 'loading');
 // 脚本长时间未就绪时给出提示（区分脚本被墙与 widget 配置错误）
 setTimeout(function() {
